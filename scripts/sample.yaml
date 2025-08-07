@@ -1,0 +1,16 @@
+meta:
+  title: "テスト動画"
+
+defaults:
+  voice:
+    speaker: 1
+    speed: 1.0
+    pitch: 0.0
+
+scenes:
+  - id: intro
+    lines:
+      - character: zundamon
+        text: "こんにちは！ずんだもんです。"
+      - character: zundamon
+        text: "今日は自己紹介するのだ！"
