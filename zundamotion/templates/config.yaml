@@ -1,0 +1,29 @@
+# Default configuration for video rendering
+
+# Video settings
+video:
+  width: 1920
+  height: 1080
+  fps: 30
+
+# Subtitle settings
+subtitle:
+  font_path: "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf" # IPAexGothic font path
+  font_color: "white"
+  font_size: 64
+  max_chars_per_line: 25 # Adjust based on font size and video width
+  stroke_color: "black"
+  stroke_width: 2
+  line_spacing_offset_per_line: 64 # Additional vertical offset per line for multi-line text (e.g., same as font_size)
+  x: "(w-text_w)/2"
+  y: "h-100-text_h/2" # Center text block 100px from bottom, adjusting for total text height
+
+# Voice settings (VOICEVOX defaults)
+voice:
+  speaker: 1      # Zundamon (Normal)
+  speed: 1.0
+  pitch: 0.0
+
+# Background settings
+background:
+  default: "assets/bg/default.png"

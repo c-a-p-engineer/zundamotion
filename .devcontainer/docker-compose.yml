@@ -9,6 +9,8 @@ services:
     command: sleep infinity
     depends_on:
       - voicevox
+    environment:
+      - VOICEVOX_URL=http://voicevox:50021
 
   voicevox:
     image: voicevox/voicevox_engine:cpu-ubuntu20.04-latest

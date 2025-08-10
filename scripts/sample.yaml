@@ -1,16 +1,52 @@
 meta:
-  title: "テスト動画"
+  title: "ずんだもん自己紹介（複数シーン）"
+  version: 1
 
 defaults:
   voice:
-    speaker: 1
+    speaker: 1     # VOICEVOX 話者ID（例：ずんだもん等。環境に合わせて変更OK）
     speed: 1.0
     pitch: 0.0
+  subtitle:
+    font: "IPAGothic"     # 未来の拡張用（現行処理では未使用）
+    fontsize: 48
+    color: "white"
+    x: "(w-text_w)/2"
+    y: "h-100"
+
+assets:
+  bg_default: "assets/bg/default.png"   # 予備の背景（存在しない場合に使う）
 
 scenes:
   - id: intro
+    bg: "assets/bg/room.png"            # シーン背景
+    # bgm: "assets/bgm/soft_intro.mp3"  # 将来拡張用（現行処理では未使用）
     lines:
       - character: zundamon
         text: "こんにちは！ずんだもんです。"
       - character: zundamon
-        text: "今日は自己紹介するのだ！"
+        text: "これから自己紹介の動画をはじめるのだ。"
+        speed: 1.1                      # 行ごとの上書き例
+      - character: zundamon
+        text: "最後まで見てくれると嬉しいのだ！"
+        pitch: 0.3
+
+  - id: topic
+    bg: "assets/bg/street.png"
+    lines:
+      - character: zundamon
+        text: "好きな食べ物はもちろん、ずんだ餅！"
+      - character: zundamon
+        text: "趣味は新しいツールを試すことなのだ。"
+        speed: 0.95
+      - character: zundamon
+        text: "このチャンネルでは、便利なスクリプトや動画制作のコツを紹介するのだ。"
+
+  - id: outro
+    bg: "assets/bg/sunset.png"
+    lines:
+      - character: zundamon
+        text: "今日は見てくれて、ありがとうなのだ！"
+      - character: zundamon
+        text: "チャンネル登録と高評価、よろしくお願いします！"
+        speed: 1.05
