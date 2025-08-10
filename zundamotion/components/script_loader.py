@@ -24,6 +24,61 @@ def merge_configs(base: Dict, override: Dict) -> Dict:
     return merged
 
 
+def _validate_config(config: Dict[str, Any]):
+    """
+    Validates the loaded configuration and script data.
+    Raises ValueError if any validation fails.
+    """
+    script = config.get("script")
+    if not isinstance(script, dict):
+        raise ValueError("Script data must be a dictionary under the 'script' key.")
+
+    scenes = script.get("scenes")
+    if not isinstance(scenes, list):
+        raise ValueError("Script must contain a 'scenes' list.")
+
+    for scene_idx, scene in enumerate(scenes):
+        if not isinstance(scene, dict):
+            raise ValueError(f"Scene at index {scene_idx} must be a dictionary.")
+
+        scene_id = scene.get(
+            "id", f"scene_{scene_idx}"
+        )  # Use generated ID for error messages
+
+        if "id" not in scene:
+            print(
+                f"Warning: Scene at index {scene_idx} has no 'id'. Using '{scene_id}'."
+            )
+
+        lines = scene.get("lines")
+        if not isinstance(lines, list):
+            raise ValueError(f"Scene '{scene_id}' must contain a 'lines' list.")
+
+        # Validate background image/video path
+        bg_path = scene.get("bg", config.get("background", {}).get("default"))
+        if bg_path and not Path(bg_path).exists():
+            raise ValueError(
+                f"Background file '{bg_path}' for scene '{scene_id}' does not exist."
+            )
+
+        # Validate BGM path
+        bgm_path = scene.get("bgm")
+        if bgm_path and not Path(bgm_path).exists():
+            raise ValueError(
+                f"BGM file '{bgm_path}' for scene '{scene_id}' does not exist."
+            )
+
+        for line_idx, line in enumerate(lines):
+            if not isinstance(line, dict):
+                raise ValueError(
+                    f"Line at scene '{scene_id}', index {line_idx} must be a dictionary."
+                )
+            if "text" not in line:
+                raise ValueError(
+                    f"Line at scene '{scene_id}', index {line_idx} must contain 'text'."
+                )
+
+
 def load_script_and_config(
     script_path: str, default_config_path: str
 ) -> Dict[str, Any]:
@@ -50,5 +105,8 @@ def load_script_and_config(
     # Allow script to override defaults
     if "defaults" in script_data:
         final_config = merge_configs(final_config, script_data["defaults"])
+
+    # Validate the final configuration
+    _validate_config(final_config)
 
     return final_config
