@@ -2,18 +2,6 @@ meta:
   title: "ずんだもん自己紹介（複数シーン）"
   version: 1
 
-defaults:
-  voice:
-    speaker: 1     # VOICEVOX 話者ID（例：ずんだもん等。環境に合わせて変更OK）
-    speed: 1.0
-    pitch: 0.0
-  subtitle:
-    font: "IPAGothic"     # 未来の拡張用（現行処理では未使用）
-    fontsize: 48
-    color: "white"
-    x: "(w-text_w)/2"
-    y: "h-100"
-
 assets:
   bg_default: "assets/bg/default.png"   # 予備の背景（存在しない場合に使う）
 
