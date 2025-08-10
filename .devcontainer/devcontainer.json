@@ -3,23 +3,27 @@
   "dockerComposeFile": "docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspace",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    },
+  },
   "settings": {
-        "python.analysis.typeCheckingMode": "basic",
-        "python.analysis.autoImportCompletions": true,
-        "python.linting.enabled": true,
-        "python.linting.pylintEnabled": true,
-        "editor.formatOnSave": true,
-        "[python]": {
-          "editor.defaultFormatter": "ms-python.black-formatter",
-          "editor.codeActionsOnSave": {
-            "source.organizeImports": "explicit"
-          }
-        }
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.autoImportCompletions": true,
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": true,
+    "editor.formatOnSave": true,
+    "[python]": {
+      "editor.defaultFormatter": "ms-python.black-formatter",
+      "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit"
+      }
+    }
   },
   "customizations": {
     "vscode": {
       "extensions": [
-        "renpy.language-renpy",
         "saoudrizwan.claude-dev",
         "ms-python.python",
         "ms-python.vscode-pylance",
@@ -31,5 +35,6 @@
         "mechatroner.rainbow-csv"
       ]
     }
-  }
+  },
+  "postCreateCommand": "bash .devcontainer/setup-mcp.sh"
 }

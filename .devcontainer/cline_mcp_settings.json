@@ -1,0 +1,73 @@
+{
+    "mcpServers": {
+        "github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking": {
+            "autoApprove": [
+                "sequentialthinking"
+            ],
+            "disabled": false,
+            "timeout": 60,
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-sequential-thinking"
+            ]
+        },
+        "github.com/executeautomation/mcp-playwright": {
+            "autoApprove": [
+                "start_codegen_session",
+                "end_codegen_session",
+                "get_codegen_session",
+                "clear_codegen_session",
+                "playwright_navigate",
+                "playwright_screenshot",
+                "playwright_click",
+                "playwright_iframe_click",
+                "playwright_iframe_fill",
+                "playwright_fill",
+                "playwright_select",
+                "playwright_hover",
+                "playwright_upload_file",
+                "playwright_evaluate",
+                "playwright_console_logs",
+                "playwright_close",
+                "playwright_get",
+                "playwright_post",
+                "playwright_put",
+                "playwright_patch",
+                "playwright_delete",
+                "playwright_expect_response",
+                "playwright_assert_response",
+                "playwright_custom_user_agent",
+                "playwright_get_visible_text",
+                "playwright_get_visible_html",
+                "playwright_go_back",
+                "playwright_go_forward",
+                "playwright_drag",
+                "playwright_press_key",
+                "playwright_save_as_pdf",
+                "playwright_click_and_switch_tab"
+            ],
+            "disabled": false,
+            "timeout": 60,
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "@executeautomation/playwright-mcp-server"
+            ]
+        },
+        "github.com/upstash/context7-mcp": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@upstash/context7-mcp"
+            ],
+            "disabled": false,
+            "autoApprove": [
+                "resolve-library-id",
+                "get-library-docs"
+            ]
+        }
+    }
+}
