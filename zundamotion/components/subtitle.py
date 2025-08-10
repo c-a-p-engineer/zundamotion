@@ -48,8 +48,6 @@ class SubtitleGenerator:
         else:
             final_y_expression = y_base_expression
 
-        print("final_y_expression:" + final_y_expression)
-
         return {
             "text": escaped_text,
             "fontfile": style.get("font_path"),

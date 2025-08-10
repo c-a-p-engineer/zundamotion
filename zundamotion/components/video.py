@@ -30,6 +30,7 @@ class VideoRenderer:
         output_filename: str,
         bgm_path: Optional[str] = None,
         bgm_volume: Optional[float] = None,
+        is_bg_video: bool = False,
     ) -> Path:
         """
         Renders a single video clip.
@@ -42,6 +43,7 @@ class VideoRenderer:
             output_filename (str): Base name for the output file.
             bgm_path (Optional[str]): Path to the background music file.
             bgm_volume (Optional[float]): Volume for the background music (0.0-1.0).
+            is_bg_video (bool): True if the background is a video file, False if an image.
 
         Returns:
             Path: Path to the rendered mp4 clip.
@@ -68,7 +70,13 @@ class VideoRenderer:
         ]
 
         # 入力ストリームの追加
-        cmd.extend(["-loop", "1", "-i", bg_image_path])  # 背景画像 (入力0)
+        if is_bg_video:
+            # 背景が動画の場合、-stream_loop -1 を指定し、出力で-t durationでトリム
+            cmd.extend(["-stream_loop", "-1", "-i", bg_image_path])  # 背景動画 (入力0)
+        else:
+            # 背景が画像の場合、-loop 1 を指定
+            cmd.extend(["-loop", "1", "-i", bg_image_path])  # 背景画像 (入力0)
+
         cmd.extend(["-i", str(audio_path)])  # メイン音声 (入力1)
 
         bgm_input_index = -1
@@ -84,9 +92,10 @@ class VideoRenderer:
 
         # ビデオフィルター (スケールとdrawtext)
         video_filter_str = f"scale={width}:{height},drawtext={drawtext_str}"
-        filter_complex.append(
-            f"[0:v]{video_filter_str}[v]"
-        )  # 背景画像をスケールして字幕を適用し、[v]として出力
+
+        # 背景が動画でも画像でも、入力0のビデオストリームに直接フィルターを適用
+        filter_complex.append(f"[0:v]{video_filter_str}[v]")
+
         map_options.append("-map")
         map_options.append("[v]")
 

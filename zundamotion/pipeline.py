@@ -13,6 +13,13 @@ from .utils.ffmpeg_utils import get_audio_duration
 class GenerationPipeline:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
+        self.video_extensions = [
+            ".mp4",
+            ".mov",
+            ".webm",
+            ".avi",
+            ".mkv",
+        ]  # 動画ファイルの拡張子リスト
 
     def run(self, output_path: str, keep_intermediate: bool = False):
         """
@@ -42,6 +49,9 @@ class GenerationPipeline:
                 bgm_path = scene.get("bgm")
                 bgm_volume = scene.get("bgm_volume")
 
+                # 背景が動画かどうかを判断
+                is_bg_video = Path(bg_image).suffix.lower() in self.video_extensions
+
                 for idx, line in enumerate(scene.get("lines", []), start=1):
                     line_id = f"{scene_id}_{idx}"
                     text = line["text"]
@@ -65,7 +75,8 @@ class GenerationPipeline:
                         bg_image,
                         line_id,
                         bgm_path=bgm_path,
-                        bgm_volume=bgm_volume,  # BGM引数を追加
+                        bgm_volume=bgm_volume,
+                        is_bg_video=is_bg_video,  # 新しい引数を渡す
                     )
                     all_clips.append(clip_path)
 

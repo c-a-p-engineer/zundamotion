@@ -19,7 +19,7 @@ assets:
 
 scenes:
   - id: intro
-    bg: "assets/bg/room.png"            # シーン背景
+    bg: "assets/bg/sample_video.mp4"    # シーン背景 (動画ファイル)
     bgm: "assets/bgm/intro.wav"         # BGMファイルパス
     bgm_volume: 0.1                     # BGM音量 (0.0-1.0)
     lines:
