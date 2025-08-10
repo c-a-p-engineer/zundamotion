@@ -20,7 +20,8 @@ assets:
 scenes:
   - id: intro
     bg: "assets/bg/room.png"            # シーン背景
-    # bgm: "assets/bgm/soft_intro.mp3"  # 将来拡張用（現行処理では未使用）
+    bgm: "assets/bgm/intro.wav"         # BGMファイルパス
+    bgm_volume: 0.1                     # BGM音量 (0.0-1.0)
     lines:
       - character: zundamon
         text: "こんにちは！ずんだもんです。"
@@ -33,6 +34,8 @@ scenes:
 
   - id: topic
     bg: "assets/bg/street.png"
+    bgm: "assets/bgm/street.wav"
+    bgm_volume: 0.2
     lines:
       - character: zundamon
         text: "好きな食べ物はもちろん、ずんだ餅！"
@@ -44,6 +47,8 @@ scenes:
 
   - id: outro
     bg: "assets/bg/sunset.png"
+    bgm: "assets/bgm/sunset.wav"
+    bgm_volume: 0.3
     lines:
       - character: zundamon
         text: "今日は見てくれて、ありがとうなのだ！"

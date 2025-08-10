@@ -39,6 +39,8 @@ class GenerationPipeline:
             for scene in script.get("scenes", []):
                 scene_id = scene["id"]
                 bg_image = scene.get("bg", bg_default)
+                bgm_path = scene.get("bgm")
+                bgm_volume = scene.get("bgm_volume")
 
                 for idx, line in enumerate(scene.get("lines", []), start=1):
                     line_id = f"{scene_id}_{idx}"
@@ -57,7 +59,13 @@ class GenerationPipeline:
 
                     # 4. Render Video Clip
                     clip_path = video_renderer.render_clip(
-                        audio_path, duration, drawtext_filter, bg_image, line_id
+                        audio_path,
+                        duration,
+                        drawtext_filter,
+                        bg_image,
+                        line_id,
+                        bgm_path=bgm_path,
+                        bgm_volume=bgm_volume,  # BGM引数を追加
                     )
                     all_clips.append(clip_path)
 

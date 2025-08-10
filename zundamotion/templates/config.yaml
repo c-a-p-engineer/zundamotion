@@ -24,6 +24,10 @@ voice:
   speed: 1.0
   pitch: 0.0
 
+# BGM settings
+bgm:
+  volume: 0.5 # Default BGM volume
+
 # Background settings
 background:
   default: "assets/bg/default.png"

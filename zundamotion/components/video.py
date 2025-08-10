@@ -1,6 +1,6 @@
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 def _format_drawtext_filter(drawtext_params: Dict[str, Any]) -> str:
@@ -19,6 +19,7 @@ class VideoRenderer:
         self.config = config
         self.temp_dir = temp_dir
         self.video_config = config.get("video", {})
+        self.bgm_config = config.get("bgm", {})
 
     def render_clip(
         self,
@@ -27,6 +28,8 @@ class VideoRenderer:
         drawtext_filter: Dict[str, Any],
         bg_image_path: str,
         output_filename: str,
+        bgm_path: Optional[str] = None,
+        bgm_volume: Optional[float] = None,
     ) -> Path:
         """
         Renders a single video clip.
@@ -37,6 +40,8 @@ class VideoRenderer:
             drawtext_filter (Dict[str, Any]): Subtitle filter options.
             bg_image_path (str): Path to the background image.
             output_filename (str): Base name for the output file.
+            bgm_path (Optional[str]): Path to the background music file.
+            bgm_volume (Optional[float]): Volume for the background music (0.0-1.0).
 
         Returns:
             Path: Path to the rendered mp4 clip.
@@ -56,31 +61,80 @@ class VideoRenderer:
 
         drawtext_str = _format_drawtext_filter(drawtext_filter)
 
+        # FFmpegコマンドの構築
         cmd = [
             "ffmpeg",
             "-y",  # Overwrite output files without asking
-            "-loop",
-            "1",
-            "-i",
-            bg_image_path,
-            "-i",
-            str(audio_path),
-            "-t",
-            str(duration),
-            "-vf",
-            f"scale={width}:{height},drawtext={drawtext_str}",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-r",
-            str(fps),  # Set output frame rate
-            str(output_path),
         ]
+
+        # 入力ストリームの追加
+        cmd.extend(["-loop", "1", "-i", bg_image_path])  # 背景画像 (入力0)
+        cmd.extend(["-i", str(audio_path)])  # メイン音声 (入力1)
+
+        bgm_input_index = -1
+        if bgm_path:
+            cmd.extend(["-i", bgm_path])  # BGM (入力2)
+            bgm_input_index = 2  # BGMの入力インデックス
+
+        cmd.extend(["-t", str(duration)])  # 出力時間
+
+        # 複雑なフィルターグラフの構築
+        filter_complex = []
+        map_options = []
+
+        # ビデオフィルター (スケールとdrawtext)
+        video_filter_str = f"scale={width}:{height},drawtext={drawtext_str}"
+        filter_complex.append(
+            f"[0:v]{video_filter_str}[v]"
+        )  # 背景画像をスケールして字幕を適用し、[v]として出力
+        map_options.append("-map")
+        map_options.append("[v]")
+
+        # オーディオフィルター (メイン音声とBGMのミキシング)
+        if bgm_path:
+            # BGMの音量調整
+            final_bgm_volume = (
+                bgm_volume
+                if bgm_volume is not None
+                else self.bgm_config.get("volume", 0.5)
+            )
+            filter_complex.append(
+                f"[{bgm_input_index}:a]volume={final_bgm_volume}[bgm_vol]"
+            )
+            # メイン音声とBGMをミックス
+            filter_complex.append(
+                f"[1:a][bgm_vol]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+            )
+            map_options.append("-map")
+            map_options.append("[aout]")
+        else:
+            # BGMがない場合、メイン音声のみをマップ
+            map_options.append("-map")
+            map_options.append("1:a")
+
+        # フィルターグラフをコマンドに追加
+        if filter_complex:
+            cmd.extend(["-filter_complex", ";".join(filter_complex)])
+
+        # マッピングオプションを追加
+        cmd.extend(map_options)
+
+        # 出力オプション
+        cmd.extend(
+            [
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-r",
+                str(fps),  # Set output frame rate
+                str(output_path),
+            ]
+        )
 
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)
