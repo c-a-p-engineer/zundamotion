@@ -46,46 +46,31 @@ class GenerationPipeline:
             print(f"Using temporary directory: {temp_dir}")
             print(f"Using cache directory: {self.cache_dir}")
 
-            # Initialize components
             audio_gen = AudioGenerator(self.config, temp_dir)
             subtitle_gen = SubtitleGenerator(self.config)
             video_renderer = VideoRenderer(self.config, temp_dir)
 
-            all_clips: List[Path] = []
             script = self.config.get("script", {})
-            bg_default = self.config.get("background", {}).get("default")
-
             scenes = script.get("scenes", [])
-            total_scenes = len(scenes)
             total_lines = sum(len(s.get("lines", [])) for s in scenes)
             current_line_num = 0
 
-            print("\n--- Starting Video Generation Pipeline ---")
+            # --- フェーズ1: 全ての音声生成とdurationの計算 ---
+            # line_id -> {audio_path, duration, text, line_config}
+            line_data_map: Dict[str, Dict[str, Any]] = {}
 
-            # Process each scene and line
+            print("\n--- Phase 1: Generating all audio and calculating durations ---")
             for scene_idx, scene in enumerate(scenes):
                 scene_id = scene["id"]
-                bg_image = scene.get("bg", bg_default)
-                bgm_path = scene.get("bgm")
-                bgm_volume = scene.get("bgm_volume")
-
-                # 背景が動画かどうかを判断
-                is_bg_video = Path(bg_image).suffix.lower() in self.video_extensions
-
-                print(
-                    f"\n--- Processing Scene {scene_idx + 1}/{total_scenes}: '{scene_id}' ---"
-                )
-
                 for idx, line in enumerate(scene.get("lines", []), start=1):
                     current_line_num += 1
                     line_id = f"{scene_id}_{idx}"
                     text = line["text"]
 
                     print(
-                        f"  [{current_line_num}/{total_lines}] Processing line '{text[:30]}...' (Scene '{scene_id}', Line {idx})"
+                        f"  [{current_line_num}/{total_lines}] Processing audio for line '{text[:30]}...' (Scene '{scene_id}', Line {idx})"
                     )
 
-                    # キャッシュキーの生成
                     audio_cache_data = {
                         "text": text,
                         "line_config": line,
@@ -94,7 +79,6 @@ class GenerationPipeline:
                     audio_cache_key = self._generate_hash(audio_cache_data)
                     cached_audio_path = self.cache_dir / f"{audio_cache_key}.wav"
 
-                    # 1. Generate Audio (with cache)
                     if cached_audio_path.exists():
                         audio_path = cached_audio_path
                         print(f"    [Audio] Using cached audio -> {audio_path.name}")
@@ -106,23 +90,85 @@ class GenerationPipeline:
                             f"    [Audio] Generated and cached audio -> {audio_path.name}"
                         )
 
-                    # 2. Get Audio Duration (always needed)
                     duration = get_audio_duration(str(audio_path))
+                    line_data_map[line_id] = {
+                        "audio_path": audio_path,
+                        "duration": duration,
+                        "text": text,
+                        "line_config": line,
+                    }
+            print("--- Phase 1 Completed ---")
+
+            # --- フェーズ2: シーンごとの背景動画の準備とクリップのレンダリング ---
+            all_clips: List[Path] = []
+            bg_default = self.config.get("background", {}).get("default")
+            total_scenes = len(scenes)
+            current_line_num = 0  # リセットしてフェーズ2で再利用
+
+            print("\n--- Phase 2: Preparing scene backgrounds and rendering clips ---")
+            for scene_idx, scene in enumerate(scenes):
+                scene_id = scene["id"]
+                bg_image = scene.get("bg", bg_default)
+                bgm_path = scene.get("bgm")
+                bgm_volume = scene.get("bgm_volume")
+
+                is_bg_video = Path(bg_image).suffix.lower() in self.video_extensions
+
+                print(
+                    f"\n--- Processing Scene {scene_idx + 1}/{total_scenes}: '{scene_id}' ---"
+                )
+
+                # シーン全体のdurationを計算
+                scene_duration = 0.0
+                for idx, line in enumerate(scene.get("lines", []), start=1):
+                    line_id = f"{scene_id}_{idx}"
+                    scene_duration += line_data_map[line_id]["duration"]
+
+                # シーンの背景が動画の場合、シーン全体の長さでループする背景動画を生成
+                scene_bg_video_path: Optional[Path] = None
+                if is_bg_video:
+                    scene_bg_video_filename = f"scene_bg_{scene_id}"
+                    scene_bg_video_path = video_renderer.render_looped_background_video(
+                        bg_image, scene_duration, scene_bg_video_filename
+                    )
+                    print(
+                        f"    [Video] Generated looped scene background video -> {scene_bg_video_path.name}"
+                    )
+
+                current_scene_time = 0.0  # シーン内での現在の時間
+                for idx, line in enumerate(scene.get("lines", []), start=1):
+                    current_line_num += 1
+                    line_id = f"{scene_id}_{idx}"
+                    text = line_data_map[line_id]["text"]
+                    audio_path = line_data_map[line_id]["audio_path"]
+                    duration = line_data_map[line_id]["duration"]
+                    line_config = line_data_map[line_id]["line_config"]
+
+                    print(
+                        f"  [{current_line_num}/{total_lines}] Rendering clip for line '{text[:30]}...' (Scene '{scene_id}', Line {idx})"
+                    )
 
                     # 3. Generate Subtitle Filter (always needed)
                     drawtext_filter = subtitle_gen.get_drawtext_filter(
-                        text, duration, line
+                        text, duration, line_config
                     )
 
                     # ビデオクリップのキャッシュキー生成
                     video_cache_data = {
-                        "audio_cache_key": audio_cache_key,
+                        "audio_cache_key": self._generate_hash(
+                            {
+                                "text": text,
+                                "line_config": line_config,
+                                "voice_config": self.config.get("voice", {}),
+                            }
+                        ),
                         "duration": duration,
                         "drawtext_filter": drawtext_filter,
-                        "bg_image_path": bg_image,
+                        "bg_image_path": bg_image,  # オリジナルのbg_image_pathをキャッシュキーに含める
                         "is_bg_video": is_bg_video,
                         "bgm_path": bgm_path,
                         "bgm_volume": bgm_volume,
+                        "start_time": current_scene_time,  # start_timeもキャッシュキーに含める
                         "video_config": self.config.get("video", {}),
                         "subtitle_config": self.config.get("subtitle", {}),
                         "bgm_config": self.config.get("bgm", {}),
@@ -140,11 +186,14 @@ class GenerationPipeline:
                             audio_path,
                             duration,
                             drawtext_filter,
-                            bg_image,
+                            (
+                                str(scene_bg_video_path) if is_bg_video else bg_image
+                            ),  # シーン背景動画を使用
                             line_id,
                             bgm_path=bgm_path,
                             bgm_volume=bgm_volume,
                             is_bg_video=is_bg_video,
+                            start_time=current_scene_time,  # シーン内での開始時間を渡す
                         )
                         shutil.copy(clip_path, cached_clip_path)
                         print(
@@ -152,6 +201,14 @@ class GenerationPipeline:
                         )
 
                     all_clips.append(clip_path)
+                    current_scene_time += duration  # 次のラインの開始時間を更新
+
+                # シーンの処理が完了したら、一時的なシーン背景動画を削除
+                if scene_bg_video_path and scene_bg_video_path.exists():
+                    scene_bg_video_path.unlink()
+                    print(
+                        f"    [Video] Cleaned up temporary scene background video -> {scene_bg_video_path.name}"
+                    )
 
             print("\n--- Concatenating all clips ---")
             # 5. Concatenate all clips

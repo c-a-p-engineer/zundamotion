@@ -25,6 +25,7 @@
     "vscode": {
       "extensions": [
         "saoudrizwan.claude-dev",
+        "google.geminicodeassist",
         "ms-python.python",
         "ms-python.vscode-pylance",
         "ms-python.pylint",

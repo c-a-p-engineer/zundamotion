@@ -31,6 +31,7 @@ class VideoRenderer:
         bgm_path: Optional[str] = None,
         bgm_volume: Optional[float] = None,
         is_bg_video: bool = False,
+        start_time: float = 0.0,  # 新しいパラメータ: 背景動画の開始時間
     ) -> Path:
         """
         Renders a single video clip.
@@ -44,6 +45,7 @@ class VideoRenderer:
             bgm_path (Optional[str]): Path to the background music file.
             bgm_volume (Optional[float]): Volume for the background music (0.0-1.0).
             is_bg_video (bool): True if the background is a video file, False if an image.
+            start_time (float): Start time for the background video (in seconds).
 
         Returns:
             Path: Path to the rendered mp4 clip.
@@ -69,12 +71,11 @@ class VideoRenderer:
             "-y",  # Overwrite output files without asking
         ]
 
-        # 入力ストリームの追加
+        # 背景動画の開始時間を指定
         if is_bg_video:
-            # 背景が動画の場合、-stream_loop -1 を指定し、出力で-t durationでトリム
+            cmd.extend(["-ss", str(start_time)])  # 背景動画の開始位置
             cmd.extend(["-stream_loop", "-1", "-i", bg_image_path])  # 背景動画 (入力0)
         else:
-            # 背景が画像の場合、-loop 1 を指定
             cmd.extend(["-loop", "1", "-i", bg_image_path])  # 背景画像 (入力0)
 
         cmd.extend(["-i", str(audio_path)])  # メイン音声 (入力1)
@@ -149,6 +150,60 @@ class VideoRenderer:
             subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             print(f"Error during ffmpeg processing for {output_filename}:")
+            print(f"STDOUT: {e.stdout}")
+            print(f"STDERR: {e.stderr}")
+            raise
+
+        return output_path
+
+    def render_looped_background_video(
+        self, bg_video_path: str, duration: float, output_filename: str
+    ) -> Path:
+        """
+        Renders a looped background video of a specified duration.
+
+        Args:
+            bg_video_path (str): Path to the background video file.
+            duration (float): Desired duration of the output video.
+            output_filename (str): Base name for the output file.
+
+        Returns:
+            Path: Path to the rendered mp4 video.
+        """
+        output_path = self.temp_dir / f"{output_filename}.mp4"
+        width = self.video_config.get("width", 1280)
+        height = self.video_config.get("height", 720)
+        fps = self.video_config.get("fps", 30)
+
+        print(f"[Video] Rendering looped background video -> {output_path.name}")
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-stream_loop",
+            "-1",  # Loop indefinitely
+            "-i",
+            bg_video_path,
+            "-t",
+            str(duration),  # Trim to desired duration
+            "-vf",
+            f"scale={width}:{height}",  # Scale to target resolution
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            str(fps),
+            "-an",  # No audio
+            str(output_path),
+        ]
+
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            print(
+                f"Error during ffmpeg processing for looped background video {output_filename}:"
+            )
             print(f"STDOUT: {e.stdout}")
             print(f"STDERR: {e.stderr}")
             raise
