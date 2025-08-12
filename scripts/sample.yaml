@@ -9,37 +9,37 @@ scenes:
   - id: intro
     bg: "assets/bg/sample_video.mp4"    # シーン背景 (動画ファイル)
     bgm: "assets/bgm/intro.wav"         # BGMファイルパス
-    bgm_volume: 0.1                     # BGM音量 (0.0-1.0)
+    bgm_volume: 0.1                     # BGM音量 (0.0-1.0, 必須)
     lines:
-      - character: zundamon
-        text: "こんにちは！ずんだもんです。"
+      - character: zundamon             # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
+        text: "こんにちは！ずんだもんです。" # セリフテキスト (必須)
       - character: zundamon
         text: "これから自己紹介の動画をはじめるのだ。"
-        speed: 1.1                      # 行ごとの上書き例
+        speed: 1.1                      # 音声速度 (0.5-2.0, オプション)
       - character: zundamon
         text: "最後まで見てくれると嬉しいのだ！"
-        pitch: 0.3
+        pitch: 0.3                      # 音声ピッチ (-1.0-1.0, オプション)
 
   - id: topic
     bg: "assets/bg/street.png"
     bgm: "assets/bgm/street.wav"
-    bgm_volume: 0.2
+    bgm_volume: 0.2                     # BGM音量 (0.0-1.0, 必須)
     lines:
-      - character: zundamon
-        text: "好きな食べ物はもちろん、ずんだ餅！"
+      - character: zundamon             # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
+        text: "好きな食べ物はもちろん、ずんだ餅！" # セリフテキスト (必須)
       - character: zundamon
         text: "趣味は新しいツールを試すことなのだ。"
-        speed: 0.95
+        speed: 0.95                     # 音声速度 (0.5-2.0, オプション)
       - character: zundamon
         text: "このチャンネルでは、便利なスクリプトや動画制作のコツを紹介するのだ。"
 
   - id: outro
     bg: "assets/bg/sunset.png"
     bgm: "assets/bgm/sunset.wav"
-    bgm_volume: 0.3
+    bgm_volume: 0.3                     # BGM音量 (0.0-1.0, 必須)
     lines:
-      - character: zundamon
-        text: "今日は見てくれて、ありがとうなのだ！"
+      - character: zundamon             # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
+        text: "今日は見てくれて、ありがとうなのだ！" # セリフテキスト (必須)
       - character: zundamon
         text: "チャンネル登録と高評価、よろしくお願いします！"
-        speed: 1.05
+        speed: 1.05                     # 音声速度 (0.5-2.0, オプション)

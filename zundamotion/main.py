@@ -8,6 +8,7 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+from zundamotion.exceptions import ValidationError
 from zundamotion.pipeline import run_generation
 
 
@@ -64,9 +65,15 @@ def main():
             args.cache_refresh,
             args.jobs,
         )
+    except ValidationError as e:
+        print(f"\nValidation Error: {e.message}")
+        if e.line_number is not None:
+            print(f"  Line: {e.line_number}")
+        if e.column_number is not None:
+            print(f"  Column: {e.column_number}")
+        exit(1)
     except Exception as e:
-        print(f"\nAn error occurred during generation: {e}")
-        # Consider adding more specific error handling or logging here
+        print(f"\nAn unexpected error occurred during generation: {e}")
         exit(1)
 
 

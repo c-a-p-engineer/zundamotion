@@ -2,12 +2,28 @@ from pathlib import Path
 from typing import Any, Dict
 
 import yaml
+from yaml import YAMLError
+
+from ..exceptions import ValidationError
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
     """Loads a YAML configuration file."""
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    except YAMLError as e:
+        # Extract line and column number if available
+        mark = getattr(e, "mark", None)
+        line = mark.line + 1 if mark else None
+        column = mark.column + 1 if mark else None
+        raise ValidationError(
+            f"Invalid YAML syntax in {config_path}: {e}",
+            line_number=line,
+            column_number=column,
+        )
+    except FileNotFoundError:
+        raise ValidationError(f"Configuration file not found: {config_path}")
 
 
 def merge_configs(base: Dict, override: Dict) -> Dict:
@@ -37,9 +53,14 @@ def _validate_config(config: Dict[str, Any]):
     if not isinstance(scenes, list):
         raise ValueError("Script must contain a 'scenes' list.")
 
+    # Get character assets path from config or default
+    character_assets_path = Path(
+        "assets/characters"
+    )  # Assuming this is the base path for characters
+
     for scene_idx, scene in enumerate(scenes):
         if not isinstance(scene, dict):
-            raise ValueError(f"Scene at index {scene_idx} must be a dictionary.")
+            raise ValidationError(f"Scene at index {scene_idx} must be a dictionary.")
 
         scene_id = scene.get(
             "id", f"scene_{scene_idx}"
@@ -52,31 +73,89 @@ def _validate_config(config: Dict[str, Any]):
 
         lines = scene.get("lines")
         if not isinstance(lines, list):
-            raise ValueError(f"Scene '{scene_id}' must contain a 'lines' list.")
+            raise ValidationError(f"Scene '{scene_id}' must contain a 'lines' list.")
 
         # Validate background image/video path
         bg_path = scene.get("bg", config.get("background", {}).get("default"))
-        if bg_path and not Path(bg_path).exists():
-            raise ValueError(
-                f"Background file '{bg_path}' for scene '{scene_id}' does not exist."
-            )
+        if bg_path:
+            bg_full_path = Path(bg_path)
+            if not bg_full_path.exists():
+                raise ValidationError(
+                    f"Background file '{bg_path}' for scene '{scene_id}' does not exist."
+                )
+            if not bg_full_path.is_file():
+                raise ValidationError(
+                    f"Background path '{bg_path}' for scene '{scene_id}' is not a file."
+                )
 
         # Validate BGM path
         bgm_path = scene.get("bgm")
-        if bgm_path and not Path(bgm_path).exists():
-            raise ValueError(
-                f"BGM file '{bgm_path}' for scene '{scene_id}' does not exist."
-            )
+        if bgm_path:
+            bgm_full_path = Path(bgm_path)
+            if not bgm_full_path.exists():
+                raise ValidationError(
+                    f"BGM file '{bgm_path}' for scene '{scene_id}' does not exist."
+                )
+            if not bgm_full_path.is_file():
+                raise ValidationError(
+                    f"BGM path '{bgm_path}' for scene '{scene_id}' is not a file."
+                )
+
+        # Validate assets defined in the top-level 'assets' section
+        top_level_assets = config.get("assets", {})
+        for asset_key, asset_path_str in top_level_assets.items():
+            asset_full_path = Path(asset_path_str)
+            if not asset_full_path.exists():
+                raise ValidationError(
+                    f"Asset '{asset_key}' path '{asset_path_str}' does not exist."
+                )
+            if not asset_full_path.is_file():
+                raise ValidationError(
+                    f"Asset '{asset_key}' path '{asset_path_str}' is not a file."
+                )
 
         for line_idx, line in enumerate(lines):
             if not isinstance(line, dict):
-                raise ValueError(
+                raise ValidationError(
                     f"Line at scene '{scene_id}', index {line_idx} must be a dictionary."
                 )
             if "text" not in line:
-                raise ValueError(
+                raise ValidationError(
                     f"Line at scene '{scene_id}', index {line_idx} must contain 'text'."
                 )
+
+            # Validate character existence
+            character_name = line.get("character")
+            if character_name:
+                character_dir = character_assets_path / character_name
+                if not character_dir.is_dir():
+                    raise ValidationError(
+                        f"Character '{character_name}' for scene '{scene_id}', line {line_idx} does not exist or is not a directory at '{character_dir}'."
+                    )
+
+            # Validate bgm_volume range
+            bgm_volume = scene.get("bgm_volume")
+            if bgm_volume is not None:
+                if not (0.0 <= bgm_volume <= 1.0):
+                    raise ValidationError(
+                        f"BGM volume for scene '{scene_id}' must be between 0.0 and 1.0, but got {bgm_volume}."
+                    )
+
+            # Validate speed range
+            speed = line.get("speed")
+            if speed is not None:
+                if not (0.5 <= speed <= 2.0):
+                    raise ValidationError(
+                        f"Speech speed for scene '{scene_id}', line {line_idx} must be between 0.5 and 2.0, but got {speed}."
+                    )
+
+            # Validate pitch range
+            pitch = line.get("pitch")
+            if pitch is not None:
+                if not (-1.0 <= pitch <= 1.0):
+                    raise ValidationError(
+                        f"Speech pitch for scene '{scene_id}', line {line_idx} must be between -1.0 and 1.0, but got {pitch}."
+                    )
 
 
 def load_script_and_config(

@@ -10,6 +10,7 @@ Zundamotionは、VOICEVOXによる高品質な音声合成とFFmpegを用いた�
 - **FFmpegによる動画合成**: 背景、キャラクター、字幕、音声をFFmpegでシームレスに統合し、プロフェッショナルな動画を生成します。
 - **YAMLベースの台本**: 直感的で記述しやすいYAML形式の台本から、音声と字幕を自動生成します。
 - **多様な字幕出力**: SRT形式とFFmpeg `drawtext`用のJSON形式字幕ファイルの両方を出力し、柔軟な動画編集に対応します。
+- **堅牢なバリデーション**: 実行前にYAML構文、参照される素材ファイル（背景、BGM、キャラクター画像など）の存在、および音声パラメータ（速度、ピッチ、音量など）の有効範囲を自動でチェックします。エラー発生時には、具体的なエラーメッセージと該当する行番号・列番号が表示され、問題の特定と修正を支援します。
 - **並列レンダリングとハードウェアエンコードの自動検出**: CPUコア数やGPU（NVENC/VAAPI/VideoToolbox）を検出し、最適なジョブ数を自動設定します。ハードウェアエンコードが利用可能な場合は自動的に活用し、失敗時はソフトウェアにフォールバックします。
 - **DevContainer対応**: VSCode DevContainerをサポートしており、どこでも一貫した開発環境を簡単に構築できます。
 
@@ -59,7 +60,7 @@ DevContainer起動時にDocker ComposeによってVOICEVOXエンジンが自動�
 Zundamotionは、YAML台本から最終的な動画ファイルを生成することを目的としています。ここでは、その基本的なワークフローを説明します。
 
 #### 1. 音声と字幕の生成
-`scripts/sample.yaml` に記述された台本を元に、VOICEVOXエンジンを利用して音声ファイルと字幕ファイル（SRT形式およびFFmpeg `drawtext`用JSON形式）を生成します。
+`scripts/sample.yaml` に記述された台本を元に、VOICEVOXエンジンを利用して音声ファイルと字幕ファイル（SRT形式およびFFmpeg `drawtext`用JSON形式）を生成します。この際、台本のYAML構文、素材ファイルの存在、およびパラメータの有効範囲が自動的に検証されます。
 ```bash
 python -m zundamotion.render_audio scripts/sample.yaml
 ```
@@ -134,3 +135,4 @@ VOICEVOXの利用に関しては、キャラクターごとに商用利用の可
 | `ModuleNotFoundError: No module named 'yaml'` | `pip install -r requirements.txt`                     |
 | `ffprobe not found`                           | Dockerfile に `apt install ffmpeg` を追加                 |
 | `No module named 'zundamotion'`               | `PYTHONPATH=.` を指定 or `python -m zundamotion.xxx` で実行 |
+| `Validation Error: ...`                       | YAML台本の構文、素材パス、またはパラメータ値を確認してください。エラーメッセージに行番号と列番号が示されます。 |
