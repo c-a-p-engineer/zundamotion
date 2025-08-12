@@ -1,7 +1,14 @@
 import argparse
+import sys
 from pathlib import Path
 
-from .pipeline import run_generation
+# Add the project root to the sys.path to enable absolute imports
+# This is necessary when running the module directly or as a package from a higher directory.
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from zundamotion.pipeline import run_generation
 
 
 def main():
@@ -36,6 +43,12 @@ def main():
         action="store_true",
         help="If set, regenerates all intermediate files and updates the cache.",
     )
+    parser.add_argument(
+        "--jobs",
+        type=str,
+        default="1",
+        help="Number of parallel jobs for rendering. Use 'auto' to detect CPU cores. Defaults to 1.",
+    )
 
     args = parser.parse_args()
 
@@ -49,6 +62,7 @@ def main():
             args.keep_intermediate,
             args.no_cache,
             args.cache_refresh,
+            args.jobs,
         )
     except Exception as e:
         print(f"\nAn error occurred during generation: {e}")

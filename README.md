@@ -10,6 +10,7 @@ Zundamotionは、VOICEVOXによる高品質な音声合成とFFmpegを用いた�
 - **FFmpegによる動画合成**: 背景、キャラクター、字幕、音声をFFmpegでシームレスに統合し、プロフェッショナルな動画を生成します。
 - **YAMLベースの台本**: 直感的で記述しやすいYAML形式の台本から、音声と字幕を自動生成します。
 - **多様な字幕出力**: SRT形式とFFmpeg `drawtext`用のJSON形式字幕ファイルの両方を出力し、柔軟な動画編集に対応します。
+- **並列レンダリングとハードウェアエンコードの自動検出**: CPUコア数やGPU（NVENC/VAAPI/VideoToolbox）を検出し、最適なジョブ数を自動設定します。ハードウェアエンコードが利用可能な場合は自動的に活用し、失敗時はソフトウェアにフォールバックします。
 - **DevContainer対応**: VSCode DevContainerをサポートしており、どこでも一貫した開発環境を簡単に構築できます。
 
 ---
@@ -93,6 +94,15 @@ python -m zundamotion.main scripts/sample.yaml --no-cache
 すべての中間ファイルを再生成し、キャッシュを更新したい場合は、`--cache-refresh`オプションを使用します。
 ```bash
 python -m zundamotion.main scripts/sample.yaml --cache-refresh
+```
+
+並列レンダリングジョブ数を指定したい場合は、`--jobs`オプションを使用します。`auto`を指定するとCPUコア数を自動検出し、最適なジョブ数を設定します。
+```bash
+python -m zundamotion.main scripts/sample.yaml --jobs auto
+```
+特定のジョブ数を指定することも可能です（例: 4コアを使用する場合）。
+```bash
+python -m zundamotion.main scripts/sample.yaml --jobs 4
 ```
 
 ---

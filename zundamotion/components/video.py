@@ -14,12 +14,55 @@ def _format_drawtext_filter(drawtext_params: Dict[str, Any]) -> str:
     return ":".join(parts)
 
 
+import multiprocessing
+import os
+
+from ..utils.ffmpeg_utils import get_ffmpeg_version, get_hardware_encoder
+
+
 class VideoRenderer:
-    def __init__(self, config: Dict[str, Any], temp_dir: Path):
+    def __init__(self, config: Dict[str, Any], temp_dir: Path, jobs: str = "1"):
         self.config = config
         self.temp_dir = temp_dir
         self.video_config = config.get("video", {})
         self.bgm_config = config.get("bgm", {})
+        self.jobs = jobs
+        self.hw_encoder = None
+        self.ffmpeg_path = "ffmpeg"  # Assume ffmpeg is in PATH
+
+        self._initialize_ffmpeg_settings()
+
+    def _initialize_ffmpeg_settings(self):
+        """Detects FFmpeg version and available hardware encoders."""
+        ffmpeg_version = get_ffmpeg_version(self.ffmpeg_path)
+        if ffmpeg_version:
+            print(f"[FFmpeg] Detected FFmpeg version: {ffmpeg_version}")
+            self.hw_encoder = get_hardware_encoder(self.ffmpeg_path)
+            if self.hw_encoder:
+                print(f"[FFmpeg] Detected hardware encoder: {self.hw_encoder}")
+            else:
+                print("[FFmpeg] No hardware encoder detected or supported.")
+        else:
+            print(
+                "[FFmpeg] FFmpeg not found or version could not be determined. Please ensure FFmpeg is installed and in your PATH."
+            )
+            # Fallback to software encoding if ffmpeg is not found
+            self.hw_encoder = None
+
+        if self.jobs == "auto":
+            self.num_jobs = multiprocessing.cpu_count()
+            print(f"[Jobs] Auto-detected CPU cores: {self.num_jobs} jobs")
+        else:
+            try:
+                self.num_jobs = int(self.jobs)
+                if self.num_jobs <= 0:
+                    raise ValueError
+                print(f"[Jobs] Using {self.num_jobs} specified jobs")
+            except ValueError:
+                print(
+                    f"[Jobs] Invalid --jobs value '{self.jobs}'. Falling back to 1 job."
+                )
+                self.num_jobs = 1
 
     def render_clip(
         self,
@@ -70,6 +113,10 @@ class VideoRenderer:
             "ffmpeg",
             "-y",  # Overwrite output files without asking
         ]
+
+        # 並列処理の指定
+        if self.num_jobs > 0:
+            cmd.extend(["-threads", str(self.num_jobs)])
 
         # 背景動画の開始時間を指定
         if is_bg_video:
@@ -130,10 +177,21 @@ class VideoRenderer:
         cmd.extend(map_options)
 
         # 出力オプション
+        video_codec = "libx264"
+        if self.hw_encoder == "nvenc":
+            video_codec = "h264_nvenc"
+        elif self.hw_encoder == "vaapi":
+            video_codec = "h264_vaapi"
+            # VAAPIの場合、-vfオプションにhwuploadとformatを追加する必要がある
+            # filter_complex.insert(0, f"hwupload,format=nv12") # これはビデオフィルターの前に来るべき
+            # TODO: VAAPIの複雑なフィルターグラフ対応を検討
+        elif self.hw_encoder == "videotoolbox":
+            video_codec = "h264_videotoolbox"
+
         cmd.extend(
             [
                 "-c:v",
-                "libx264",
+                video_codec,
                 "-pix_fmt",
                 "yuv420p",
                 "-c:a",
@@ -149,10 +207,29 @@ class VideoRenderer:
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            print(f"Error during ffmpeg processing for {output_filename}:")
+            print(
+                f"Error during ffmpeg processing for {output_filename} with {video_codec}:"
+            )
             print(f"STDOUT: {e.stdout}")
             print(f"STDERR: {e.stderr}")
-            raise
+
+            # ハードウェアエンコードが失敗した場合、ソフトウェアエンコードにフォールバック
+            if self.hw_encoder and video_codec != "libx264":
+                print(
+                    f"Hardware encoding failed. Falling back to libx264 for {output_filename}."
+                )
+                cmd[cmd.index("-c:v") + 1] = "libx264"  # -c:v の次の要素をlibx264に変更
+                try:
+                    subprocess.run(cmd, check=True, capture_output=True, text=True)
+                except subprocess.CalledProcessError as fallback_e:
+                    print(
+                        f"Error during ffmpeg processing with libx264 for {output_filename}:"
+                    )
+                    print(f"STDOUT: {fallback_e.stdout}")
+                    print(f"STDERR: {fallback_e.stderr}")
+                    raise  # フォールバックも失敗した場合はエラーを再スロー
+            else:
+                raise  # ハードウェアエンコーダーが指定されていないか、libx264で失敗した場合はそのままエラーを再スロー
 
         return output_path
 
@@ -180,33 +257,73 @@ class VideoRenderer:
         cmd = [
             "ffmpeg",
             "-y",
-            "-stream_loop",
-            "-1",  # Loop indefinitely
-            "-i",
-            bg_video_path,
-            "-t",
-            str(duration),  # Trim to desired duration
-            "-vf",
-            f"scale={width}:{height}",  # Scale to target resolution
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            str(fps),
-            "-an",  # No audio
-            str(output_path),
         ]
+
+        # 並列処理の指定
+        if self.num_jobs > 0:
+            cmd.extend(["-threads", str(self.num_jobs)])
+
+        cmd.extend(
+            [
+                "-stream_loop",
+                "-1",  # Loop indefinitely
+                "-i",
+                bg_video_path,
+                "-t",
+                str(duration),  # Trim to desired duration
+                "-vf",
+                f"scale={width}:{height}",  # Scale to target resolution
+            ]
+        )
+
+        video_codec = "libx264"
+        if self.hw_encoder == "nvenc":
+            video_codec = "h264_nvenc"
+        elif self.hw_encoder == "vaapi":
+            video_codec = "h264_vaapi"
+            # TODO: VAAPIの複雑なフィルターグラフ対応を検討
+        elif self.hw_encoder == "videotoolbox":
+            video_codec = "h264_videotoolbox"
+
+        cmd.extend(
+            [
+                "-c:v",
+                video_codec,
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                str(fps),
+                "-an",  # No audio
+                str(output_path),
+            ]
+        )
 
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             print(
-                f"Error during ffmpeg processing for looped background video {output_filename}:"
+                f"Error during ffmpeg processing for looped background video {output_filename} with {video_codec}:"
             )
             print(f"STDOUT: {e.stdout}")
             print(f"STDERR: {e.stderr}")
-            raise
+
+            # ハードウェアエンコードが失敗した場合、ソフトウェアエンコードにフォールバック
+            if self.hw_encoder and video_codec != "libx264":
+                print(
+                    f"Hardware encoding failed. Falling back to libx264 for looped background video {output_filename}."
+                )
+                cmd[cmd.index("-c:v") + 1] = "libx264"  # -c:v の次の要素をlibx264に変更
+                try:
+                    subprocess.run(cmd, check=True, capture_output=True, text=True)
+                except subprocess.CalledProcessError as fallback_e:
+                    print(
+                        f"Error during ffmpeg processing with libx264 for looped background video {output_filename}:"
+                    )
+                    print(f"STDOUT: {fallback_e.stdout}")
+                    print(f"STDERR: {fallback_e.stderr}")
+                    raise  # フォールバックも失敗した場合はエラーを再スロー
+            else:
+                raise  # ハードウェアエンコーダーが指定されていないか、libx264で失敗した場合はそのままエラーを再スロー
 
         return output_path
 
@@ -233,16 +350,25 @@ class VideoRenderer:
         cmd = [
             "ffmpeg",
             "-y",  # Overwrite output files without asking
-            "-f",
-            "concat",
-            "-safe",
-            "0",  # Allow unsafe file paths (e.g., absolute paths)
-            "-i",
-            str(file_list_path),
-            "-c",
-            "copy",  # Copy streams without re-encoding
-            output_path,
         ]
+
+        # 並列処理の指定
+        if self.num_jobs > 0:
+            cmd.extend(["-threads", str(self.num_jobs)])
+
+        cmd.extend(
+            [
+                "-f",
+                "concat",
+                "-safe",
+                "0",  # Allow unsafe file paths (e.g., absolute paths)
+                "-i",
+                str(file_list_path),
+                "-c",
+                "copy",  # Copy streams without re-encoding
+                str(output_path),  # output_pathをstrにキャスト
+            ]
+        )
 
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)

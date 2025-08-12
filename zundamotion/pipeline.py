@@ -14,11 +14,16 @@ from .utils.ffmpeg_utils import get_audio_duration
 
 class GenerationPipeline:
     def __init__(
-        self, config: Dict[str, Any], no_cache: bool = False, cache_refresh: bool = False
+        self,
+        config: Dict[str, Any],
+        no_cache: bool = False,
+        cache_refresh: bool = False,
+        jobs: str = "1",
     ):
         self.config = config
         self.no_cache = no_cache
         self.cache_refresh = cache_refresh
+        self.jobs = jobs
         self.video_extensions = [
             ".mp4",
             ".mov",
@@ -63,7 +68,9 @@ class GenerationPipeline:
         with tempfile.TemporaryDirectory() as temp_dir_str:
             temp_dir = Path(temp_dir_str)
             # キャッシュディレクトリを永続的な場所に変更
-            self.cache_dir = Path("cache")  # プロジェクトルートに'cache'ディレクトリを作成
+            self.cache_dir = Path(
+                "cache"
+            )  # プロジェクトルートに'cache'ディレクトリを作成
             self.cache_dir.mkdir(exist_ok=True)
 
             print(f"Using temporary directory: {temp_dir}")
@@ -76,17 +83,21 @@ class GenerationPipeline:
                     shutil.rmtree(self.cache_dir)
                     self.cache_dir.mkdir(exist_ok=True)
             elif self.cache_refresh:
-                print("Cache refresh requested (--cache-refresh). All files will be regenerated and cache updated.")
+                print(
+                    "Cache refresh requested (--cache-refresh). All files will be regenerated and cache updated."
+                )
                 # キャッシュディレクトリの内容をクリア
                 if self.cache_dir.exists():
                     shutil.rmtree(self.cache_dir)
                     self.cache_dir.mkdir(exist_ok=True)
             else:
-                print("Using existing cache. Use --no-cache to disable or --cache-refresh to force regeneration.")
+                print(
+                    "Using existing cache. Use --no-cache to disable or --cache-refresh to force regeneration."
+                )
 
             audio_gen = AudioGenerator(self.config, temp_dir)
             subtitle_gen = SubtitleGenerator(self.config)
-            video_renderer = VideoRenderer(self.config, temp_dir)
+            video_renderer = VideoRenderer(self.config, temp_dir, self.jobs)
 
             script = self.config.get("script", {})
             scenes = script.get("scenes", [])
@@ -154,7 +165,9 @@ class GenerationPipeline:
                 )
 
                 if not self.no_cache and cached_scene_video_path.exists():
-                    print(f"    [Scene] Using cached scene video -> {cached_scene_video_path.name}")
+                    print(
+                        f"    [Scene] Using cached scene video -> {cached_scene_video_path.name}"
+                    )
                     all_clips.append(cached_scene_video_path)
                     # このシーンのライン数をスキップするために current_line_num を更新
                     current_line_num += sum(len(s.get("lines", [])) for s in [scene])
@@ -169,7 +182,7 @@ class GenerationPipeline:
 
                 # シーン全体のdurationを計算
                 scene_duration = 0.0
-                scene_line_clips: List[Path] = [] # シーン内のクリップを一時的に保持
+                scene_line_clips: List[Path] = []  # シーン内のクリップを一時的に保持
                 for idx, line in enumerate(scene.get("lines", []), start=1):
                     line_id = f"{scene_id}_{idx}"
                     scene_duration += line_data_map[line_id]["duration"]
@@ -260,13 +273,17 @@ class GenerationPipeline:
                 if scene_line_clips:
                     scene_output_path = temp_dir / f"scene_output_{scene_id}.mp4"
                     video_renderer.concat_clips(scene_line_clips, scene_output_path)
-                    print(f"    [Scene] Concatenated scene clips -> {scene_output_path.name}")
+                    print(
+                        f"    [Scene] Concatenated scene clips -> {scene_output_path.name}"
+                    )
                     all_clips.append(scene_output_path)
 
                     # シーン動画をキャッシュに保存
                     if not self.no_cache:
                         shutil.copy(scene_output_path, cached_scene_video_path)
-                        print(f"    [Scene] Cached scene video -> {cached_scene_video_path.name}")
+                        print(
+                            f"    [Scene] Cached scene video -> {cached_scene_video_path.name}"
+                        )
 
                 # シーンの処理が完了したら、一時的なシーン背景動画を削除
                 if scene_bg_video_path and scene_bg_video_path.exists():
@@ -292,6 +309,7 @@ def run_generation(
     keep_intermediate: bool = False,
     no_cache: bool = False,
     cache_refresh: bool = False,
+    jobs: str = "1",
 ):
     """
     High-level function to run the entire generation process.
@@ -303,5 +321,5 @@ def run_generation(
     config = load_script_and_config(script_path, str(default_config_path))
 
     # Create and run the pipeline
-    pipeline = GenerationPipeline(config, no_cache, cache_refresh)
+    pipeline = GenerationPipeline(config, no_cache, cache_refresh, jobs)
     pipeline.run(output_path, keep_intermediate)
