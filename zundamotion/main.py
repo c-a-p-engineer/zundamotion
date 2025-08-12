@@ -26,6 +26,16 @@ def main():
         action="store_true",
         help="If set, keeps the intermediate audio and video clips in an 'intermediate' folder.",
     )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="If set, disables caching and regenerates all intermediate files.",
+    )
+    parser.add_argument(
+        "--cache-refresh",
+        action="store_true",
+        help="If set, regenerates all intermediate files and updates the cache.",
+    )
 
     args = parser.parse_args()
 
@@ -33,7 +43,13 @@ def main():
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        run_generation(args.script_path, args.output, args.keep_intermediate)
+        run_generation(
+            args.script_path,
+            args.output,
+            args.keep_intermediate,
+            args.no_cache,
+            args.cache_refresh,
+        )
     except Exception as e:
         print(f"\nAn error occurred during generation: {e}")
         # Consider adding more specific error handling or logging here

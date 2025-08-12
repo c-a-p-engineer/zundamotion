@@ -6,8 +6,8 @@ Zundamotionは、VOICEVOXによる高品質な音声合成とFFmpegを用いた�
 
 ## 🚀 機能概要
 
-- **VOICEVOX連携**: Dockerを活用したVOICEVOXエンジンとの連携により、高品質な音声合成を実現します。
-- **FFmpegによる動画合成**: 背景、立ち絵、字幕、音声をFFmpegでシームレスに合成し、プロフェッショナルな動画を生成します。
+- **VOICEVOX連携**: Dockerを利用したVOICEVOXエンジンとの連携により、高品質な音声合成を実現します。
+- **FFmpegによる動画合成**: 背景、キャラクター、字幕、音声をFFmpegでシームレスに統合し、プロフェッショナルな動画を生成します。
 - **YAMLベースの台本**: 直感的で記述しやすいYAML形式の台本から、音声と字幕を自動生成します。
 - **多様な字幕出力**: SRT形式とFFmpeg `drawtext`用のJSON形式字幕ファイルの両方を出力し、柔軟な動画編集に対応します。
 - **DevContainer対応**: VSCode DevContainerをサポートしており、どこでも一貫した開発環境を簡単に構築できます。
@@ -55,8 +55,10 @@ DevContainer起動時にDocker ComposeによってVOICEVOXエンジンが自動�
 
 ## 🧪 動作確認
 
+Zundamotionは、YAML台本から最終的な動画ファイルを生成することを目的としています。ここでは、その基本的なワークフローを説明します。
+
 #### 1. 音声と字幕の生成
-`scripts/sample.yaml` に記述された台本を元に、音声ファイルと字幕ファイルを生成します。
+`scripts/sample.yaml` に記述された台本を元に、VOICEVOXエンジンを利用して音声ファイルと字幕ファイル（SRT形式およびFFmpeg `drawtext`用JSON形式）を生成します。
 ```bash
 python -m zundamotion.render_audio scripts/sample.yaml
 ```
@@ -72,11 +74,11 @@ voices/
 ```
 
 #### 2. 動画の生成
-生成された音声と字幕、そして台本に指定された背景や立ち絵素材を組み合わせて`.mp4`動画を生成します。`zundamotion.main`は内部でシステムにインストールされたFFmpegコマンドを利用します。
+生成された音声と字幕、そして台本に指定された背景やキャラクター素材を組み合わせて`.mp4`動画を生成します。このプロセスでは、システムにインストールされたFFmpegコマンドが内部的に利用されます。
 ```bash
 python -m zundamotion.main scripts/sample.yaml
 ```
-出力ファイルのパスを指定する場合は、`-o`または`--output`オプションを使用します。
+出力ファイルのパスを指定する場合は、`-o`または`--output`オプションを使用します。デフォルトの出力パスは `output/final.mp4` です。
 ```bash
 python -m zundamotion.main scripts/sample.yaml -o output/my_video.mp4
 ```
@@ -84,13 +86,19 @@ python -m zundamotion.main scripts/sample.yaml -o output/my_video.mp4
 ```bash
 python -m zundamotion.main scripts/sample.yaml --keep-intermediate
 ```
+キャッシュを無効にしてすべての中間ファイルを再生成したい場合は、`--no-cache`オプションを使用します。
+```bash
+python -m zundamotion.main scripts/sample.yaml --no-cache
+```
+すべての中間ファイルを再生成し、キャッシュを更新したい場合は、`--cache-refresh`オプションを使用します。
+```bash
+python -m zundamotion.main scripts/sample.yaml --cache-refresh
+```
 
 ---
 
 ## 💡 今後の機能拡張予定
 
-- [ ] **動画生成機能の追加**: `render_video.py` を実装し、生成された音声・字幕と背景画像を組み合わせて`.mp4`動画を出力する機能。
-- [ ] **CLIツールの提供**: `zundamotion render script.yaml` のようなコマンドラインインターフェースを整備し、より手軽に動画生成を実行できるようにします。
 - [ ] **キャラクター表現の強化**: 表情差分や口パクの自動生成に対応し、キャラクターの表現力を向上させます。
 - [ ] **高度な動画編集機能**: エフェクト、BGM、トランジションの指定を台本に含めることで、よりリッチな動画コンテンツを制作可能にします。
 

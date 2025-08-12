@@ -228,7 +228,7 @@ class VideoRenderer:
         file_list_path = self.temp_dir / "file_list.txt"
         with open(file_list_path, "w") as f:
             for p in clip_paths:
-                f.write(f"file '{p}'\n")
+                f.write(f"file '{p.resolve()}'\n")
 
         cmd = [
             "ffmpeg",
