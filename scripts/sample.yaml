@@ -14,15 +14,31 @@ scenes:
       fade_in_duration: 2.0             # フェードインの長さ (秒, オプション)
       fade_out_duration: 1.5            # フェードアウトの長さ (秒, オプション)
     lines:
-      - character: zundamon             # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
-        text: "こんにちは！ずんだもんです。" # セリフテキスト (必須)
+      - text: "こんにちは！ずんだもんです。" # セリフテキスト (必須)
         speaker_id: 3 # 明示的にVOICEVOX ID 3 を指定
-      - character: zundamon
-        text: "これから自己紹介の動画をはじめるのだ。"
-        voice_style: whisper # キャラクター定義のwhisperスタイル（ID 22）を使用
+        speaker_name: "zundamon" # 話しているキャラクターの名前
+
+      - text: "これから自己紹介の動画をはじめるのだ。"
+        speaker_id: 3 # ずんだもんのスピーカーID
+        speaker_name: "zundamon" # 話しているキャラクターの名前
+        characters: # キャラクター設定リスト
+          - name: "zundamon"
+            expression: "whisper" # voice_style: whisper を expression: whisper に変更
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
+            anchor: "bottom_center"
+            visible: true
         speed: 1.1                      # 音声速度 (0.5-2.0, オプション)
-      - character: zundamon
-        text: "最後まで見てくれると嬉しいのだ！"
+      - text: "最後まで見てくれると嬉しいのだ！"
+        voice_style: whisper # キャラクター定義のwhisperスタイル（ID 22）を使用
+        speaker_name: "zundamon" # 話しているキャラクターの名前
+        characters: # キャラクター設定リスト
+          - name: "zundamon"
+            expression: "normal" # 元のvoice_style: whisper から normal に戻す（例として）
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
+            anchor: "bottom_right"
+            visible: true
         pitch: 0.3                      # 音声ピッチ (-1.0-1.0, オプション)
 
   - id: topic
@@ -31,14 +47,37 @@ scenes:
       path: "assets/bgm/street.wav"     # BGMファイルパス
       volume: 0.2                       # BGM音量 (0.0-1.0, オプション)
     lines:
-      - character: metan             # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
-        text: "私はメタンよ" # セリフテキスト (必須)
-      - character: metan
-        text: "趣味は新しいツールを試すこと！"
-        speed: 0.95                     # 音声速度 (0.5-2.0, オプション)
-      - character: metan # ずんだもんからめたんに変更
-        text: "このチャンネルでは、便利なスクリプトや動画制作のコツを紹介するのよ。"
+      - text: "私はメタンよ" # セリフテキスト (必須)
         speaker_id: 6 # 明示的にVOICEVOX ID 6 を指定
+        speaker_name: "metan" # 話しているキャラクターの名前
+        characters: # キャラクター設定リスト
+          - name: "metan"
+            expression: "normal" # voice_style: normal を expression: normal に変更
+            position: {"x": "0", "y": "0"} # アンカーポイントからのオフセット (ピクセル単位)
+            scale: 0.8
+            anchor: "top_left"
+            visible: true
+      - text: "趣味は新しいツールを試すこと！"
+        speaker_id: 6 # メタンのスピーカーID
+        speaker_name: "metan" # 話しているキャラクターの名前
+        characters: # キャラクター設定リスト
+          - name: "metan"
+            expression: "normal" # voice_style: normal を expression: normal に変更
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
+            anchor: "bottom_center"
+            visible: true
+        speed: 0.95                     # 音声速度 (0.5-2.0, オプション)
+      - text: "このチャンネルでは、便利なスクリプトや動画制作のコツを紹介するのよ。"
+        speaker_id: 6 # 明示的にVOICEVOX ID 6 を指定
+        speaker_name: "metan" # 話しているキャラクターの名前
+        characters: # キャラクター設定リスト
+          - name: "metan"
+            expression: "normal" # voice_style: normal を expression: normal に変更
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
+            anchor: "bottom_center"
+            visible: true
 
   - id: outro
     bg: "assets/bg/sunset.png"
@@ -47,8 +86,20 @@ scenes:
       volume: 0.3                       # BGM音量 (0.0-1.0, オプション)
       start_time: 1.0                   # BGMの開始時間 (秒, オプション)
     lines:
-      - character: zundamon             # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
-        text: "今日は見てくれて、ありがとうなのだ！" # セリフテキスト (必須)
-      - character: zundamon
-        text: "チャンネル登録と高評価、よろしくお願いします！"
+      - text: "今日は見てくれて、ありがとうなのだ！" # セリフテキスト (必須)
+        speaker_id: 3 # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
+        speaker_name: "zundamon" # 話しているキャラクターの名前
+        characters: # キャラクター設定リスト
+          - name: "zundamon"
+            expression: "normal" # expression を normal に設定
+            position: {"x": "300", "y": "500"}
+            visible: true
+      - text: "チャンネル登録と高評価、よろしくお願いします！"
+        speaker_id: 3 # ずんだもんのスピーカーID
+        speaker_name: "zundamon" # 話しているキャラクターの名前
+        characters: # キャラクター設定リスト
+          - name: "zundamon"
+            expression: "normal" # expression を normal に設定
+            position: {"x": "300", "y": "500"}
+            visible: true
         speed: 1.05                     # 音声速度 (0.5-2.0, オプション)

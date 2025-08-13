@@ -24,8 +24,13 @@ voice:
   speed: 1.0
   pitch: 0.0
 
-# Character specific VOICEVOX settings
+# Character settings
 characters:
+  default_scale: 1.0 # Default character scale (0.0 to 1.0)
+  # Default anchor point for character positioning. Available options:
+  # top_left, top_center, top_right, middle_left, middle_center, middle_right,
+  # bottom_left, bottom_center, bottom_right
+  default_anchor: "bottom_center"
   zundamon:
     default_speaker_id: 3 # VOICEVOXのずんだもんのデフォルトID
     voice_styles:
@@ -33,7 +38,7 @@ characters:
       whisper: 22
       angry: 7
   metan:
-    default_speaker_id: 6 # VOICEVOXの冥鳴ひまりのデフォルトID
+    default_speaker_id: 6 # VOICEVOXの四国めたんのデフォルトID
 
 # BGM settings
 bgm:

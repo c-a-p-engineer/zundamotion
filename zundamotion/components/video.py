@@ -17,7 +17,11 @@ def _format_drawtext_filter(drawtext_params: Dict[str, Any]) -> str:
 import multiprocessing
 import os
 
-from ..utils.ffmpeg_utils import get_ffmpeg_version, get_hardware_encoder
+from ..utils.ffmpeg_utils import (
+    calculate_overlay_position,
+    get_ffmpeg_version,
+    get_hardware_encoder,
+)
 
 
 class VideoRenderer:
@@ -34,20 +38,7 @@ class VideoRenderer:
 
     def _initialize_ffmpeg_settings(self):
         """Detects FFmpeg version and available hardware encoders."""
-        ffmpeg_version = get_ffmpeg_version(self.ffmpeg_path)
-        if ffmpeg_version:
-            print(f"[FFmpeg] Detected FFmpeg version: {ffmpeg_version}")
-            self.hw_encoder = get_hardware_encoder(self.ffmpeg_path)
-            if self.hw_encoder:
-                print(f"[FFmpeg] Detected hardware encoder: {self.hw_encoder}")
-            else:
-                print("[FFmpeg] No hardware encoder detected or supported.")
-        else:
-            print(
-                "[FFmpeg] FFmpeg not found or version could not be determined. Please ensure FFmpeg is installed and in your PATH."
-            )
-            # Fallback to software encoding if ffmpeg is not found
-            self.hw_encoder = None
+        self.hw_encoder = None
 
         if self.jobs == "auto":
             self.num_jobs = multiprocessing.cpu_count()
@@ -69,99 +60,230 @@ class VideoRenderer:
         audio_path: Path,
         duration: float,
         drawtext_filter: Dict[str, Any],
-        bg_image_path: str,
+        background_config: Dict[str, Any],
+        characters_config: List[Dict[str, Any]],
         output_filename: str,
-        is_bg_video: bool = False,
-        start_time: float = 0.0,  # 新しいパラメータ: 背景動画の開始時間
-    ) -> Path:
+    ) -> Optional[Path]:
         """
-        Renders a single video clip.
+        Renders a single video clip with background and multiple characters.
 
         Args:
             audio_path (Path): Path to the audio file.
             duration (float): Duration of the clip.
             drawtext_filter (Dict[str, Any]): Subtitle filter options.
-            bg_image_path (str): Path to the background image.
+            background_config (Dict[str, Any]): Configuration for the background.
+                Expected keys: 'type' ('image' or 'video'), 'path', 'start_time' (if type is 'video').
+            characters_config (List[Dict[str, Any]]): List of character configurations.
+                Each dict should contain: 'name', 'expression', 'position' (dict with 'x', 'y'), 'visible'.
             output_filename (str): Base name for the output file.
-            bgm_path (Optional[str]): Path to the background music file.
-            bgm_volume (Optional[float]): Volume for the background music (0.0-1.0).
-            is_bg_video (bool): True if the background is a video file, False if an image.
-            start_time (float): Start time for the background video (in seconds).
 
         Returns:
             Path: Path to the rendered mp4 clip.
         """
         output_path = self.temp_dir / f"{output_filename}.mp4"
-        width = self.video_config.get("width", 1280)  # Default width
-        height = self.video_config.get("height", 720)  # Default height
-        fps = self.video_config.get("fps", 30)  # Default fps
+        # Delete temporary directory if it exists
+        temp_dir_path = Path("/tmp/tmp0uy2ckjk/")
+        if temp_dir_path.exists():
+            import shutil
+
+            shutil.rmtree(temp_dir_path)
+        width = self.video_config.get("width", 1280)
+        height = self.video_config.get("height", 720)
+        fps = self.video_config.get("fps", 30)
 
         print(f"[Video] Rendering clip -> {output_path.name}")
 
-        # configからデフォルトのフォントパスを取得
-        default_font_path = self.config.get("subtitle", {}).get("font_path")
-        # drawtext_filterにfontfileがなければ追加
-        if "fontfile" not in drawtext_filter and default_font_path:
-            drawtext_filter["fontfile"] = default_font_path
+        # --- Background Processing ---
+        bg_type = background_config.get("type", "image")
+        bg_path = background_config.get("path")
+        bg_start_time = background_config.get("start_time", 0.0)
+        is_bg_video = bg_type == "video"
 
-        drawtext_str = _format_drawtext_filter(drawtext_filter)
+        if not bg_path:
+            raise ValueError("Background path is missing in background_config.")
 
-        # FFmpegコマンドの構築
-        cmd = [
-            "ffmpeg",
-            "-y",  # Overwrite output files without asking
-        ]
+        # --- Character Image Path Resolution ---
+        # This part assumes a structure like assets/characters/{name}/{expression}.png
+        # It also needs to handle cases where an expression might not be found and fall back to default.
+        resolved_character_images = []
+        # Get default character settings from config
+        default_char_scale = self.config.get("characters", {}).get("default_scale", 1.0)
+        default_char_anchor = self.config.get("characters", {}).get(
+            "default_anchor", "bottom_center"
+        )
 
-        # 並列処理の指定
+        for char_config in characters_config:
+            if char_config.get("visible", False):
+                char_name = char_config.get("name")
+                char_expression = char_config.get(
+                    "expression", "default"
+                )  # Default to 'default' if not specified
+                char_position = char_config.get(
+                    "position", {"x": "0", "y": "0"}
+                )  # Default position
+                # Get scale and anchor for this specific character, falling back to defaults
+                char_scale = char_config.get("scale", default_char_scale)
+                char_anchor = char_config.get("anchor", default_char_anchor)
+
+                if not char_name:
+                    print(f"[Warning] Skipping character with missing name.")
+                    return None
+
+                # Construct the expected image path
+                # This logic might need to be more robust, e.g., checking for existence and falling back
+                char_image_path = Path(
+                    f"assets/characters/{char_name}/{char_expression}.png"
+                )
+                if not char_image_path.exists():
+                    # Fallback to default if expression image not found
+                    char_image_path = Path(f"assets/characters/{char_name}/default.png")
+                    if not char_image_path.exists():
+                        print(
+                            f"[Warning] Character image not found for {char_name}/{char_expression} or default. Skipping."
+                        )
+                        continue
+
+                resolved_character_images.append(
+                    {
+                        "path": str(
+                            char_image_path.resolve()
+                        ),  # Use absolute path for FFmpeg
+                        "position": char_position,
+                        "name": char_name,
+                        "expression": char_expression,
+                        "scale": char_scale,
+                        "anchor": char_anchor,
+                    }
+                )
+            else:
+                print(f"Skipping invisible character: {char_config.get('name')}")
+
+        # --- FFmpeg Filter Graph Construction ---
+        cmd = ["ffmpeg", "-y"]
         if self.num_jobs > 0:
             cmd.extend(["-threads", str(self.num_jobs)])
 
-        # 背景動画の開始時間を指定
+        input_streams = []
+        filter_complex_parts = []
+        current_input_index = 0  # Use a single counter for all inputs
+
+        # 1. Background Input
+        bg_ffmpeg_input_index = current_input_index
         if is_bg_video:
-            cmd.extend(["-ss", str(start_time)])  # 背景動画の開始位置
-            cmd.extend(["-stream_loop", "-1", "-i", bg_image_path])  # 背景動画 (入力0)
+            cmd.extend(["-ss", str(bg_start_time)])
+            cmd.extend(["-stream_loop", "-1", "-i", bg_path])
         else:
-            cmd.extend(["-loop", "1", "-i", bg_image_path])  # 背景画像 (入力0)
+            cmd.extend(["-loop", "1", "-i", bg_path])
+        input_streams.append(f"[{bg_ffmpeg_input_index}:v]")
+        current_input_index += 1
 
-        cmd.extend(["-i", str(audio_path)])  # メイン音声 (入力1)
+        # 2. Audio Input
+        audio_ffmpeg_input_index = current_input_index
+        cmd.extend(["-i", str(audio_path)])
+        current_input_index += 1
 
-        cmd.extend(["-t", str(duration)])  # 出力時間
+        # 3. Character Inputs
+        character_ffmpeg_input_indices = (
+            {}
+        )  # Map character config index to ffmpeg input index
+        for i, char_data in enumerate(resolved_character_images):
+            char_ffmpeg_input_index = current_input_index
+            cmd.extend(["-loop", "1", "-framerate", str(fps), "-i", char_data["path"]])
+            character_ffmpeg_input_indices[i] = char_ffmpeg_input_index
+            input_streams.append(f"[{char_ffmpeg_input_index}:v]")
+            current_input_index += 1
 
-        # 複雑なフィルターグラフの構築
-        filter_complex = []
+        # Set duration
+        cmd.extend(["-t", str(duration)])
+
+        # Build the filter_complex string
+        # Start with background scaling
+        # Use bg_ffmpeg_input_index for background video stream
+        bg_filter_chain = (
+            f"[{bg_ffmpeg_input_index}:v]scale={width}:{height}[bg_scaled]"
+        )
+        filter_complex_parts.append(bg_filter_chain)
+        last_chain_name = "[bg_scaled]"
+
+        # Character Overlays
+        for i, char_data in enumerate(resolved_character_images):
+            char_ffmpeg_input_index = character_ffmpeg_input_indices[
+                i
+            ]  # Use the correct ffmpeg input index for character
+
+            scale = char_data["scale"]
+            anchor = char_data["anchor"]
+            overlay_x = char_data["position"].get("x", "0")
+            overlay_y = char_data["position"].get("y", "0")
+
+            # Apply scale filter
+            scaled_fg_stream_name = f"scaled_fg{i}"
+            filter_complex_parts.append(
+                f"[{char_ffmpeg_input_index}:v]scale=iw*{scale}:ih*{scale}[{scaled_fg_stream_name}]"
+            )
+
+            # Format the scaled character image to rgba
+            formatted_fg_stream_name = f"fg{i}"
+            filter_complex_parts.append(
+                f"[{scaled_fg_stream_name}]format=rgba[{formatted_fg_stream_name}]"
+            )
+
+            # Calculate overlay position using the new helper function
+            x_expr, y_expr = calculate_overlay_position(
+                bg_width_expr="W",
+                bg_height_expr="H",
+                fg_width_expr="w",  # 'w' and 'h' in overlay filter refer to the foreground's dimensions
+                fg_height_expr="h",
+                anchor=anchor,
+                offset_x=str(overlay_x),
+                offset_y=str(overlay_y),
+            )
+
+            # Overlay the formatted character image onto the current video stream
+            new_chain_name = f"[char_overlay_{i}]"
+            filter_complex_parts.append(
+                f"{last_chain_name}[{formatted_fg_stream_name}]overlay=x={x_expr}:y={y_expr}{new_chain_name}"
+            )
+            last_chain_name = new_chain_name
+
+        final_video_stream_name_before_drawtext = (
+            last_chain_name  # Output of the last overlay
+        )
+
+        # Add drawtext filter if present (after all overlays)
+        default_font_path = self.config.get("subtitle", {}).get("font_path")
+        if "fontfile" not in drawtext_filter and default_font_path:
+            drawtext_filter["fontfile"] = default_font_path
+        drawtext_str = _format_drawtext_filter(drawtext_filter)
+
+        if drawtext_str:
+            # Apply drawtext to the final video stream after all character overlays
+            final_video_stream_name = "[final_output_with_text]"
+            filter_complex_parts.append(
+                f"{final_video_stream_name_before_drawtext}drawtext={drawtext_str}{final_video_stream_name}"
+            )
+        else:
+            final_video_stream_name = final_video_stream_name_before_drawtext  # If no drawtext, use the stream name before drawtext
+
+        # Map options
         map_options = []
-
-        # ビデオフィルター (スケールとdrawtext)
-        video_filter_str = f"scale={width}:{height},drawtext={drawtext_str}"
-
-        # 背景が動画でも画像でも、入力0のビデオストリームに直接フィルターを適用
-        filter_complex.append(f"[0:v]{video_filter_str}[v]")
-
         map_options.append("-map")
-        map_options.append("[v]")
-
-        # オーディオフィルター (メイン音声のみをマップ)
+        map_options.append(final_video_stream_name)  # Map the final video stream
         map_options.append("-map")
-        map_options.append("1:a")
+        map_options.append(f"{audio_ffmpeg_input_index}:a")
 
-        # フィルターグラフをコマンドに追加
-        if filter_complex:
-            cmd.extend(["-filter_complex", ";".join(filter_complex)])
+        # Add filter_complex to command
+        if filter_complex_parts:
+            cmd.extend(["-filter_complex", ";".join(filter_complex_parts)])
 
-        # マッピングオプションを追加
+        # Map options
         cmd.extend(map_options)
 
-        # 出力オプション
+        # Add logging options for debugging
+        cmd.extend(["-loglevel", "level+info", "-stats"])
+
+        # Output options
         video_codec = "libx264"
-        if self.hw_encoder == "nvenc":
-            video_codec = "h264_nvenc"
-        elif self.hw_encoder == "vaapi":
-            video_codec = "h264_vaapi"
-            # VAAPIの場合、-vfオプションにhwuploadとformatを追加する必要がある
-            # filter_complex.insert(0, f"hwupload,format=nv12") # これはビデオフィルターの前に来るべき
-            # TODO: VAAPIの複雑なフィルターグラフ対応を検討
-        elif self.hw_encoder == "videotoolbox":
-            video_codec = "h264_videotoolbox"
 
         cmd.extend(
             [
@@ -174,13 +296,20 @@ class VideoRenderer:
                 "-b:a",
                 "192k",
                 "-r",
-                str(fps),  # Set output frame rate
+                str(fps),
                 str(output_path),
             ]
         )
 
+        result = None
         try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            print(f"Executing FFmpeg command: {' '.join(cmd)}")  # Debugging
+            result = subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
         except subprocess.CalledProcessError as e:
             print(
                 f"Error during ffmpeg processing for {output_filename} with {video_codec}:"
@@ -188,23 +317,26 @@ class VideoRenderer:
             print(f"STDOUT: {e.stdout}")
             print(f"STDERR: {e.stderr}")
 
-            # ハードウェアエンコードが失敗した場合、ソフトウェアエンコードにフォールバック
             if self.hw_encoder and video_codec != "libx264":
                 print(
                     f"Hardware encoding failed. Falling back to libx264 for {output_filename}."
                 )
-                cmd[cmd.index("-c:v") + 1] = "libx264"  # -c:v の次の要素をlibx264に変更
+                # Find and replace the video codec in the command
                 try:
-                    subprocess.run(cmd, check=True, capture_output=True, text=True)
-                except subprocess.CalledProcessError as fallback_e:
-                    print(
-                        f"Error during ffmpeg processing with libx264 for {output_filename}:"
+                    codec_index = cmd.index("-c:v")
+                    cmd[codec_index + 1] = "libx264"
+                    result = subprocess.run(
+                        cmd,
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        text=True,
+                        stderr=subprocess.PIPE,
                     )
-                    print(f"STDOUT: {fallback_e.stdout}")
-                    print(f"STDERR: {fallback_e.stderr}")
-                    raise  # フォールバックも失敗した場合はエラーを再スロー
+                except Exception as fallback_e:
+                    print(f"Error during fallback ffmpeg processing: {fallback_e}")
+                    raise
             else:
-                raise  # ハードウェアエンコーダーが指定されていないか、libx264で失敗した場合はそのままエラーを再スロー
+                raise
 
         return output_path
 

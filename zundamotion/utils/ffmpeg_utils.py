@@ -191,3 +191,73 @@ def add_bgm_to_video(
         logger.error(f"FFmpeg stdout:\n{e.stdout}")
         logger.error(f"FFmpeg stderr:\n{e.stderr}")
         raise
+
+
+def calculate_overlay_position(
+    bg_width_expr: str,
+    bg_height_expr: str,
+    fg_width_expr: str,
+    fg_height_expr: str,
+    anchor: str,
+    offset_x: str,
+    offset_y: str,
+) -> tuple[str, str]:
+    """
+    Calculates FFmpeg overlay x, y expressions based on anchor point and offsets.
+
+    Args:
+        bg_width_expr (str): FFmpeg expression for background width (e.g., 'W').
+        bg_height_expr (str): FFmpeg expression for background height (e.g., 'H').
+        fg_width_expr (str): FFmpeg expression for foreground width (e.g., 'w').
+        fg_height_expr (str): FFmpeg expression for foreground height (e.g., 'h').
+        anchor (str): Anchor point (e.g., 'bottom_center').
+        offset_x (str): X offset from the anchor point.
+        offset_y (str): Y offset from the anchor point.
+
+    Returns:
+        tuple[str, str]: (x_expression, y_expression) for FFmpeg overlay filter.
+    """
+    x_base = "0"
+    y_base = "0"
+
+    if anchor == "top_left":
+        x_base = "0"
+        y_base = "0"
+    elif anchor == "top_center":
+        x_base = f"({bg_width_expr}-{fg_width_expr})/2"
+        y_base = "0"
+    elif anchor == "top_right":
+        x_base = f"{bg_width_expr}-{fg_width_expr}"
+        y_base = "0"
+    elif anchor == "middle_left":
+        x_base = "0"
+        y_base = f"({bg_height_expr}-{fg_height_expr})/2"
+    elif anchor == "middle_center":
+        x_base = f"({bg_width_expr}-{fg_width_expr})/2"
+        y_base = f"({bg_height_expr}-{fg_height_expr})/2"
+    elif anchor == "middle_right":
+        x_base = f"{bg_width_expr}-{fg_width_expr}"
+        y_base = f"({bg_height_expr}-{fg_height_expr})/2"
+    elif anchor == "bottom_left":
+        x_base = "0"
+        y_base = f"{bg_height_expr}-{fg_height_expr}"
+    elif anchor == "bottom_center":
+        x_base = f"({bg_width_expr}-{fg_width_expr})/2"
+        y_base = f"{bg_height_expr}-{fg_height_expr}"
+    elif anchor == "bottom_right":
+        x_base = f"{bg_width_expr}-{fg_width_expr}"
+        y_base = f"{bg_height_expr}-{fg_height_expr}"
+    else:
+        logger.warning(f"Unknown anchor point: {anchor}. Defaulting to top_left.")
+        x_base = "0"
+        y_base = "0"
+
+    # Add offsets
+    x_expr = f"{x_base}+{offset_x}" if offset_x and offset_x != "0" else x_base
+    y_expr = f"{y_base}+{offset_y}" if offset_y and offset_y != "0" else y_base
+
+    # Handle negative offsets (e.g., y-50 instead of y+-50)
+    x_expr = x_expr.replace("+-", "-")
+    y_expr = y_expr.replace("+-", "-")
+
+    return x_expr, y_expr

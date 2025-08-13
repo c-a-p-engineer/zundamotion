@@ -148,7 +148,9 @@ class GenerationPipeline:
                             "voice_config": self.config.get("voice", {}),
                         }
                         audio_cache_key = self._generate_hash(audio_cache_data)
-                        cached_audio_path = self.cache_dir / f"{audio_cache_key}.wav"
+                        cached_audio_path = (
+                            self.cache_dir / f"{line_id}_{audio_cache_key}.wav"
+                        )
 
                         if cached_audio_path.exists():
                             audio_path = cached_audio_path
@@ -184,7 +186,9 @@ class GenerationPipeline:
                 for scene_idx, scene in enumerate(scenes):
                     scene_id = scene["id"]
                     scene_hash = self._generate_scene_hash(scene)
-                    cached_scene_video_path = self.cache_dir / f"scene_{scene_hash}.mp4"
+                    cached_scene_video_path = (
+                        self.cache_dir / f"scene_{scene_id}_{scene_hash}.mp4"
+                    )
 
                     pbar_scenes.set_description(
                         f"Scene Rendering (Scene {scene_idx + 1}/{total_scenes}: '{scene_id}')"
@@ -267,27 +271,44 @@ class GenerationPipeline:
                             ),  # グローバルBGM設定もキャッシュキーに含める
                         }
                         video_cache_key = self._generate_hash(video_cache_data)
-                        cached_clip_path = self.cache_dir / f"{video_cache_key}.mp4"
+                        cached_clip_path = (
+                            self.cache_dir / f"{line_id}_{video_cache_key}.mp4"
+                        )
 
                         # 4. Render Video Clip (with cache)
+                        clip_path: Optional[Path] = None  # Initialize clip_path
                         if not self.no_cache and cached_clip_path.exists():
                             clip_path = cached_clip_path
                             logger.debug(f"Using cached clip -> {clip_path.name}")
                         else:
                             logger.debug("Rendering clip...")
+                            background_config = {
+                                "type": "video" if is_bg_video else "image",
+                                "path": (
+                                    str(scene_bg_video_path)
+                                    if is_bg_video
+                                    else bg_image
+                                ),
+                                "start_time": current_scene_time,
+                            }
+                            characters_config = line.get("characters", [])
+
                             clip_path = video_renderer.render_clip(
                                 audio_path,
                                 duration,
                                 drawtext_filter,
-                                (
-                                    str(scene_bg_video_path)
-                                    if is_bg_video
-                                    else bg_image
-                                ),  # シーン背景動画を使用
+                                background_config,
+                                characters_config,
                                 line_id,
-                                is_bg_video=is_bg_video,
-                                start_time=current_scene_time,  # シーン内での開始時間を渡す
                             )
+                            if clip_path is None:
+                                logger.error(
+                                    f"Failed to render clip for line: {line_id}"
+                                )
+                                raise RuntimeError(
+                                    f"Clip rendering failed for line: {line_id}"
+                                )
+
                             if not self.no_cache:
                                 shutil.copy(clip_path, cached_clip_path)
                                 logger.debug(
@@ -296,8 +317,9 @@ class GenerationPipeline:
                             else:
                                 logger.debug(f"Generated clip -> {clip_path.name}")
 
+                        # These lines should always execute after clip_path is determined
                         scene_line_clips.append(clip_path)
-                        current_scene_time += duration  # 次のラインの開始時間を更新
+                        current_scene_time += duration
 
                     # シーン内のクリップを結合してシーン動画を生成
                     if scene_line_clips:
