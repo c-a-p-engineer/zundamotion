@@ -28,7 +28,7 @@ class AudioGenerator:
         Returns:
             Path: The path to the generated wav file.
         """
-        speaker = line_config.get("speaker", self.voice_config.get("speaker"))
+        speaker = line_config.get("speaker_id", self.voice_config.get("speaker"))
         speed = line_config.get("speed", self.voice_config.get("speed"))
         pitch = line_config.get("pitch", self.voice_config.get("pitch"))
 

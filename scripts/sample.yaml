@@ -16,8 +16,10 @@ scenes:
     lines:
       - character: zundamon             # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
         text: "こんにちは！ずんだもんです。" # セリフテキスト (必須)
+        speaker_id: 3 # 明示的にVOICEVOX ID 3 を指定
       - character: zundamon
         text: "これから自己紹介の動画をはじめるのだ。"
+        voice_style: whisper # キャラクター定義のwhisperスタイル（ID 22）を使用
         speed: 1.1                      # 音声速度 (0.5-2.0, オプション)
       - character: zundamon
         text: "最後まで見てくれると嬉しいのだ！"
@@ -29,13 +31,14 @@ scenes:
       path: "assets/bgm/street.wav"     # BGMファイルパス
       volume: 0.2                       # BGM音量 (0.0-1.0, オプション)
     lines:
-      - character: zundamon             # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
-        text: "好きな食べ物はもちろん、ずんだ餅！" # セリフテキスト (必須)
-      - character: zundamon
-        text: "趣味は新しいツールを試すことなのだ。"
+      - character: metan             # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
+        text: "私はメタンよ" # セリフテキスト (必須)
+      - character: metan
+        text: "趣味は新しいツールを試すこと！"
         speed: 0.95                     # 音声速度 (0.5-2.0, オプション)
-      - character: zundamon
-        text: "このチャンネルでは、便利なスクリプトや動画制作のコツを紹介するのだ。"
+      - character: metan # ずんだもんからめたんに変更
+        text: "このチャンネルでは、便利なスクリプトや動画制作のコツを紹介するのよ。"
+        speaker_id: 6 # 明示的にVOICEVOX ID 6 を指定
 
   - id: outro
     bg: "assets/bg/sunset.png"

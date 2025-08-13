@@ -138,15 +138,6 @@ def _validate_config(config: Dict[str, Any]):
                     f"Line at scene '{scene_id}', index {line_idx} must contain 'text'."
                 )
 
-            # Validate character existence
-            character_name = line.get("character")
-            if character_name:
-                character_dir = character_assets_path / character_name
-                if not character_dir.is_dir():
-                    raise ValidationError(
-                        f"Character '{character_name}' for scene '{scene_id}', line {line_idx} does not exist or is not a directory at '{character_dir}'."
-                    )
-
             # Validate speed range
             speed = line.get("speed")
             if speed is not None:
@@ -161,6 +152,14 @@ def _validate_config(config: Dict[str, Any]):
                 if not (-1.0 <= pitch <= 1.0):
                     raise ValidationError(
                         f"Speech pitch for scene '{scene_id}', line {line_idx} must be between -1.0 and 1.0, but got {pitch}."
+                    )
+
+            # Validate speaker_id type
+            speaker_id = line.get("speaker_id")
+            if speaker_id is not None:
+                if not isinstance(speaker_id, int):
+                    raise ValidationError(
+                        f"Speaker ID for scene '{scene_id}', line {line_idx} must be an integer, but got {type(speaker_id).__name__}."
                     )
 
 
@@ -186,6 +185,33 @@ def load_script_and_config(
     # Merge script into the 'script' key of the config
     final_config = default_config.copy()
     final_config["script"] = script_data
+
+    # Process character speaker IDs
+    characters_config = final_config.get("characters", {})
+    for scene in final_config["script"].get("scenes", []):
+        for line in scene.get("lines", []):
+            character_name = line.get("character")
+            if character_name and character_name in characters_config:
+                character_settings = characters_config[character_name]
+                # 1. If voice_style is specified, try to use it first
+                voice_style = line.get("voice_style")
+                if voice_style:
+                    if (
+                        "voice_styles" in character_settings
+                        and voice_style in character_settings["voice_styles"]
+                    ):
+                        line["speaker_id"] = character_settings["voice_styles"][
+                            voice_style
+                        ]
+                    else:
+                        # If voice_style is specified but not found, log a warning and fall back to default_speaker_id if available
+                        print(
+                            f"Warning: Voice style '{voice_style}' not found for character '{character_name}'. Falling back to default_speaker_id."
+                        )
+
+                # 2. If speaker_id is still not explicitly set in the line, use default from character config
+                if "speaker_id" not in line:
+                    line["speaker_id"] = character_settings.get("default_speaker_id")
 
     # Allow script to override defaults
     if "defaults" in script_data:

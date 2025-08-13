@@ -24,6 +24,17 @@ voice:
   speed: 1.0
   pitch: 0.0
 
+# Character specific VOICEVOX settings
+characters:
+  zundamon:
+    default_speaker_id: 3 # VOICEVOXのずんだもんのデフォルトID
+    voice_styles:
+      normal: 3
+      whisper: 22
+      angry: 7
+  metan:
+    default_speaker_id: 6 # VOICEVOXの冥鳴ひまりのデフォルトID
+
 # BGM settings
 bgm:
   path: null # Path to the default background music file (e.g., "assets/bgm/intro.wav")
