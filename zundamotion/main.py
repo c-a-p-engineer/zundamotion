@@ -1,5 +1,6 @@
 import argparse
 import sys
+import traceback
 from pathlib import Path
 
 # Add the project root to the sys.path to enable absolute imports
@@ -10,6 +11,7 @@ if str(project_root) not in sys.path:
 
 from zundamotion.exceptions import ValidationError
 from zundamotion.pipeline import run_generation
+from zundamotion.utils.logger import logger, setup_logging
 
 
 def main():
@@ -50,13 +52,22 @@ def main():
         default="1",
         help="Number of parallel jobs for rendering. Use 'auto' to detect CPU cores. Defaults to 1.",
     )
+    parser.add_argument(
+        "--log-json",
+        action="store_true",
+        help="If set, outputs logs in machine-readable JSON format.",
+    )
 
     args = parser.parse_args()
+
+    # Setup logging based on --log-json argument
+    setup_logging(log_json=args.log_json)
 
     # Ensure output directory exists
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
 
     try:
+        logger.info("Video generation started.")
         run_generation(
             args.script_path,
             args.output,
@@ -65,21 +76,17 @@ def main():
             args.cache_refresh,
             args.jobs,
         )
+        logger.info("Video generation completed successfully.")
     except ValidationError as e:
-        print(f"\nValidation Error: {e.message}")
+        logger.error(f"Validation Error: {e.message}")
         if e.line_number is not None:
-            print(f"  Line: {e.line_number}")
+            logger.error(f"  Line: {e.line_number}")
         if e.column_number is not None:
-            print(f"  Column: {e.column_number}")
-        exit(1)
+            logger.error(f"  Column: {e.column_number}")
+        sys.exit(1)
     except Exception as e:
-        import traceback
-
-        print(f"\nAn unexpected error occurred during generation: {e}")
-        print("--- Full Traceback ---")
-        traceback.print_exc()  # 完全なトレースバックを出力
-        print("----------------------")
-        exit(1)
+        logger.exception(f"An unexpected error occurred during generation: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
