@@ -116,6 +116,35 @@ scenes:
 
 ---
 
+## 🔊 効果音設定
+
+効果音は、各セリフ（`line`）に紐付けて設定できます。これにより、セリフの再生と同時に、またはセリフの開始からの相対的な時間で効果音を挿入することが可能です。
+
+```yaml
+lines:
+  - text: "これはセリフです。"
+    speaker_id: 3
+    sound_effects:
+      - path: "assets/se/rap_fanfare.mp3" # 効果音ファイルのパス
+        start_time: 0.0                   # セリフ開始からの相対的な開始時間 (秒, デフォルト: 0.0)
+        volume: 0.7                       # 効果音の音量 (0.0-1.0, デフォルト: 1.0)
+      - path: "assets/se/another_sound.wav"
+        start_time: 1.5                   # セリフ開始から1.5秒後に再生
+        volume: 0.5
+
+  - text: "" # セリフなしで効果音のみを再生する場合
+    sound_effects:
+      - path: "assets/se/rap_fanfare.mp3"
+        start_time: 0.0 # このlineが開始されると同時に再生
+        volume: 0.8
+```
+
+- `path`: 効果音ファイルのパス。
+- `start_time`: 効果音がセリフの開始から何秒後に再生を開始するかを指定します。デフォルトは `0.0` で、セリフと同時に再生されます。
+- `volume`: 効果音の音量（0.0から1.0の範囲）。デフォルトは `1.0` です。
+
+---
+
 ## 🖼️ キャラクター画像の設定
 
 キャラクター画像は、`assets/characters/` ディレクトリ以下に、キャラクター名と表情ごとに配置します。
@@ -141,24 +170,8 @@ DevContainer起動時にDocker ComposeによってVOICEVOXエンジンが自動�
 
 Zundamotionは、YAML台本から最終的な動画ファイルを生成することを目的としています。ここでは、その基本的なワークフローを説明します。
 
-#### 1. 音声と字幕の生成
-`scripts/sample.yaml` に記述された台本を元に、VOICEVOXエンジンを利用して音声ファイルと字幕ファイル（SRT形式およびFFmpeg `drawtext`用JSON形式）を生成します。この際、台本のYAML構文、素材ファイルの存在、およびパラメータの有効範囲が自動的に検証されます。
-```bash
-python -m zundamotion.render_audio scripts/sample.yaml
-```
-実行後、`voices/` ディレクトリに以下のファイルが生成されます。
-```plaintext
-voices/
-├── intro_1.drawtext.json
-├── intro_1.srt
-├── intro_1.wav
-├── intro_2.drawtext.json
-├── intro_2.srt
-└── intro_2.wav
-```
-
-#### 2. 動画の生成
-生成された音声と字幕、そして台本に指定された背景やキャラクター素材を組み合わせて`.mp4`動画を生成します。このプロセスでは、システムにインストールされたFFmpegコマンドが内部的に利用されます。実行中、CLIに進捗バーと残り時間が表示されます。
+#### 1. 動画の生成
+台本に指定された情報（音声、字幕、背景、キャラクター素材など）を元に、`.mp4`動画を生成します。このプロセスでは、VOICEVOXによる音声合成、字幕生成、FFmpegによる動画合成がすべて一括で行われます。実行中、CLIに進捗バーと残り時間が表示されます。
 ```bash
 python -m zundamotion.main scripts/sample.yaml
 ```

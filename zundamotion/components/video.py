@@ -172,6 +172,8 @@ class VideoRenderer:
         if is_bg_video:
             cmd.extend(["-ss", str(bg_start_time)])
             cmd.extend(["-stream_loop", "-1", "-i", bg_path])
+            # Explicitly set duration for background video input to match audio duration
+            cmd.extend(["-t", str(duration)])
         else:
             cmd.extend(["-loop", "1", "-i", bg_path])
         input_streams.append(f"[{bg_ffmpeg_input_index}:v]")
@@ -192,9 +194,6 @@ class VideoRenderer:
             character_ffmpeg_input_indices[i] = char_ffmpeg_input_index
             input_streams.append(f"[{char_ffmpeg_input_index}:v]")
             current_input_index += 1
-
-        # Set duration
-        cmd.extend(["-t", str(duration)])
 
         # Build the filter_complex string
         # Start with background scaling
@@ -297,6 +296,7 @@ class VideoRenderer:
                 "192k",
                 "-r",
                 str(fps),
+                "-shortest",  # Add -shortest to ensure output duration matches shortest input (audio)
                 str(output_path),
             ]
         )
@@ -436,7 +436,7 @@ class VideoRenderer:
 
     def concat_clips(self, clip_paths: List[Path], output_path: str) -> None:
         """
-        Concatenates multiple video clips into a single file.
+        Concatenates multiple video clips into a single file using the concat filter for robustness.
 
         Args:
             clip_paths (List[Path]): A sorted list of clip paths to concatenate.
@@ -446,47 +446,53 @@ class VideoRenderer:
             print("[Concat] No clips to concatenate.")
             return
 
-        print(f"[Concat] Concatenating {len(clip_paths)} clips -> {output_path}")
-
-        # Create a file list for ffmpeg concat demuxer
-        file_list_path = self.temp_dir / "file_list.txt"
-        with open(file_list_path, "w") as f:
-            for p in clip_paths:
-                f.write(f"file '{p.resolve()}'\n")
+        print(
+            f"[Concat] Concatenating {len(clip_paths)} clips -> {output_path} using concat filter."
+        )
 
         cmd = [
             "ffmpeg",
             "-y",  # Overwrite output files without asking
         ]
 
-        # 並列処理の指定
-        if self.num_jobs > 0:
-            cmd.extend(["-threads", str(self.num_jobs)])
+        # Add all clips as inputs
+        for p in clip_paths:
+            cmd.extend(["-i", str(p.resolve())])
+
+        # Build the filter_complex string for the concat filter
+        filter_inputs = "".join([f"[{i}:v:0][{i}:a:0]" for i in range(len(clip_paths))])
+        filter_complex = (
+            f"{filter_inputs}concat=n={len(clip_paths)}:v=1:a=1[outv][outa]"
+        )
 
         cmd.extend(
             [
-                "-f",
-                "concat",
-                "-safe",
-                "0",  # Allow unsafe file paths (e.g., absolute paths)
-                "-i",
-                str(file_list_path),
-                "-c",
-                "copy",  # Copy streams without re-encoding
-                str(output_path),  # output_pathをstrにキャスト
+                "-filter_complex",
+                filter_complex,
+                "-map",
+                "[outv]",
+                "-map",
+                "[outa]",
+                "-c:v",
+                "libx264",  # Re-encoding is necessary with concat filter
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                str(output_path),
             ]
         )
 
         try:
+            print(f"Executing FFmpeg command: {' '.join(cmd)}")
             subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            print(f"Error during ffmpeg concatenation:")
+            print(f"Error during ffmpeg concatenation with concat filter:")
+            print(f"FFMPEG Command: {' '.join(cmd)}")
             print(f"STDOUT: {e.stdout}")
             print(f"STDERR: {e.stderr}")
             raise
-        finally:
-            # Clean up the file list
-            if file_list_path.exists():
-                file_list_path.unlink()
 
         print(f"[Success] Final video saved to {output_path}")

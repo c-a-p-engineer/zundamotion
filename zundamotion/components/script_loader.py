@@ -162,6 +162,53 @@ def _validate_config(config: Dict[str, Any]):
                         f"Speaker ID for scene '{scene_id}', line {line_idx} must be an integer, but got {type(speaker_id).__name__}."
                     )
 
+            # Validate sound_effects
+            sound_effects = line.get("sound_effects")
+            if sound_effects:
+                if not isinstance(sound_effects, list):
+                    raise ValidationError(
+                        f"Sound effects for scene '{scene_id}', line {line_idx} must be a list."
+                    )
+                for se_idx, se in enumerate(sound_effects):
+                    if not isinstance(se, dict):
+                        raise ValidationError(
+                            f"Sound effect at scene '{scene_id}', line {line_idx}, index {se_idx} must be a dictionary."
+                        )
+                    se_path = se.get("path")
+                    if not se_path:
+                        raise ValidationError(
+                            f"Sound effect at scene '{scene_id}', line {line_idx}, index {se_idx} must have a 'path'."
+                        )
+                    se_full_path = Path(se_path)
+                    if not se_full_path.exists():
+                        raise ValidationError(
+                            f"Sound effect file '{se_path}' for scene '{scene_id}', line {line_idx}, index {se_idx} does not exist."
+                        )
+                    if not se_full_path.is_file():
+                        raise ValidationError(
+                            f"Sound effect path '{se_path}' for scene '{scene_id}', line {line_idx}, index {se_idx} is not a file."
+                        )
+
+                    se_start_time = se.get("start_time", 0.0)
+                    if not isinstance(se_start_time, (int, float)):
+                        raise ValidationError(
+                            f"Sound effect start_time for scene '{scene_id}', line {line_idx}, index {se_idx} must be a number, but got {type(se_start_time).__name__}."
+                        )
+                    if se_start_time < 0:
+                        raise ValidationError(
+                            f"Sound effect start_time for scene '{scene_id}', line {line_idx}, index {se_idx} must be non-negative, but got {se_start_time}."
+                        )
+
+                    se_volume = se.get("volume", 1.0)
+                    if not isinstance(se_volume, (int, float)):
+                        raise ValidationError(
+                            f"Sound effect volume for scene '{scene_id}', line {line_idx}, index {se_idx} must be a number, but got {type(se_volume).__name__}."
+                        )
+                    if not (0.0 <= se_volume <= 1.0):
+                        raise ValidationError(
+                            f"Sound effect volume for scene '{scene_id}', line {line_idx}, index {se_idx} must be between 0.0 and 1.0, but got {se_volume}."
+                        )
+
 
 def load_script_and_config(
     script_path: str, default_config_path: str

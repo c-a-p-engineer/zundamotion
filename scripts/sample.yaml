@@ -17,6 +17,16 @@ scenes:
       - text: "こんにちは！ずんだもんです。" # セリフテキスト (必須)
         speaker_id: 3 # 明示的にVOICEVOX ID 3 を指定
         speaker_name: "zundamon" # 話しているキャラクターの名前
+        sound_effects: # セリフと同時に再生する効果音
+          - path: "assets/se/rap_fanfare.mp3"
+            start_time: 3.0 # セリフ開始と同時に再生
+            volume: 0.5
+
+      - text: "" # 音単体で再生する効果音
+        sound_effects:
+          - path: "assets/se/rap_fanfare.mp3"
+            start_time: 0.0 # シーン開始から0.0秒後に再生 (デフォルト: 0.0)
+            volume: 0.7 # (デフォルト: 1)
 
       - text: "これから自己紹介の動画をはじめるのだ。"
         speaker_id: 3 # ずんだもんのスピーカーID
