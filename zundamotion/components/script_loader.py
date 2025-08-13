@@ -89,17 +89,31 @@ def _validate_config(config: Dict[str, Any]):
                 )
 
         # Validate BGM path
-        bgm_path = scene.get("bgm")
-        if bgm_path:
-            bgm_full_path = Path(bgm_path)
-            if not bgm_full_path.exists():
+        bgm_config = scene.get("bgm")
+        if bgm_config:
+            if not isinstance(bgm_config, dict):
                 raise ValidationError(
-                    f"BGM file '{bgm_path}' for scene '{scene_id}' does not exist."
+                    f"BGM configuration for scene '{scene_id}' must be a dictionary."
                 )
-            if not bgm_full_path.is_file():
-                raise ValidationError(
-                    f"BGM path '{bgm_path}' for scene '{scene_id}' is not a file."
-                )
+            bgm_path = bgm_config.get("path")
+            if bgm_path:
+                bgm_full_path = Path(bgm_path)
+                if not bgm_full_path.exists():
+                    raise ValidationError(
+                        f"BGM file '{bgm_path}' for scene '{scene_id}' does not exist."
+                    )
+                if not bgm_full_path.is_file():
+                    raise ValidationError(
+                        f"BGM path '{bgm_path}' for scene '{scene_id}' is not a file."
+                    )
+
+            # Validate bgm_volume range (moved from line validation to here)
+            bgm_volume = bgm_config.get("volume")
+            if bgm_volume is not None:
+                if not (0.0 <= bgm_volume <= 1.0):
+                    raise ValidationError(
+                        f"BGM volume for scene '{scene_id}' must be between 0.0 and 1.0, but got {bgm_volume}."
+                    )
 
         # Validate assets defined in the top-level 'assets' section
         top_level_assets = config.get("assets", {})
@@ -131,14 +145,6 @@ def _validate_config(config: Dict[str, Any]):
                 if not character_dir.is_dir():
                     raise ValidationError(
                         f"Character '{character_name}' for scene '{scene_id}', line {line_idx} does not exist or is not a directory at '{character_dir}'."
-                    )
-
-            # Validate bgm_volume range
-            bgm_volume = scene.get("bgm_volume")
-            if bgm_volume is not None:
-                if not (0.0 <= bgm_volume <= 1.0):
-                    raise ValidationError(
-                        f"BGM volume for scene '{scene_id}' must be between 0.0 and 1.0, but got {bgm_volume}."
                     )
 
             # Validate speed range

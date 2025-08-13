@@ -26,7 +26,11 @@ voice:
 
 # BGM settings
 bgm:
-  volume: 0.5 # Default BGM volume
+  path: null # Path to the default background music file (e.g., "assets/bgm/intro.wav")
+  volume: 0.5 # Default BGM volume (0.0 to 1.0)
+  start_time: 0.0 # Default BGM start time in seconds
+  fade_in_duration: 0.0 # Default BGM fade-in duration in seconds
+  fade_out_duration: 0.0 # Default BGM fade-out duration in seconds
 
 # Background settings
 background:

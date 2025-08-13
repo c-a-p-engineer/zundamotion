@@ -8,8 +8,11 @@ assets:
 scenes:
   - id: intro
     bg: "assets/bg/sample_video.mp4"    # シーン背景 (動画ファイル)
-    bgm: "assets/bgm/intro.wav"         # BGMファイルパス
-    bgm_volume: 0.1                     # BGM音量 (0.0-1.0, 必須)
+    bgm:                                # BGM設定
+      path: "assets/bgm/intro.wav"      # BGMファイルパス
+      volume: 0.1                       # BGM音量 (0.0-1.0, オプション)
+      fade_in_duration: 2.0             # フェードインの長さ (秒, オプション)
+      fade_out_duration: 1.5            # フェードアウトの長さ (秒, オプション)
     lines:
       - character: zundamon             # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
         text: "こんにちは！ずんだもんです。" # セリフテキスト (必須)
@@ -22,8 +25,9 @@ scenes:
 
   - id: topic
     bg: "assets/bg/street.png"
-    bgm: "assets/bgm/street.wav"
-    bgm_volume: 0.2                     # BGM音量 (0.0-1.0, 必須)
+    bgm:                                # BGM設定
+      path: "assets/bgm/street.wav"     # BGMファイルパス
+      volume: 0.2                       # BGM音量 (0.0-1.0, オプション)
     lines:
       - character: zundamon             # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
         text: "好きな食べ物はもちろん、ずんだ餅！" # セリフテキスト (必須)
@@ -35,8 +39,10 @@ scenes:
 
   - id: outro
     bg: "assets/bg/sunset.png"
-    bgm: "assets/bgm/sunset.wav"
-    bgm_volume: 0.3                     # BGM音量 (0.0-1.0, 必須)
+    bgm:                                # BGM設定
+      path: "assets/bgm/sunset.wav"     # BGMファイルパス
+      volume: 0.3                       # BGM音量 (0.0-1.0, オプション)
+      start_time: 1.0                   # BGMの開始時間 (秒, オプション)
     lines:
       - character: zundamon             # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
         text: "今日は見てくれて、ありがとうなのだ！" # セリフテキスト (必須)

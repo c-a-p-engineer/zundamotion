@@ -71,8 +71,6 @@ class VideoRenderer:
         drawtext_filter: Dict[str, Any],
         bg_image_path: str,
         output_filename: str,
-        bgm_path: Optional[str] = None,
-        bgm_volume: Optional[float] = None,
         is_bg_video: bool = False,
         start_time: float = 0.0,  # 新しいパラメータ: 背景動画の開始時間
     ) -> Path:
@@ -127,11 +125,6 @@ class VideoRenderer:
 
         cmd.extend(["-i", str(audio_path)])  # メイン音声 (入力1)
 
-        bgm_input_index = -1
-        if bgm_path:
-            cmd.extend(["-i", bgm_path])  # BGM (入力2)
-            bgm_input_index = 2  # BGMの入力インデックス
-
         cmd.extend(["-t", str(duration)])  # 出力時間
 
         # 複雑なフィルターグラフの構築
@@ -147,27 +140,9 @@ class VideoRenderer:
         map_options.append("-map")
         map_options.append("[v]")
 
-        # オーディオフィルター (メイン音声とBGMのミキシング)
-        if bgm_path:
-            # BGMの音量調整
-            final_bgm_volume = (
-                bgm_volume
-                if bgm_volume is not None
-                else self.bgm_config.get("volume", 0.5)
-            )
-            filter_complex.append(
-                f"[{bgm_input_index}:a]volume={final_bgm_volume}[bgm_vol]"
-            )
-            # メイン音声とBGMをミックス
-            filter_complex.append(
-                f"[1:a][bgm_vol]amix=inputs=2:duration=first:dropout_transition=0[aout]"
-            )
-            map_options.append("-map")
-            map_options.append("[aout]")
-        else:
-            # BGMがない場合、メイン音声のみをマップ
-            map_options.append("-map")
-            map_options.append("1:a")
+        # オーディオフィルター (メイン音声のみをマップ)
+        map_options.append("-map")
+        map_options.append("1:a")
 
         # フィルターグラフをコマンドに追加
         if filter_complex:

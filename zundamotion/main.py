@@ -73,7 +73,12 @@ def main():
             print(f"  Column: {e.column_number}")
         exit(1)
     except Exception as e:
+        import traceback
+
         print(f"\nAn unexpected error occurred during generation: {e}")
+        print("--- Full Traceback ---")
+        traceback.print_exc()  # 完全なトレースバックを出力
+        print("----------------------")
         exit(1)
 
 

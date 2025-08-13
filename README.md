@@ -8,6 +8,7 @@ Zundamotionは、VOICEVOXによる高品質な音声合成とFFmpegを用いた�
 
 - **VOICEVOX連携**: Dockerを利用したVOICEVOXエンジンとの連携により、高品質な音声合成を実現します。
 - **FFmpegによる動画合成**: 背景、キャラクター、字幕、音声をFFmpegでシームレスに統合し、プロフェッショナルな動画を生成します。
+- **BGM挿入（フェードイン・フェードアウト対応）**: シーン単位または動画全体のBGMを、フェードイン/アウト、音量、開始位置を指定して挿入できます。
 - **YAMLベースの台本**: 直感的で記述しやすいYAML形式の台本から、音声と字幕を自動生成します。
 - **多様な字幕出力**: SRT形式とFFmpeg `drawtext`用のJSON形式字幕ファイルの両方を出力し、柔軟な動画編集に対応します。
 - **堅牢なバリデーション**: 実行前にYAML構文、参照される素材ファイル（背景、BGM、キャラクター画像など）の存在、および音声パラメータ（速度、ピッチ、音量など）の有効範囲を自動でチェックします。エラー発生時には、具体的なエラーメッセージと該当する行番号・列番号が表示され、問題の特定と修正を支援します。
@@ -45,6 +46,58 @@ cd zundamotion
 
 ### 3. DevContainerの起動
 VS Codeでプロジェクトを開き、プロンプトが表示されたら「Reopen in Container」を選択します。これにより、必要な依存関係が自動的にインストールされ、開発環境が構築されます。
+
+---
+
+## 🎵 BGM設定
+
+BGMは、グローバル設定またはシーンごとに設定できます。シーンごとの設定はグローバル設定を上書きします。
+
+### グローバルBGM設定 (config.yaml)
+
+`zundamotion/templates/config.yaml` またはカスタム設定ファイルで、動画全体に適用されるデフォルトのBGMを設定できます。
+
+```yaml
+# BGM settings
+bgm:
+  path: "assets/bgm/default_bgm.wav" # デフォルトのBGMファイルパス
+  volume: 0.3                       # デフォルトのBGM音量 (0.0-1.0)
+  start_time: 0.0                   # デフォルトのBGM開始時間 (秒)
+  fade_in_duration: 1.0             # デフォルトのフェードイン時間 (秒)
+  fade_out_duration: 1.0            # デフォルトのフェードアウト時間 (秒)
+```
+
+### シーンごとのBGM設定 (scripts/your_script.yaml)
+
+各シーンで個別のBGMを設定できます。これにより、シーンごとに異なる雰囲気を作り出すことが可能です。
+
+```yaml
+scenes:
+  - id: intro_scene
+    bg: "assets/bg/intro_bg.mp4"
+    bgm:
+      path: "assets/bgm/intro_music.wav" # このシーンのBGMファイルパス
+      volume: 0.5                       # このシーンのBGM音量
+      start_time: 2.0                   # このシーンのBGM開始時間
+      fade_in_duration: 3.0             # このシーンのフェードイン時間
+      fade_out_duration: 2.5            # このシーンのフェードアウト時間
+    lines:
+      - text: "これはイントロシーンです。"
+
+  - id: main_content_scene
+    bg: "assets/bg/main_bg.png"
+    bgm:
+      path: "assets/bgm/main_music.wav"
+      volume: 0.4
+    lines:
+      - text: "メインコンテンツが始まります。"
+```
+
+- `path`: BGMファイルのパス。
+- `volume`: BGMの音量（0.0から1.0の範囲）。
+- `start_time`: BGMが動画のどの時点から開始するか（秒）。
+- `fade_in_duration`: BGMのフェードインの長さ（秒）。
+- `fade_out_duration`: BGMのフェードアウトの長さ（秒）。
 
 ---
 
@@ -111,7 +164,7 @@ python -m zundamotion.main scripts/sample.yaml --jobs 4
 ## 💡 今後の機能拡張予定
 
 - [ ] **キャラクター表現の強化**: 表情差分や口パクの自動生成に対応し、キャラクターの表現力を向上させます。
-- [ ] **高度な動画編集機能**: エフェクト、BGM、トランジションの指定を台本に含めることで、よりリッチな動画コンテンツを制作可能にします。
+- [ ] **高度な動画編集機能**: エフェクト、トランジションの指定を台本に含めることで、よりリッチな動画コンテンツを制作可能にします。
 
 ---
 

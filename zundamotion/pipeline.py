@@ -9,7 +9,7 @@ from .components.audio import AudioGenerator
 from .components.script_loader import load_script_and_config
 from .components.subtitle import SubtitleGenerator
 from .components.video import VideoRenderer
-from .utils.ffmpeg_utils import get_audio_duration
+from .utils.ffmpeg_utils import add_bgm_to_video, get_audio_duration
 
 
 class GenerationPipeline:
@@ -34,27 +34,47 @@ class GenerationPipeline:
         self.cache_dir: Optional[Path] = None  # キャッシュディレクトリ
 
     def _generate_hash(self, data: Dict[str, Any]) -> str:
-        """Generates a SHA256 hash from a dictionary."""
+        """Generates a SHA256 hash from a dictionary, handling Path objects."""
+
+        # Path オブジェクトを文字列に変換するカスタムエンコーダ
+        class PathEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, Path):
+                    return str(obj)
+                return json.JSONEncoder.default(self, obj)
+
         # 辞書をソートしてJSON文字列に変換し、ハッシュを計算
         # 辞書のキーの順序が異なるとハッシュ値が変わるのを防ぐためソート
-        sorted_data = json.dumps(data, sort_keys=True).encode("utf-8")
+        sorted_data = json.dumps(data, sort_keys=True, cls=PathEncoder).encode("utf-8")
         return hashlib.sha256(sorted_data).hexdigest()
 
     def _generate_scene_hash(self, scene: Dict[str, Any]) -> str:
         """Generates a SHA256 hash for a scene based on its content and relevant config."""
         # シーンのID、ライン、背景、BGM、および関連するグローバル設定をハッシュに含める
+        # BGM設定は辞書になったため、そのまま含める
         scene_data = {
             "id": scene.get("id"),
             "lines": scene.get("lines", []),
             "bg": scene.get("bg"),
-            "bgm": scene.get("bgm"),
-            "bgm_volume": scene.get("bgm_volume"),
+            "bgm": scene.get("bgm"),  # bgm は辞書としてそのまま含める
+            # "bgm_volume": scene.get("bgm_volume"), # bgm_volume は bgm 辞書の中に移動したため削除
             "voice_config": self.config.get("voice", {}),
             "video_config": self.config.get("video", {}),
             "subtitle_config": self.config.get("subtitle", {}),
-            "bgm_config": self.config.get("bgm", {}),
+            "bgm_config": self.config.get(
+                "bgm", {}
+            ),  # グローバルBGM設定もそのまま含める
             "background_default": self.config.get("background", {}).get("default"),
         }
+
+        # デバッグログの追加
+        print(
+            f"  [DEBUG] _generate_scene_hash - scene_data before hashing: {scene_data}"
+        )
+        print(
+            f"  [DEBUG] _generate_scene_hash - Type of scene_data: {type(scene_data)}"
+        )
+
         return self._generate_hash(scene_data)
 
     def run(self, output_path: str, keep_intermediate: bool = False):
@@ -229,12 +249,14 @@ class GenerationPipeline:
                         "drawtext_filter": drawtext_filter,
                         "bg_image_path": bg_image,  # オリジナルのbg_image_pathをキャッシュキーに含める
                         "is_bg_video": is_bg_video,
-                        "bgm_path": bgm_path,
-                        "bgm_volume": bgm_volume,
+                        # "bgm_path": bgm_path, # BGMはrender_clipでは処理しないため、キャッシュキーから削除
+                        # "bgm_volume": bgm_volume, # BGMはrender_clipでは処理しないため、キャッシュキーから削除
                         "start_time": current_scene_time,  # start_timeもキャッシュキーに含める
                         "video_config": self.config.get("video", {}),
                         "subtitle_config": self.config.get("subtitle", {}),
-                        "bgm_config": self.config.get("bgm", {}),
+                        "bgm_config": self.config.get(
+                            "bgm", {}
+                        ),  # グローバルBGM設定もキャッシュキーに含める
                     }
                     video_cache_key = self._generate_hash(video_cache_data)
                     cached_clip_path = self.cache_dir / f"{video_cache_key}.mp4"
@@ -253,8 +275,6 @@ class GenerationPipeline:
                                 str(scene_bg_video_path) if is_bg_video else bg_image
                             ),  # シーン背景動画を使用
                             line_id,
-                            bgm_path=bgm_path,
-                            bgm_volume=bgm_volume,
                             is_bg_video=is_bg_video,
                             start_time=current_scene_time,  # シーン内での開始時間を渡す
                         )
@@ -272,7 +292,9 @@ class GenerationPipeline:
                 # シーン内のクリップを結合してシーン動画を生成
                 if scene_line_clips:
                     scene_output_path = temp_dir / f"scene_output_{scene_id}.mp4"
-                    video_renderer.concat_clips(scene_line_clips, scene_output_path)
+                    video_renderer.concat_clips(
+                        scene_line_clips, str(scene_output_path)
+                    )
                     print(
                         f"    [Scene] Concatenated scene clips -> {scene_output_path.name}"
                     )
@@ -292,9 +314,102 @@ class GenerationPipeline:
                         f"    [Video] Cleaned up temporary scene background video -> {scene_bg_video_path.name}"
                     )
 
-            print("\n--- Concatenating all final scene clips ---")
-            # 5. Concatenate all final scene clips
-            video_renderer.concat_clips(all_clips, output_path)
+            print(
+                "\n--- Phase 3: Applying BGM to scenes and preparing for final concat ---"
+            )
+            final_clips_for_concat: List[Path] = []
+            for scene_idx, scene in enumerate(scenes):  # scenes をループ
+                # all_clips から対応するシーンのクリップパスを取得
+                # all_clips はフェーズ2で結合されたシーン動画のリスト
+                # all_clips のインデックスと scenes のインデックスは一致するはず
+
+                # デバッグログの追加
+                print(f"  [DEBUG] Processing scene_idx: {scene_idx}")
+                print(f"  [DEBUG] Type of scene: {type(scene)}, Value: {scene}")
+
+                if scene_idx >= len(all_clips):
+                    print(
+                        f"  [ERROR] scene_idx {scene_idx} is out of bounds for all_clips (length {len(all_clips)})"
+                    )
+                    raise IndexError(
+                        "Scene index out of bounds for all_clips. This indicates a mismatch between scenes and generated clips."
+                    )
+
+                scene_clip_path = all_clips[scene_idx]
+                print(
+                    f"  [DEBUG] Type of scene_clip_path: {type(scene_clip_path)}, Value: {scene_clip_path}"
+                )
+
+                scene_bgm_config = scene.get("bgm", {})
+
+                bgm_path = scene_bgm_config.get("path")
+                bgm_volume = scene_bgm_config.get(
+                    "volume", self.config.get("bgm", {}).get("volume", 0.5)
+                )
+                bgm_start_time = scene_bgm_config.get(
+                    "start_time", self.config.get("bgm", {}).get("start_time", 0.0)
+                )
+                fade_in_duration = scene_bgm_config.get(
+                    "fade_in_duration",
+                    self.config.get("bgm", {}).get("fade_in_duration", 0.0),
+                )
+                fade_out_duration = scene_bgm_config.get(
+                    "fade_out_duration",
+                    self.config.get("bgm", {}).get("fade_out_duration", 0.0),
+                )
+
+                if bgm_path:
+                    print(
+                        f"  Applying BGM to scene {scene_idx + 1} ('{scene['id']}') with '{bgm_path}'"
+                    )
+                    scene_output_with_bgm_path = (
+                        temp_dir / f"scene_with_bgm_{scene_idx}.mp4"
+                    )
+                    add_bgm_to_video(
+                        video_path=str(scene_clip_path),
+                        bgm_path=bgm_path,
+                        output_path=str(scene_output_with_bgm_path),
+                        bgm_volume=bgm_volume,
+                        bgm_start_time=bgm_start_time,
+                        fade_in_duration=fade_in_duration,
+                        fade_out_duration=fade_out_duration,
+                        video_duration=get_audio_duration(
+                            str(scene_clip_path)
+                        ),  # シーン動画の長さを取得
+                    )
+                    final_clips_for_concat.append(scene_output_with_bgm_path)
+                else:
+                    final_clips_for_concat.append(scene_clip_path)
+
+            print("\n--- Phase 4: Final Concatenation and Global BGM Application ---")
+            final_output_path_temp = temp_dir / "final_video_no_global_bgm.mp4"
+            video_renderer.concat_clips(
+                final_clips_for_concat, str(final_output_path_temp)
+            )
+
+            global_bgm_config = self.config.get("bgm", {})
+            global_bgm_path = global_bgm_config.get("path")
+            global_bgm_volume = global_bgm_config.get("volume", 0.5)
+            global_bgm_start_time = global_bgm_config.get("start_time", 0.0)
+            global_fade_in_duration = global_bgm_config.get("fade_in_duration", 0.0)
+            global_fade_out_duration = global_bgm_config.get("fade_out_duration", 0.0)
+
+            if global_bgm_path:
+                print(f"  Applying global BGM with '{global_bgm_path}' to final video.")
+                add_bgm_to_video(
+                    video_path=str(final_output_path_temp),
+                    bgm_path=global_bgm_path,
+                    output_path=str(Path(output_path)),  # 最終出力パスに保存
+                    bgm_volume=global_bgm_volume,
+                    bgm_start_time=global_bgm_start_time,
+                    fade_in_duration=global_fade_in_duration,
+                    fade_out_duration=global_fade_out_duration,
+                    video_duration=get_audio_duration(str(final_output_path_temp)),
+                )
+            else:
+                # グローバルBGMがない場合、一時的な最終動画を最終出力パスにコピー
+                shutil.copy(final_output_path_temp, Path(output_path))
+
             print("--- Video Generation Pipeline Completed ---")
 
             if keep_intermediate:
