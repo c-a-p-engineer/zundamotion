@@ -65,7 +65,7 @@ scenes:
             expression: "normal" # voice_style: normal を expression: normal に変更
             position: {"x": "0", "y": "0"} # アンカーポイントからのオフセット (ピクセル単位)
             scale: 0.8
-            anchor: "top_left"
+            anchor: "middle_center"
             visible: true
       - text: "趣味は新しいツールを試すこと！"
         speaker_id: 6 # メタンのスピーカーID
@@ -104,6 +104,24 @@ scenes:
             expression: "normal" # expression を normal に設定
             position: {"x": "300", "y": "500"}
             visible: true
+      - text: "（画像を右下に小さく表示するのだ）"
+        speaker_id: 3
+        speaker_name: "zundamon"
+        insert:
+          path: "assets/bg/room.png"
+          duration: 3.0
+          scale: 0.3
+          anchor: "bottom_right"
+          position: {"x": "-20", "y": "-20"}
+      - text: "（動画を再生するのだ！）"
+        speaker_id: 3
+        speaker_name: "zundamon"
+        insert:
+          path: "assets/bg/countdown.mp4"
+          scale: 0.8
+          anchor: "middle_center"
+          position: {"x": "20", "y": "20"}
+          volume: 0.2
       - text: "チャンネル登録と高評価、よろしくお願いします！"
         speaker_id: 3 # ずんだもんのスピーカーID
         speaker_name: "zundamon" # 話しているキャラクターの名前

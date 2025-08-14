@@ -163,7 +163,22 @@ class GenerationPipeline:
                                 f"Generated and cached audio -> {audio_path.name}"
                             )
 
-                        duration = get_audio_duration(str(audio_path))
+                        insert_config = line.get("insert")
+                        duration = 0.0
+                        if insert_config:
+                            insert_path = Path(insert_config["path"])
+                            if insert_path.suffix.lower() in self.video_extensions:
+                                # 挿入メディアが動画の場合、その動画の長さをdurationとする
+                                duration = get_audio_duration(str(insert_path))
+                            else:
+                                # 挿入メディアが画像の場合、指定されたdurationを使用
+                                duration = insert_config.get(
+                                    "duration", 2.0
+                                )  # デフォルト2秒
+                        else:
+                            # 通常のセリフの場合、音声の長さをdurationとする
+                            duration = get_audio_duration(str(audio_path))
+
                         line_data_map[line_id] = {
                             "audio_path": audio_path,
                             "duration": duration,
@@ -269,6 +284,7 @@ class GenerationPipeline:
                             "bgm_config": self.config.get(
                                 "bgm", {}
                             ),  # グローバルBGM設定もキャッシュキーに含める
+                            "insert_config": line_config.get("insert"),
                         }
                         video_cache_key = self._generate_hash(video_cache_data)
                         cached_clip_path = (
@@ -292,6 +308,7 @@ class GenerationPipeline:
                                 "start_time": current_scene_time,
                             }
                             characters_config = line.get("characters", [])
+                            insert_config = line_config.get("insert")
 
                             clip_path = video_renderer.render_clip(
                                 audio_path,
@@ -300,6 +317,7 @@ class GenerationPipeline:
                                 background_config,
                                 characters_config,
                                 line_id,
+                                insert_config=insert_config,
                             )
                             if clip_path is None:
                                 logger.error(

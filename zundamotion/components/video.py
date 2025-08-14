@@ -21,6 +21,7 @@ from ..utils.ffmpeg_utils import (
     calculate_overlay_position,
     get_ffmpeg_version,
     get_hardware_encoder,
+    has_audio_stream,
 )
 
 
@@ -63,56 +64,68 @@ class VideoRenderer:
         background_config: Dict[str, Any],
         characters_config: List[Dict[str, Any]],
         output_filename: str,
+        insert_config: Optional[Dict[str, Any]] = None,
     ) -> Optional[Path]:
-        """
-        Renders a single video clip with background and multiple characters.
-
-        Args:
-            audio_path (Path): Path to the audio file.
-            duration (float): Duration of the clip.
-            drawtext_filter (Dict[str, Any]): Subtitle filter options.
-            background_config (Dict[str, Any]): Configuration for the background.
-                Expected keys: 'type' ('image' or 'video'), 'path', 'start_time' (if type is 'video').
-            characters_config (List[Dict[str, Any]]): List of character configurations.
-                Each dict should contain: 'name', 'expression', 'position' (dict with 'x', 'y'), 'visible'.
-            output_filename (str): Base name for the output file.
-
-        Returns:
-            Path: Path to the rendered mp4 clip.
-        """
         output_path = self.temp_dir / f"{output_filename}.mp4"
-        # Delete temporary directory if it exists
-        temp_dir_path = Path("/tmp/tmp0uy2ckjk/")
-        if temp_dir_path.exists():
-            import shutil
-
-            shutil.rmtree(temp_dir_path)
         width = self.video_config.get("width", 1280)
         height = self.video_config.get("height", 720)
         fps = self.video_config.get("fps", 30)
 
         print(f"[Video] Rendering clip -> {output_path.name}")
 
-        # --- Background Processing ---
-        bg_type = background_config.get("type", "image")
+        cmd = ["ffmpeg", "-y"]
+        if self.num_jobs > 0:
+            cmd.extend(["-threads", str(self.num_jobs)])
+
+        # --- Input Configuration ---
+        input_layers = []
+        # 1. Background
         bg_path = background_config.get("path")
-        bg_start_time = background_config.get("start_time", 0.0)
-        is_bg_video = bg_type == "video"
-
         if not bg_path:
-            raise ValueError("Background path is missing in background_config.")
+            raise ValueError("Background path is missing.")
+        if background_config.get("type") == "video":
+            cmd.extend(
+                [
+                    "-ss",
+                    str(background_config.get("start_time", 0.0)),
+                    "-i",
+                    str(bg_path),
+                ]
+            )
+        else:
+            cmd.extend(["-loop", "1", "-i", str(bg_path)])
+        input_layers.append({"type": "video", "index": len(input_layers)})
 
-        # --- Character Image Path Resolution ---
-        # This part assumes a structure like assets/characters/{name}/{expression}.png
-        # It also needs to handle cases where an expression might not be found and fall back to default.
-        resolved_character_images = []
-        # Get default character settings from config
-        default_char_scale = self.config.get("characters", {}).get("default_scale", 1.0)
-        default_char_anchor = self.config.get("characters", {}).get(
-            "default_anchor", "bottom_center"
-        )
+        # 2. Main Audio (from speech)
+        cmd.extend(["-i", str(audio_path)])
+        speech_audio_index = len(input_layers)
+        input_layers.append({"type": "audio", "index": speech_audio_index})
 
-        for char_config in characters_config:
+        # 3. Insert Media (if any)
+        insert_ffmpeg_index = -1
+        insert_audio_index = -1
+        if insert_config:
+            insert_path = Path(insert_config["path"])
+            is_video = insert_path.suffix.lower() not in [
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".bmp",
+            ]
+            if is_video:
+                cmd.extend(["-i", str(insert_path)])
+            else:
+                cmd.extend(["-loop", "1", "-i", str(insert_path)])
+            insert_ffmpeg_index = len(input_layers)
+            input_layers.append({"type": "video", "index": insert_ffmpeg_index})
+            if is_video and has_audio_stream(str(insert_path)):
+                insert_audio_index = (
+                    insert_ffmpeg_index  # Video and audio are in the same input
+                )
+
+        # 4. Character Images
+        character_indices = {}
+        for i, char_config in enumerate(characters_config):
             if char_config.get("visible", False):
                 char_name = char_config.get("name")
                 char_expression = char_config.get(
@@ -122,12 +135,19 @@ class VideoRenderer:
                     "position", {"x": "0", "y": "0"}
                 )  # Default position
                 # Get scale and anchor for this specific character, falling back to defaults
-                char_scale = char_config.get("scale", default_char_scale)
-                char_anchor = char_config.get("anchor", default_char_anchor)
+                char_scale = char_config.get(
+                    "scale", self.config.get("characters", {}).get("default_scale", 1.0)
+                )
+                char_anchor = char_config.get(
+                    "anchor",
+                    self.config.get("characters", {}).get(
+                        "default_anchor", "bottom_center"
+                    ),
+                )
 
                 if not char_name:
                     print(f"[Warning] Skipping character with missing name.")
-                    return None
+                    continue
 
                 # Construct the expected image path
                 # This logic might need to be more robust, e.g., checking for existence and falling back
@@ -143,151 +163,102 @@ class VideoRenderer:
                         )
                         continue
 
-                resolved_character_images.append(
-                    {
-                        "path": str(
-                            char_image_path.resolve()
-                        ),  # Use absolute path for FFmpeg
-                        "position": char_position,
-                        "name": char_name,
-                        "expression": char_expression,
-                        "scale": char_scale,
-                        "anchor": char_anchor,
-                    }
-                )
-            else:
-                print(f"Skipping invisible character: {char_config.get('name')}")
+                character_indices[i] = len(input_layers)
+                cmd.extend(["-loop", "1", "-i", str(char_image_path.resolve())])
+                input_layers.append({"type": "video", "index": len(input_layers)})
 
-        # --- FFmpeg Filter Graph Construction ---
-        cmd = ["ffmpeg", "-y"]
-        if self.num_jobs > 0:
-            cmd.extend(["-threads", str(self.num_jobs)])
-
-        input_streams = []
+        # --- Filter Graph Construction ---
         filter_complex_parts = []
-        current_input_index = 0  # Use a single counter for all inputs
+        last_video_stream = f"[0:v]scale={width}:{height}[bg_scaled]"
+        filter_complex_parts.append(last_video_stream)
+        last_video_stream = "[bg_scaled]"
 
-        # 1. Background Input
-        bg_ffmpeg_input_index = current_input_index
-        if is_bg_video:
-            cmd.extend(["-ss", str(bg_start_time)])
-            cmd.extend(["-stream_loop", "-1", "-i", bg_path])
-            # Explicitly set duration for background video input to match audio duration
-            cmd.extend(["-t", str(duration)])
-        else:
-            cmd.extend(["-loop", "1", "-i", bg_path])
-        input_streams.append(f"[{bg_ffmpeg_input_index}:v]")
-        current_input_index += 1
-
-        # 2. Audio Input
-        audio_ffmpeg_input_index = current_input_index
-        cmd.extend(["-i", str(audio_path)])
-        current_input_index += 1
-
-        # 3. Character Inputs
-        character_ffmpeg_input_indices = (
-            {}
-        )  # Map character config index to ffmpeg input index
-        for i, char_data in enumerate(resolved_character_images):
-            char_ffmpeg_input_index = current_input_index
-            cmd.extend(["-loop", "1", "-framerate", str(fps), "-i", char_data["path"]])
-            character_ffmpeg_input_indices[i] = char_ffmpeg_input_index
-            input_streams.append(f"[{char_ffmpeg_input_index}:v]")
-            current_input_index += 1
-
-        # Build the filter_complex string
-        # Start with background scaling
-        # Use bg_ffmpeg_input_index for background video stream
-        bg_filter_chain = (
-            f"[{bg_ffmpeg_input_index}:v]scale={width}:{height}[bg_scaled]"
-        )
-        filter_complex_parts.append(bg_filter_chain)
-        last_chain_name = "[bg_scaled]"
-
-        # Character Overlays
-        for i, char_data in enumerate(resolved_character_images):
-            char_ffmpeg_input_index = character_ffmpeg_input_indices[
-                i
-            ]  # Use the correct ffmpeg input index for character
-
-            scale = char_data["scale"]
-            anchor = char_data["anchor"]
-            overlay_x = char_data["position"].get("x", "0")
-            overlay_y = char_data["position"].get("y", "0")
-
-            # Apply scale filter
-            scaled_fg_stream_name = f"scaled_fg{i}"
-            filter_complex_parts.append(
-                f"[{char_ffmpeg_input_index}:v]scale=iw*{scale}:ih*{scale}[{scaled_fg_stream_name}]"
-            )
-
-            # Format the scaled character image to rgba
-            formatted_fg_stream_name = f"fg{i}"
-            filter_complex_parts.append(
-                f"[{scaled_fg_stream_name}]format=rgba[{formatted_fg_stream_name}]"
-            )
-
-            # Calculate overlay position using the new helper function
+        # Overlay Insert Media
+        if insert_config and insert_ffmpeg_index != -1:
+            scale = insert_config.get("scale", 1.0)
+            anchor = insert_config.get("anchor", "middle_center")
+            pos = insert_config.get("position", {"x": "0", "y": "0"})
             x_expr, y_expr = calculate_overlay_position(
-                bg_width_expr="W",
-                bg_height_expr="H",
-                fg_width_expr="w",  # 'w' and 'h' in overlay filter refer to the foreground's dimensions
-                fg_height_expr="h",
-                anchor=anchor,
-                offset_x=str(overlay_x),
-                offset_y=str(overlay_y),
+                "W",
+                "H",
+                "w",
+                "h",
+                anchor,
+                str(pos.get("x", "0")),
+                str(pos.get("y", "0")),
             )
 
-            # Overlay the formatted character image onto the current video stream
-            new_chain_name = f"[char_overlay_{i}]"
             filter_complex_parts.append(
-                f"{last_chain_name}[{formatted_fg_stream_name}]overlay=x={x_expr}:y={y_expr}{new_chain_name}"
+                f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[insert_scaled]"
             )
-            last_chain_name = new_chain_name
+            filter_complex_parts.append(f"[insert_scaled]format=rgba[insert_rgba]")
+            filter_complex_parts.append(
+                f"{last_video_stream}[insert_rgba]overlay=x={x_expr}:y={y_expr}[with_insert]"
+            )
+            last_video_stream = "[with_insert]"
 
-        final_video_stream_name_before_drawtext = (
-            last_chain_name  # Output of the last overlay
-        )
+        # Overlay Characters
+        for i, char_config in enumerate(characters_config):
+            if char_config.get("visible", False) and i in character_indices:
+                ffmpeg_index = character_indices[i]
+                scale = char_config.get("scale", 1.0)
+                anchor = char_config.get("anchor", "bottom_center")
+                pos = char_config.get("position", {"x": "0", "y": "0"})
+                x_expr, y_expr = calculate_overlay_position(
+                    "W",
+                    "H",
+                    "w",
+                    "h",
+                    anchor,
+                    str(pos.get("x", "0")),
+                    str(pos.get("y", "0")),
+                )
 
-        # Add drawtext filter if present (after all overlays)
-        default_font_path = self.config.get("subtitle", {}).get("font_path")
-        if "fontfile" not in drawtext_filter and default_font_path:
-            drawtext_filter["fontfile"] = default_font_path
+                filter_complex_parts.append(
+                    f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[char_scaled_{i}]"
+                )
+                filter_complex_parts.append(
+                    f"[char_scaled_{i}]format=rgba[char_rgba_{i}]"
+                )
+                filter_complex_parts.append(
+                    f"{last_video_stream}[char_rgba_{i}]overlay=x={x_expr}:y={y_expr}[with_char_{i}]"
+                )
+                last_video_stream = f"[with_char_{i}]"
+
+        # Subtitles
         drawtext_str = _format_drawtext_filter(drawtext_filter)
-
         if drawtext_str:
-            # Apply drawtext to the final video stream after all character overlays
-            final_video_stream_name = "[final_output_with_text]"
             filter_complex_parts.append(
-                f"{final_video_stream_name_before_drawtext}drawtext={drawtext_str}{final_video_stream_name}"
+                f"{last_video_stream}drawtext={drawtext_str}[final_v]"
             )
+            last_video_stream = "[final_v]"
+
+        # --- Audio Mixing ---
+        # まずはセリフの音声を準備
+        if insert_config and insert_audio_index != -1:
+            volume = insert_config.get("volume", 1.0)
+            # 挿入動画の音量調整
+            filter_complex_parts.append(
+                f"[{insert_audio_index}:a]volume={volume}[insert_audio_vol]"
+            )
+            # 長い方を優先してミックス。終端のクリック回避に dropout_transition を指定
+            filter_complex_parts.append(
+                f"[1:a][insert_audio_vol]amix=inputs=2:duration=longest:dropout_transition=0[final_a]"
+            )
+            audio_map = "[final_a]"
         else:
-            final_video_stream_name = final_video_stream_name_before_drawtext  # If no drawtext, use the stream name before drawtext
+            filter_complex_parts.append(f"[1:a]anull[final_a]")
+            audio_map = "[final_a]"
 
-        # Map options
-        map_options = []
-        map_options.append("-map")
-        map_options.append(final_video_stream_name)  # Map the final video stream
-        map_options.append("-map")
-        map_options.append(f"{audio_ffmpeg_input_index}:a")
-
-        # Add filter_complex to command
-        if filter_complex_parts:
-            cmd.extend(["-filter_complex", ";".join(filter_complex_parts)])
-
-        # Map options
-        cmd.extend(map_options)
-
-        # Add logging options for debugging
-        cmd.extend(["-loglevel", "level+info", "-stats"])
-
-        # Output options
-        video_codec = "libx264"
-
+        # --- Final Command Assembly ---
+        cmd.extend(["-filter_complex", ";".join(filter_complex_parts)])
+        cmd.extend(["-map", last_video_stream, "-map", audio_map])
         cmd.extend(
             [
+                "-t",
+                str(duration),
                 "-c:v",
-                video_codec,
+                "libx264",
                 "-pix_fmt",
                 "yuv420p",
                 "-c:a",
@@ -296,47 +267,23 @@ class VideoRenderer:
                 "192k",
                 "-r",
                 str(fps),
-                "-shortest",  # Add -shortest to ensure output duration matches shortest input (audio)
+                "-shortest",
                 str(output_path),
             ]
         )
 
-        result = None
         try:
-            print(f"Executing FFmpeg command: {' '.join(cmd)}")  # Debugging
-            result = subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            print(f"Executing FFmpeg command: {' '.join(cmd)}")
+            process = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            print(process.stderr)
         except subprocess.CalledProcessError as e:
-            print(
-                f"Error during ffmpeg processing for {output_filename} with {video_codec}:"
-            )
+            print(f"Error during ffmpeg processing for {output_filename}:")
             print(f"STDOUT: {e.stdout}")
             print(f"STDERR: {e.stderr}")
-
-            if self.hw_encoder and video_codec != "libx264":
-                print(
-                    f"Hardware encoding failed. Falling back to libx264 for {output_filename}."
-                )
-                # Find and replace the video codec in the command
-                try:
-                    codec_index = cmd.index("-c:v")
-                    cmd[codec_index + 1] = "libx264"
-                    result = subprocess.run(
-                        cmd,
-                        check=True,
-                        stdout=subprocess.PIPE,
-                        text=True,
-                        stderr=subprocess.PIPE,
-                    )
-                except Exception as fallback_e:
-                    print(f"Error during fallback ffmpeg processing: {fallback_e}")
-                    raise
-            else:
-                raise
+            raise
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            raise
 
         return output_path
 
@@ -387,8 +334,7 @@ class VideoRenderer:
         if self.hw_encoder == "nvenc":
             video_codec = "h264_nvenc"
         elif self.hw_encoder == "vaapi":
-            video_codec = "h264_vaapi"
-            # TODO: VAAPIの複雑なフィルターグラフ対応を検討
+            video_codec = "h264_videotoolbox"
         elif self.hw_encoder == "videotoolbox":
             video_codec = "h264_videotoolbox"
 
@@ -427,8 +373,8 @@ class VideoRenderer:
                         f"Error during ffmpeg processing with libx264 for looped background video {output_filename}:"
                     )
                     print(f"STDOUT: {fallback_e.stdout}")
-                    print(f"STDERR: {fallback_e.stderr}")
-                    raise  # フォールバックも失敗した場合はエラーを再スロー
+                    print(f"STDERR: {e.stderr}")
+                    raise  # ハードウェアエンコーダーが指定されていないか、libx264で失敗した場合はそのままエラーを再スロー
             else:
                 raise  # ハードウェアエンコーダーが指定されていないか、libx264で失敗した場合はそのままエラーを再スロー
 
@@ -489,10 +435,10 @@ class VideoRenderer:
             print(f"Executing FFmpeg command: {' '.join(cmd)}")
             subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            print(f"Error during ffmpeg concatenation with concat filter:")
-            print(f"FFMPEG Command: {' '.join(cmd)}")
+            print(f"Error during ffmpeg processing for {output_filename}:")
             print(f"STDOUT: {e.stdout}")
             print(f"STDERR: {e.stderr}")
             raise
-
-        print(f"[Success] Final video saved to {output_path}")
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            raise
