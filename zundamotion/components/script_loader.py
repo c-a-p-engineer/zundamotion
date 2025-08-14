@@ -133,10 +133,44 @@ def _validate_config(config: Dict[str, Any]):
                 raise ValidationError(
                     f"Line at scene '{scene_id}', index {line_idx} must be a dictionary."
                 )
-            if "text" not in line:
+
+            # 'text' or 'wait' key must exist
+            if "text" not in line and "wait" not in line:
                 raise ValidationError(
-                    f"Line at scene '{scene_id}', index {line_idx} must contain 'text'."
+                    f"Line at scene '{scene_id}', index {line_idx} must contain 'text' or 'wait'."
                 )
+
+            if "text" in line and "wait" in line:
+                raise ValidationError(
+                    f"Line at scene '{scene_id}', index {line_idx} cannot contain both 'text' and 'wait'."
+                )
+
+            if "wait" in line:
+                wait_value = line["wait"]
+                if isinstance(wait_value, (int, float)):
+                    if wait_value <= 0:
+                        raise ValidationError(
+                            f"Wait duration for scene '{scene_id}', line {line_idx} must be positive, but got {wait_value}."
+                        )
+                elif isinstance(wait_value, dict):
+                    duration = wait_value.get("duration")
+                    if duration is None:
+                        raise ValidationError(
+                            f"Wait dictionary for scene '{scene_id}', line {line_idx} must contain 'duration'."
+                        )
+                    if not isinstance(duration, (int, float)):
+                        raise ValidationError(
+                            f"Wait duration for scene '{scene_id}', line {line_idx} must be a number, but got {type(duration).__name__}."
+                        )
+                    if duration <= 0:
+                        raise ValidationError(
+                            f"Wait duration for scene '{scene_id}', line {line_idx} must be positive, but got {duration}."
+                        )
+                else:
+                    raise ValidationError(
+                        f"Wait value for scene '{scene_id}', line {line_idx} must be a number or a dictionary."
+                    )
+                continue  # Skip other validations for wait steps
 
             # Validate speed range
             speed = line.get("speed")

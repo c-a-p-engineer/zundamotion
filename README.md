@@ -28,6 +28,22 @@ Zundamotionは、VOICEVOXによる高品質な音声合成とFFmpegを用いた�
     - `bottom_center`: 画像の底辺中央を基準点とします（デフォルト）。
     - `bottom_right`: 画像の右下を基準点とします。
   - `position`: `x`, `y` 座標は、指定された `anchor` からのオフセットとして機能します。例えば、`anchor: bottom_center` で `position: {x: 0, y: 0}` の場合、キャラクターの底辺中央が背景の底辺中央に配置されます。`position: {x: 100, y: -50}` の場合、底辺中央から右に100ピクセル、上に50ピクセル移動します。
+
+以下は、台本ファイルでのキャラクター設定の記述例です。
+
+```yaml
+lines:
+  - text: "これから自己紹介の動画をはじめるのだ。"
+    speaker_name: "zundamon"
+    characters: # キャラクター設定リスト
+      - name: "zundamon"
+        expression: "whisper"
+        position: {"x": "0", "y": "0"}
+        scale: 0.8
+        anchor: "bottom_center"
+        visible: true
+```
+
 - **DevContainer対応**: VSCode DevContainerをサポートしており、どこでも一貫した開発環境を簡単に構築できます。
 
 ---
@@ -88,24 +104,15 @@ bgm:
 
 ```yaml
 scenes:
-  - id: intro_scene
-    bg: "assets/bg/intro_bg.mp4"
-    bgm:
-      path: "assets/bgm/intro_music.wav" # このシーンのBGMファイルパス
-      volume: 0.5                       # このシーンのBGM音量
-      start_time: 2.0                   # このシーンのBGM開始時間
-      fade_in_duration: 3.0             # このシーンのフェードイン時間
-      fade_out_duration: 2.5            # このシーンのフェードアウト時間
+  - id: intro
+    bg: "assets/bg/sample_video.mp4"    # シーン背景 (動画ファイル)
+    bgm:                                # BGM設定
+      path: "assets/bgm/intro.wav"      # BGMファイルパス
+      volume: 0.1                       # BGM音量 (0.0-1.0, オプション)
+      fade_in_duration: 2.0             # フェードインの長さ (秒, オプション)
+      fade_out_duration: 1.5            # フェードアウトの長さ (秒, オプション)
     lines:
-      - text: "これはイントロシーンです。"
-
-  - id: main_content_scene
-    bg: "assets/bg/main_bg.png"
-    bgm:
-      path: "assets/bgm/main_music.wav"
-      volume: 0.4
-    lines:
-      - text: "メインコンテンツが始まります。"
+      - text: "こんにちは！ずんだもんです。"
 ```
 
 - `path`: BGMファイルのパス。
@@ -122,26 +129,57 @@ scenes:
 
 ```yaml
 lines:
-  - text: "これはセリフです。"
+  - text: "こんにちは！ずんだもんです。"
     speaker_id: 3
-    sound_effects:
-      - path: "assets/se/rap_fanfare.mp3" # 効果音ファイルのパス
-        start_time: 0.0                   # セリフ開始からの相対的な開始時間 (秒, デフォルト: 0.0)
-        volume: 0.7                       # 効果音の音量 (0.0-1.0, デフォルト: 1.0)
-      - path: "assets/se/another_sound.wav"
-        start_time: 1.5                   # セリフ開始から1.5秒後に再生
+    sound_effects: # セリフと同時に再生する効果音
+      - path: "assets/se/rap_fanfare.mp3"
+        start_time: 3.0 # セリフ開始から3.0秒後に再生
         volume: 0.5
 
   - text: "" # セリフなしで効果音のみを再生する場合
     sound_effects:
       - path: "assets/se/rap_fanfare.mp3"
         start_time: 0.0 # このlineが開始されると同時に再生
-        volume: 0.8
+        volume: 0.7
 ```
 
 - `path`: 効果音ファイルのパス。
 - `start_time`: 効果音がセリフの開始から何秒後に再生を開始するかを指定します。デフォルトは `0.0` で、セリフと同時に再生されます。
 - `volume`: 効果音の音量（0.0から1.0の範囲）。デフォルトは `1.0` です。
+
+---
+
+## 🎬 画像・動画の挿入
+
+セリフ中に、指定した画像や動画を画面に挿入することができます。これにより、参考資料を提示したり、視覚的なエフェクトを追加したりすることが可能です。
+
+```yaml
+lines:
+  - text: "（画像を右下に小さく表示するのだ）"
+    speaker_id: 3
+    insert:
+      path: "assets/bg/room.png"      # 挿入する画像・動画のパス
+      duration: 3.0                   # 表示時間 (秒, 画像の場合のみ有効)
+      scale: 0.3                      # 拡大縮小率 (オプション)
+      anchor: "bottom_right"          # アンカーポイント (オプション)
+      position: {"x": "-20", "y": "-20"} # 位置オフセット (オプション)
+
+  - text: "（動画を再生するのだ！）"
+    speaker_id: 3
+    insert:
+      path: "assets/bg/countdown.mp4" # 挿入する動画
+      scale: 0.8
+      anchor: "middle_center"
+      position: {"x": "20", "y": "20"}
+      volume: 0.2                     # 挿入動画の音量 (オプション)
+```
+
+- `path`: 挿入する画像または動画ファイルのパス。
+- `duration`: 画像を表示する時間（秒）。動画の場合は無視されます。
+- `scale`: 画像・動画の拡大縮小率。
+- `anchor`: 配置の基準点。キャラクター配置と同様のアンカーポイントが利用可能です。
+- `position`: アンカーポイントからの相対的な位置オフセット（x, y座標）。
+- `volume`: 挿入する動画の音量（0.0から1.0の範囲）。画像の場合は無視されます。
 
 ---
 

@@ -125,7 +125,7 @@ class GenerationPipeline:
             total_scenes = len(scenes)
 
             # --- フェーズ1: 全ての音声生成とdurationの計算 ---
-            # line_id -> {audio_path, duration, text, line_config}
+            # line_id -> {type, audio_path, duration, text, line_config}
             line_data_map: Dict[str, Dict[str, Any]] = {}
 
             logger.info(
@@ -136,6 +136,28 @@ class GenerationPipeline:
                     scene_id = scene["id"]
                     for idx, line in enumerate(scene.get("lines", []), start=1):
                         line_id = f"{scene_id}_{idx}"
+
+                        if "wait" in line:
+                            pbar.set_description(
+                                f"Calculating Wait Step (Scene '{scene_id}', Line {idx})"
+                            )
+                            wait_value = line["wait"]
+                            if isinstance(wait_value, dict):
+                                duration = wait_value.get("duration")
+                            else:
+                                duration = wait_value
+
+                            line_data_map[line_id] = {
+                                "type": "wait",
+                                "duration": duration,
+                                "line_config": line,
+                                "audio_path": None,
+                                "text": None,
+                            }
+                            pbar.update(1)
+                            continue
+
+                        # --- 通常のセリフ行の処理 ---
                         text = line["text"]
 
                         pbar.set_description(
@@ -180,6 +202,7 @@ class GenerationPipeline:
                             duration = get_audio_duration(str(audio_path))
 
                         line_data_map[line_id] = {
+                            "type": "talk",
                             "audio_path": audio_path,
                             "duration": duration,
                             "text": text,
@@ -249,11 +272,65 @@ class GenerationPipeline:
                     current_scene_time = 0.0  # シーン内での現在の時間
                     for idx, line in enumerate(scene.get("lines", []), start=1):
                         line_id = f"{scene_id}_{idx}"
-                        text = line_data_map[line_id]["text"]
-                        audio_path = line_data_map[line_id]["audio_path"]
-                        duration = line_data_map[line_id]["duration"]
-                        line_config = line_data_map[line_id]["line_config"]
+                        line_data = line_data_map[line_id]
+                        duration = line_data["duration"]
+                        line_config = line_data["line_config"]
 
+                        background_config = {
+                            "type": "video" if is_bg_video else "image",
+                            "path": (
+                                str(scene_bg_video_path) if is_bg_video else bg_image
+                            ),
+                            "start_time": current_scene_time,
+                        }
+
+                        # --- Wait Step ---
+                        if line_data["type"] == "wait":
+                            logger.debug(
+                                f"Rendering wait clip for {duration}s (Scene '{scene_id}', Line {idx})"
+                            )
+                            # Waitクリップのキャッシュキー生成
+                            wait_cache_data = {
+                                "type": "wait",
+                                "duration": duration,
+                                "bg_image_path": bg_image,
+                                "is_bg_video": is_bg_video,
+                                "start_time": current_scene_time,
+                                "video_config": self.config.get("video", {}),
+                                "line_config": line_config,
+                            }
+                            wait_cache_key = self._generate_hash(wait_cache_data)
+                            cached_clip_path = (
+                                self.cache_dir / f"{line_id}_{wait_cache_key}.mp4"
+                            )
+
+                            clip_path: Optional[Path] = None
+                            if not self.no_cache and cached_clip_path.exists():
+                                clip_path = cached_clip_path
+                                logger.debug(
+                                    f"Using cached wait clip -> {clip_path.name}"
+                                )
+                            else:
+                                clip_path = video_renderer.render_wait_clip(
+                                    duration,
+                                    background_config,
+                                    line_id,
+                                    line_config,
+                                )
+                                if clip_path and not self.no_cache:
+                                    shutil.copy(clip_path, cached_clip_path)
+                                    logger.debug(
+                                        f"Generated and cached wait clip -> {clip_path.name}"
+                                    )
+
+                            if clip_path:
+                                scene_line_clips.append(clip_path)
+                            current_scene_time += duration
+                            continue
+
+                        # --- Talk Step ---
+                        text = line_data["text"]
+                        audio_path = line_data["audio_path"]
                         logger.debug(
                             f"Rendering clip for line '{text[:30]}...' (Scene '{scene_id}', Line {idx})"
                         )
@@ -265,6 +342,7 @@ class GenerationPipeline:
 
                         # ビデオクリップのキャッシュキー生成
                         video_cache_data = {
+                            "type": "talk",
                             "audio_cache_key": self._generate_hash(
                                 {
                                     "text": text,
@@ -276,8 +354,6 @@ class GenerationPipeline:
                             "drawtext_filter": drawtext_filter,
                             "bg_image_path": bg_image,  # オリジナルのbg_image_pathをキャッシュキーに含める
                             "is_bg_video": is_bg_video,
-                            # "bgm_path": bgm_path, # BGMはrender_clipでは処理しないため、キャッシュキーから削除
-                            # "bgm_volume": bgm_volume, # BGMはrender_clipでは処理しないため、キャッシュキーから削除
                             "start_time": current_scene_time,  # start_timeもキャッシュキーに含める
                             "video_config": self.config.get("video", {}),
                             "subtitle_config": self.config.get("subtitle", {}),
@@ -298,15 +374,6 @@ class GenerationPipeline:
                             logger.debug(f"Using cached clip -> {clip_path.name}")
                         else:
                             logger.debug("Rendering clip...")
-                            background_config = {
-                                "type": "video" if is_bg_video else "image",
-                                "path": (
-                                    str(scene_bg_video_path)
-                                    if is_bg_video
-                                    else bg_image
-                                ),
-                                "start_time": current_scene_time,
-                            }
                             characters_config = line.get("characters", [])
                             insert_config = line_config.get("insert")
 

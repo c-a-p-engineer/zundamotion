@@ -14,6 +14,7 @@ scenes:
       fade_in_duration: 2.0             # フェードインの長さ (秒, オプション)
       fade_out_duration: 1.5            # フェードアウトの長さ (秒, オプション)
     lines:
+      - wait: 2
       - text: "こんにちは！ずんだもんです。" # セリフテキスト (必須)
         speaker_id: 3 # 明示的にVOICEVOX ID 3 を指定
         speaker_name: "zundamon" # 話しているキャラクターの名前
@@ -22,6 +23,7 @@ scenes:
             start_time: 3.0 # セリフ開始と同時に再生
             volume: 0.5
 
+      - wait: 2
       - text: "" # 音単体で再生する効果音
         sound_effects:
           - path: "assets/se/rap_fanfare.mp3"
@@ -57,6 +59,7 @@ scenes:
       path: "assets/bgm/street.wav"     # BGMファイルパス
       volume: 0.2                       # BGM音量 (0.0-1.0, オプション)
     lines:
+      - wait: 2
       - text: "私はメタンよ" # セリフテキスト (必須)
         speaker_id: 6 # 明示的にVOICEVOX ID 6 を指定
         speaker_name: "metan" # 話しているキャラクターの名前
@@ -96,6 +99,7 @@ scenes:
       volume: 0.3                       # BGM音量 (0.0-1.0, オプション)
       start_time: 1.0                   # BGMの開始時間 (秒, オプション)
     lines:
+      - wait: 2
       - text: "今日は見てくれて、ありがとうなのだ！" # セリフテキスト (必須)
         speaker_id: 3 # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
         speaker_name: "zundamon" # 話しているキャラクターの名前

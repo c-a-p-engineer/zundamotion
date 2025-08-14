@@ -287,6 +287,92 @@ class VideoRenderer:
 
         return output_path
 
+    def render_wait_clip(
+        self,
+        duration: float,
+        background_config: Dict[str, Any],
+        output_filename: str,
+        line_config: Dict[str, Any],
+    ) -> Optional[Path]:
+        output_path = self.temp_dir / f"{output_filename}.mp4"
+        width = self.video_config.get("width", 1280)
+        height = self.video_config.get("height", 720)
+        fps = self.video_config.get("fps", 30)
+
+        print(f"[Video] Rendering wait clip -> {output_path.name}")
+
+        cmd = ["ffmpeg", "-y"]
+        if self.num_jobs > 0:
+            cmd.extend(["-threads", str(self.num_jobs)])
+
+        # --- Input Configuration ---
+        # 1. Background
+        bg_path = background_config.get("path")
+        if not bg_path:
+            raise ValueError("Background path is missing.")
+        if background_config.get("type") == "video":
+            cmd.extend(
+                [
+                    "-ss",
+                    str(background_config.get("start_time", 0.0)),
+                    "-i",
+                    str(bg_path),
+                ]
+            )
+        else:
+            cmd.extend(["-loop", "1", "-i", str(bg_path)])
+
+        # 2. Silent Audio
+        cmd.extend(
+            ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+        )
+
+        # --- Filter Graph Construction ---
+        # P0: Just use the background as is.
+        # For P1 'freeze_video=false', this is the correct behavior.
+        # For P0 'freeze_video=true' (default), we should ideally hold the last frame.
+        # This is complex in the current pipeline. A simpler approach for now is to just show the static/looping background.
+        # A true freeze would require `tpad=stop_mode=clone:stop_duration={duration}` but needs a single frame input.
+        filter_complex = (
+            f"[0:v]scale={width}:{height},trim=duration={duration}[final_v]"
+        )
+
+        # --- Final Command Assembly ---
+        cmd.extend(["-filter_complex", filter_complex])
+        cmd.extend(["-map", "[final_v]", "-map", "1:a"])
+        cmd.extend(
+            [
+                "-t",
+                str(duration),
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-r",
+                str(fps),
+                str(output_path),
+            ]
+        )
+
+        try:
+            print(f"Executing FFmpeg command: {' '.join(cmd)}")
+            process = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            print(process.stderr)
+        except subprocess.CalledProcessError as e:
+            print(f"Error during ffmpeg processing for {output_filename}:")
+            print(f"STDOUT: {e.stdout}")
+            print(f"STDERR: {e.stderr}")
+            raise
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            raise
+
+        return output_path
+
     def render_looped_background_video(
         self, bg_video_path: str, duration: float, output_filename: str
     ) -> Path:
@@ -435,7 +521,7 @@ class VideoRenderer:
             print(f"Executing FFmpeg command: {' '.join(cmd)}")
             subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            print(f"Error during ffmpeg processing for {output_filename}:")
+            print(f"Error during ffmpeg processing for {output_path}:")
             print(f"STDOUT: {e.stdout}")
             print(f"STDERR: {e.stderr}")
             raise
