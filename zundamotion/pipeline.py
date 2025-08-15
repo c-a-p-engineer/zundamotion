@@ -63,7 +63,9 @@ class GenerationPipeline:
             final_clips_for_concat = bgm_phase.run(scenes, all_clips)
 
             finalize_phase = FinalizePhase(self.config, temp_dir, self.jobs)
-            finalize_phase.run(output_path, final_clips_for_concat)
+            finalize_phase.run(
+                output_path, scenes, final_clips_for_concat
+            )  # Pass scenes to FinalizePhase
 
             logger.info("--- Video Generation Pipeline Completed ---")
 

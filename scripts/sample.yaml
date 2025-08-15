@@ -52,6 +52,9 @@ scenes:
             anchor: "bottom_right"
             visible: true
         pitch: 0.3                      # 音声ピッチ (-1.0-1.0, オプション)
+    transition: # introシーンの後に適用されるトランジション
+      type: "fade" # トランジションの種類 (例: fade, dissolve, wipeleftなど)
+      duration: 1.0 # トランジションの期間 (秒)
 
   - id: topic
     bg: "assets/bg/street.png"
@@ -91,6 +94,9 @@ scenes:
             scale: 0.8
             anchor: "bottom_center"
             visible: true
+    transition: # topicシーンの後に適用されるトランジション
+      type: "dissolve" # 別のトランジションタイプを試す
+      duration: 0.8 # 短めの期間
 
   - id: outro
     bg: "assets/bg/sunset.png"

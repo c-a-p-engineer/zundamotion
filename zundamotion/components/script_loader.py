@@ -88,6 +88,37 @@ def _validate_config(config: Dict[str, Any]):
                     f"Background path '{bg_path}' for scene '{scene_id}' is not a file."
                 )
 
+        # Validate scene transition
+        transition_config = scene.get("transition")
+        if transition_config:
+            if not isinstance(transition_config, dict):
+                raise ValidationError(
+                    f"Transition configuration for scene '{scene_id}' must be a dictionary."
+                )
+            transition_type = transition_config.get("type")
+            if not transition_type:
+                raise ValidationError(
+                    f"Transition for scene '{scene_id}' must have a 'type'."
+                )
+            if not isinstance(transition_type, str):
+                raise ValidationError(
+                    f"Transition type for scene '{scene_id}' must be a string, but got {type(transition_type).__name__}."
+                )
+
+            transition_duration = transition_config.get("duration")
+            if transition_duration is None:
+                raise ValidationError(
+                    f"Transition for scene '{scene_id}' must have a 'duration'."
+                )
+            if not isinstance(transition_duration, (int, float)):
+                raise ValidationError(
+                    f"Transition duration for scene '{scene_id}' must be a number, but got {type(transition_duration).__name__}."
+                )
+            if transition_duration <= 0:
+                raise ValidationError(
+                    f"Transition duration for scene '{scene_id}' must be positive, but got {transition_duration}."
+                )
+
         # Validate BGM path
         bgm_config = scene.get("bgm")
         if bgm_config:

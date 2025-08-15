@@ -291,6 +291,112 @@ def add_bgm_to_video(
         raise
 
 
+def apply_transition(
+    input_video1_path: str,
+    input_video2_path: str,
+    output_path: str,
+    transition_type: str,
+    duration: float,
+    offset: float,
+):
+    """
+    映像は xfade、音声は acrossfade で正しくクロスフェードさせる。
+    """
+    import logging
+    import subprocess
+
+    logger = logging.getLogger(__name__)
+
+    has_audio1 = has_audio_stream(input_video1_path)
+    has_audio2 = has_audio_stream(input_video2_path)
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        input_video1_path,
+        "-i",
+        input_video2_path,
+    ]
+
+    # 映像は従来どおり
+    vf = f"[0:v][1:v]xfade=transition={transition_type}:duration={duration}:offset={offset}[v]"
+
+    filter_parts = [vf]
+
+    # 音声：両方ある→ acrossfade、どちらかのみ→それ用の処理
+    if has_audio1 and has_audio2:
+        # 形式を統一してから acrossfade
+        af = (
+            "[0:a]aresample=async=1:first_pts=0,"
+            "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a0];"
+            "[1:a]aresample=async=1:first_pts=0,"
+            "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a1];"
+            f"[a0][a1]acrossfade=d={duration}:c1=tri:c2=tri[a]"
+        )
+        filter_parts.append(af)
+        cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[v]", "-map", "[a]"]
+
+    elif has_audio1:
+        # 1本目だけ音声 → 映像のトランジションに合わせてフェードアウト
+        af = (
+            "[0:a]aresample=async=1:first_pts=0,"
+            "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+            f"afade=t=out:st={offset}:d={duration}[a]"
+        )
+        filter_parts.append(af)
+        cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[v]", "-map", "[a]"]
+
+    elif has_audio2:
+        # 2本目だけ音声 → offset だけ無音で遅らせてからフェードイン
+        delay_ms = int(offset * 1000)
+        af = (
+            "[1:a]aresample=async=1:first_pts=0,"
+            "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+            f"adelay={delay_ms}|{delay_ms},afade=t=in:st=0:d={duration}[a]"
+        )
+        filter_parts.append(af)
+        cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[v]", "-map", "[a]"]
+    else:
+        # 音声なし
+        cmd += ["-filter_complex", vf, "-map", "[v]"]
+
+    # エンコード設定
+    cmd += [
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "23",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        # "-shortest",  # 必要なら出力を最短ストリーム長に合わせる
+        output_path,
+    ]
+
+    try:
+        process = subprocess.run(
+            cmd, check=True, capture_output=True, text=True, encoding="utf-8"
+        )
+        logger.debug("FFmpeg stdout:\n%s", process.stdout)
+        logger.debug("FFmpeg stderr:\n%s", process.stderr)
+        logger.info(
+            "Applied '%s' transition with proper audio crossfade: %s + %s -> %s",
+            transition_type,
+            input_video1_path,
+            input_video2_path,
+            output_path,
+        )
+    except subprocess.CalledProcessError as e:
+        logger.error("Error applying transition: %s", e)
+        logger.error("FFmpeg stdout:\n%s", e.stdout)
+        logger.error("FFmpeg stderr:\n%s", e.stderr)
+        raise
+
+
 def calculate_overlay_position(
     bg_width_expr: str,
     bg_height_expr: str,

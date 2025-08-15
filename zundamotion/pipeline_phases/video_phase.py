@@ -44,6 +44,9 @@ class VideoPhase:
             "subtitle_config": self.config.get("subtitle", {}),
             "bgm_config": self.config.get("bgm", {}),
             "background_default": self.config.get("background", {}).get("default"),
+            "transition_config": scene.get(
+                "transition"
+            ),  # Add transition config to hash
         }
 
     def run(
