@@ -19,3 +19,25 @@ class ValidationError(Exception):
         if self.line_number is not None:
             return f"Validation Error: {self.message} (Line: {self.line_number}, Column: {self.column_number})"
         return f"Validation Error: {self.message}"
+
+
+class PipelineError(Exception):
+    """Custom exception for pipeline errors in Zundamotion."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+    def __str__(self):
+        return f"Pipeline Error: {self.message}"
+
+
+class CacheError(Exception):
+    """Custom exception for cache errors in Zundamotion."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+    def __str__(self):
+        return f"Cache Error: {self.message}"

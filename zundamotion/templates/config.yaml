@@ -1,5 +1,15 @@
 # Default configuration for video rendering
 
+# System settings
+system:
+  cache_dir: "cache" # Path to the cache directory for storing intermediate files
+  video_extensions: # List of file extensions to be treated as video files
+    - ".mp4"
+    - ".mov"
+    - ".webm"
+    - ".avi"
+    - ".mkv"
+
 # Video settings
 video:
   width: 1920
