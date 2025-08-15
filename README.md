@@ -221,10 +221,6 @@ python -m zundamotion.main scripts/sample.yaml --log-json
 ```bash
 python -m zundamotion.main scripts/sample.yaml -o output/my_video.mp4
 ```
-中間ファイルを保持したい場合は、`--keep-intermediate`オプションを使用します。
-```bash
-python -m zundamotion.main scripts/sample.yaml --keep-intermediate
-```
 キャッシュを無効にしてすべての中間ファイルを再生成したい場合は、`--no-cache`オプションを使用します。
 ```bash
 python -m zundamotion.main scripts/sample.yaml --no-cache

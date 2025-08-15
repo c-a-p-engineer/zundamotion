@@ -75,13 +75,12 @@ class GenerationPipeline:
 
         return self._generate_hash(scene_data)
 
-    def run(self, output_path: str, keep_intermediate: bool = False):
+    def run(self, output_path: str):
         """
         Executes the full video generation pipeline.
 
         Args:
             output_path (str): The final output video file path.
-            keep_intermediate (bool): If True, intermediate files are not deleted.
         """
         with tempfile.TemporaryDirectory() as temp_dir_str:
             temp_dir = Path(temp_dir_str)
@@ -533,16 +532,10 @@ class GenerationPipeline:
 
             logger.info("--- Video Generation Pipeline Completed ---")
 
-            if keep_intermediate:
-                intermediate_dir = Path(output_path).parent / "intermediate"
-                shutil.copytree(temp_dir, intermediate_dir)
-                logger.info(f"Intermediate files saved to: {intermediate_dir}")
-
 
 def run_generation(
     script_path: str,
     output_path: str,
-    keep_intermediate: bool = False,
     no_cache: bool = False,
     cache_refresh: bool = False,
     jobs: str = "1",
@@ -558,4 +551,4 @@ def run_generation(
 
     # Create and run the pipeline
     pipeline = GenerationPipeline(config, no_cache, cache_refresh, jobs)
-    pipeline.run(output_path, keep_intermediate)
+    pipeline.run(output_path)

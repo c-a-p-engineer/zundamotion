@@ -32,11 +32,6 @@ def main():
         help="Path to the output video file. Defaults to 'output/final.mp4'.",
     )
     parser.add_argument(
-        "--keep-intermediate",
-        action="store_true",
-        help="If set, keeps the intermediate audio and video clips in an 'intermediate' folder.",
-    )
-    parser.add_argument(
         "--no-cache",
         action="store_true",
         help="If set, disables caching and regenerates all intermediate files.",
@@ -71,7 +66,6 @@ def main():
         run_generation(
             args.script_path,
             args.output,
-            args.keep_intermediate,
             args.no_cache,
             args.cache_refresh,
             args.jobs,
