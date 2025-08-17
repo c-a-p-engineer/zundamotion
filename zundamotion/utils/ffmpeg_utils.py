@@ -149,7 +149,7 @@ def normalize_video(
     input_path: str, output_path: str, target_fps: int = 30, target_ar: int = 48000
 ):
     """
-    Normalizes a video to a standard format (30fps, 48kHz audio).
+    Normalizes a video to a standard format (30fps, 48kHz audio) with timestamp correction.
 
     Args:
         input_path (str): Path to the input video file.
@@ -157,13 +157,18 @@ def normalize_video(
         target_fps (int): Target frames per second.
         target_ar (int): Target audio sample rate.
     """
+    video_filter = f"fps={target_fps},setpts=PTS-STARTPTS"
+    audio_filter = f"aresample={target_ar},asetpts=PTS-STARTPTS"
+
     cmd = [
         "ffmpeg",
         "-y",
         "-i",
         input_path,
-        "-r",
-        str(target_fps),
+        "-vf",
+        video_filter,
+        "-af",
+        audio_filter,
         "-c:v",
         "libx264",
         "-pix_fmt",
@@ -174,8 +179,6 @@ def normalize_video(
         "23",
         "-c:a",
         "aac",
-        "-ar",
-        str(target_ar),
         "-b:a",
         "192k",
         output_path,
