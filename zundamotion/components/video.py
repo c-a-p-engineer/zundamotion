@@ -21,7 +21,9 @@ from ..utils.ffmpeg_utils import (
     calculate_overlay_position,
     get_ffmpeg_version,
     get_hardware_encoder,
+    get_media_info,
     has_audio_stream,
+    normalize_video,
 )
 
 
@@ -80,10 +82,33 @@ class VideoRenderer:
         # --- Input Configuration ---
         input_layers = []
         # 1. Background
-        bg_path = background_config.get("path")
-        if not bg_path:
+        bg_path_str = background_config.get("path")
+        if not bg_path_str:
             raise ValueError("Background path is missing.")
+        bg_path = Path(bg_path_str)
+
         if background_config.get("type") == "video":
+            try:
+                media_info = get_media_info(str(bg_path))
+                video_info = media_info.get("video", {})
+                audio_info = media_info.get("audio", {})
+
+                is_standard = (
+                    video_info.get("fps") == 30
+                    and audio_info.get("sample_rate") == 48000
+                )
+
+                if not is_standard:
+                    print(f"[Video] Normalizing background video: {bg_path.name}")
+                    normalized_bg_path = self.temp_dir / f"normalized_{bg_path.name}"
+                    normalize_video(str(bg_path), str(normalized_bg_path))
+                    bg_path = normalized_bg_path
+
+            except Exception as e:
+                print(
+                    f"[Warning] Could not inspect or normalize background video {bg_path.name}: {e}. Using it as is."
+                )
+
             cmd.extend(
                 [
                     "-ss",
@@ -113,6 +138,29 @@ class VideoRenderer:
                 ".bmp",
             ]
             if is_video:
+                try:
+                    media_info = get_media_info(str(insert_path))
+                    video_info = media_info.get("video", {})
+                    audio_info = media_info.get("audio", {})
+
+                    is_standard = (
+                        video_info.get("fps") == 30
+                        and audio_info.get("sample_rate") == 48000
+                    )
+
+                    if not is_standard:
+                        print(f"[Video] Normalizing insert video: {insert_path.name}")
+                        normalized_insert_path = (
+                            self.temp_dir / f"normalized_{insert_path.name}"
+                        )
+                        normalize_video(str(insert_path), str(normalized_insert_path))
+                        insert_path = normalized_insert_path
+
+                except Exception as e:
+                    print(
+                        f"[Warning] Could not inspect or normalize insert video {insert_path.name}: {e}. Using it as is."
+                    )
+
                 cmd.extend(["-i", str(insert_path)])
             else:
                 cmd.extend(["-loop", "1", "-i", str(insert_path)])

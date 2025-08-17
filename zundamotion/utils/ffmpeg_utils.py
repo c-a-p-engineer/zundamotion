@@ -86,6 +86,114 @@ def get_audio_duration(file_path: str) -> float:
         raise
 
 
+def get_media_info(file_path: str) -> dict:
+    """
+    Get media information using ffprobe.
+
+    Args:
+        file_path (str): Path to the media file.
+
+    Returns:
+        dict: A dictionary containing media information.
+    """
+    try:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_streams",
+            "-of",
+            "json",
+            file_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        info = json.loads(result.stdout)
+
+        video_stream = next(
+            (s for s in info.get("streams", []) if s.get("codec_type") == "video"), None
+        )
+        audio_stream = next(
+            (s for s in info.get("streams", []) if s.get("codec_type") == "audio"), None
+        )
+
+        media_info = {}
+        if video_stream:
+            media_info["video"] = {
+                "width": int(video_stream.get("width", 0)),
+                "height": int(video_stream.get("height", 0)),
+                "pix_fmt": video_stream.get("pix_fmt"),
+                "r_frame_rate": video_stream.get("r_frame_rate", "0/0"),
+            }
+            # Convert frame rate to a float
+            num, den = map(int, media_info["video"]["r_frame_rate"].split("/"))
+            media_info["video"]["fps"] = float(num) / float(den) if den != 0 else 0.0
+
+        if audio_stream:
+            media_info["audio"] = {
+                "sample_rate": int(audio_stream.get("sample_rate", 0)),
+                "channels": int(audio_stream.get("channels", 0)),
+                "channel_layout": audio_stream.get("channel_layout"),
+            }
+
+        return media_info
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error running ffprobe for {file_path}: {e.stderr}")
+        raise
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
+        raise
+
+
+def normalize_video(
+    input_path: str, output_path: str, target_fps: int = 30, target_ar: int = 48000
+):
+    """
+    Normalizes a video to a standard format (30fps, 48kHz audio).
+
+    Args:
+        input_path (str): Path to the input video file.
+        output_path (str): Path to save the normalized video file.
+        target_fps (int): Target frames per second.
+        target_ar (int): Target audio sample rate.
+    """
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        input_path,
+        "-r",
+        str(target_fps),
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-preset",
+        "fast",
+        "-crf",
+        "23",
+        "-c:a",
+        "aac",
+        "-ar",
+        str(target_ar),
+        "-b:a",
+        "192k",
+        output_path,
+    ]
+    try:
+        process = subprocess.run(
+            cmd, check=True, capture_output=True, text=True, encoding="utf-8"
+        )
+        logger.debug(f"FFmpeg stdout:\n{process.stdout}")
+        logger.debug(f"FFmpeg stderr:\n{process.stderr}")
+        logger.info(f"Successfully normalized {input_path} to {output_path}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error normalizing video {input_path}: {e}")
+        logger.error(f"FFmpeg stdout:\n{e.stdout}")
+        logger.error(f"FFmpeg stderr:\n{e.stderr}")
+        raise
+
+
 def create_silent_audio(
     output_path: str, duration: float, sample_rate: int = 44100, channels: int = 2
 ):
