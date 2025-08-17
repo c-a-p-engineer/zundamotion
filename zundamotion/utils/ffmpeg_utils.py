@@ -365,6 +365,8 @@ def apply_transition(
     cmd += [
         "-c:v",
         "libx264",
+        "-pix_fmt",
+        "yuv420p",  # X(Twitter)互換性のために追加
         "-preset",
         "fast",
         "-crf",
