@@ -1,11 +1,51 @@
 meta:
-  title: "ずんだもん自己紹介（複数シーン）"
-  version: 1
+  title: "サンプル動画！"
+  version: 2
 
-assets:
-  bg_default: "assets/bg/default.png"   # 予備の背景（存在しない場合に使う）
+defaults:
+  characters:
+    zundamon:
+      speaker_id: 3
+      speed: 1.1
+      pitch: 0.05
+    metan:
+      speaker_id: 6
+      speed: 0.95
 
 scenes:
+  - id: test
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "こんにちは！ずんだもんです。これはデフォルト設定で話しているのだ。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            visible: true
+
+      - text: "このセリフだけ、少しゆっくり話してみるのだ。"
+        speaker_name: "zundamon"
+        speed: 0.9 # この行だけデフォルトを上書き
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            visible: true
+
+      - text: "私は四国めたん。私もデフォルト設定よ。"
+        speaker_name: "metan"
+        characters:
+          - name: "metan"
+            expression: "normal"
+            visible: true
+
+      - text: "このプロジェクト、なかなか面白いじゃない。"
+        speaker_name: "metan"
+        pitch: -0.1 # この行だけデフォルトを上書き
+        characters:
+          - name: "metan"
+            expression: "normal"
+            visible: true
+
   - id: intro
     bg: "assets/bg/sample_video.mp4"    # シーン背景 (動画ファイル)
     bgm:                                # BGM設定
@@ -15,7 +55,7 @@ scenes:
       fade_out_duration: 1.5            # フェードアウトの長さ (秒, オプション)
     lines:
       - wait: 2
-      - text: "こんにちは！ずんだもんです。" # セリフテキスト (必須)
+      - text: "背景ビデオと効果音、待機のテストなのだ！" # セリフテキスト (必須)
         speaker_id: 3 # 明示的にVOICEVOX ID 3 を指定
         speaker_name: "zundamon" # 話しているキャラクターの名前
         sound_effects: # セリフと同時に再生する効果音

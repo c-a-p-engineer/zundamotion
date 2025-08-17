@@ -298,10 +298,32 @@ def load_script_and_config(
     final_config = default_config.copy()
     final_config["script"] = script_data
 
-    # Process character speaker IDs
+    # Process character speaker IDs and merge defaults
     characters_config = final_config.get("characters", {})
+    script_defaults = script_data.get("defaults", {})
+    character_defaults = script_defaults.get("characters", {})
+    global_voice_defaults = final_config.get("voice", {})
+    global_subtitle_defaults = final_config.get("subtitle", {})
+
     for scene in final_config["script"].get("scenes", []):
         for line in scene.get("lines", []):
+            # Start with global defaults
+            merged_line = global_voice_defaults.copy()
+            merged_line.update(global_subtitle_defaults)
+
+            speaker_name = line.get("speaker_name")
+            if speaker_name:
+                # Apply character defaults from script
+                if speaker_name in character_defaults:
+                    merged_line = merge_configs(
+                        merged_line, character_defaults[speaker_name]
+                    )
+
+            # Apply line-specific settings
+            merged_line = merge_configs(merged_line, line)
+            line.clear()
+            line.update(merged_line)
+
             character_name = line.get("character")
             if character_name and character_name in characters_config:
                 character_settings = characters_config[character_name]

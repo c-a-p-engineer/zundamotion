@@ -36,7 +36,7 @@ subtitle:
 
 # Voice settings (VOICEVOX defaults)
 voice:
-  speaker: 1      # Zundamon (Normal)
+  speaker_id: 1      # Zundamon (Normal)
   speed: 1.0
   pitch: 0.0
 
