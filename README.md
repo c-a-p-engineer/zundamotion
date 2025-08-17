@@ -47,6 +47,7 @@ lines:
 - **DevContainer対応**: VSCode DevContainerをサポートしており、どこでも一貫した開発環境を簡単に構築できます。
 - **外部設定ファイル**: `config.yaml`を通じて、キャッシュディレクトリや動画拡張子などのシステム設定を柔軟に変更できます。
 - **タイムライン出力**: 動画の各シーンやセリフの開始時刻を記録し、YouTubeのチャプターなどに利用できるタイムラインファイルを自動生成します。出力形式はMarkdown (`.md`)、CSV (`.csv`)、またはその両方を選択できます。
+- **字幕ファイル出力**: 焼き込み字幕とは別に、`.srt`または`.ass`形式の独立した字幕ファイルを動画と同時に出力します。これにより、YouTubeへのアップロードや、他言語への翻訳作業が容易になります。
 
 ---
 
@@ -257,6 +258,19 @@ python -m zundamotion.main scripts/sample.yaml --timeline both
 ```bash
 python -m zundamotion.main scripts/sample.yaml --no-timeline
 ```
+
+字幕ファイルの出力も同様に制御できます。
+```bash
+# SRT形式で字幕ファイルを出力（デフォルト）
+python -m zundamotion.main scripts/sample.yaml --subtitle-file
+
+# ASS形式で字幕ファイルを出力
+python -m zundamotion.main scripts/sample.yaml --subtitle-file ass
+
+# 字幕ファイル出力を無効化
+python -m zundamotion.main scripts/sample.yaml --no-subtitle-file
+```
+
 これらの設定は、`config.yaml`でも指定可能です。
 
 ```yaml
@@ -264,6 +278,9 @@ system:
   timeline:
     enabled: true
     format: "md" # "md", "csv", "both", "none" から選択
+  subtitle_file:
+    enabled: true
+    format: "srt" # "srt", "ass", "both", "none" から選択
 ```
 
 ---

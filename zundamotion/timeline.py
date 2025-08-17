@@ -1,6 +1,8 @@
 import csv
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+
+import pysubs2
 
 
 def format_timestamp(seconds: float) -> str:
@@ -15,13 +17,14 @@ class Timeline:
         self.events: List[Dict[str, Any]] = []
         self.current_time: float = 0.0
 
-    def add_event(self, description: str, duration: float):
+    def add_event(self, description: str, duration: float, text: Optional[str] = None):
         """Adds a new event to the timeline."""
         self.events.append(
             {
                 "start_time": self.current_time,
                 "duration": duration,
                 "description": description,
+                "text": text,
             }
         )
         self.current_time += duration
@@ -59,3 +62,16 @@ class Timeline:
                         event["description"],
                     ]
                 )
+
+    def save_subtitles(self, output_path: Path, format: str):
+        """Saves subtitles as an SRT or ASS file."""
+        subs = pysubs2.SSAFile()
+        for event in self.events:
+            if event.get("text"):
+                start_time = int(event["start_time"] * 1000)
+                end_time = int((event["start_time"] + event["duration"]) * 1000)
+                line = pysubs2.SSAEvent(
+                    start=start_time, end=end_time, text=event["text"]
+                )
+                subs.append(line)
+        subs.save(str(output_path), format=format)

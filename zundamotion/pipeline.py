@@ -84,6 +84,23 @@ class GenerationPipeline:
                     self.timeline.save_as_csv(timeline_output_path_csv)
                     logger.info(f"Timeline saved to {timeline_output_path_csv}")
 
+            # Save subtitle file if enabled
+            subtitle_file_config = self.config.get("system", {}).get(
+                "subtitle_file", {}
+            )
+            if subtitle_file_config.get("enabled", False):
+                subtitle_format = subtitle_file_config.get("format", "srt")
+                output_path_base = Path(output_path)
+
+                if subtitle_format in ["srt", "both"]:
+                    subtitle_output_path_srt = output_path_base.with_suffix(".srt")
+                    self.timeline.save_subtitles(subtitle_output_path_srt, format="srt")
+                    logger.info(f"Subtitle file saved to {subtitle_output_path_srt}")
+                if subtitle_format in ["ass", "both"]:
+                    subtitle_output_path_ass = output_path_base.with_suffix(".ass")
+                    self.timeline.save_subtitles(subtitle_output_path_ass, format="ass")
+                    logger.info(f"Subtitle file saved to {subtitle_output_path_ass}")
+
             logger.info("--- Video Generation Pipeline Completed ---")
 
 
@@ -95,6 +112,8 @@ def run_generation(
     jobs: str = "1",
     timeline_format: Optional[str] = None,
     no_timeline: bool = False,
+    subtitle_file_format: Optional[str] = None,
+    no_subtitle_file: bool = False,
 ):
     """
     High-level function to run the entire generation process.
@@ -111,6 +130,17 @@ def run_generation(
     elif timeline_format:
         config.setdefault("system", {}).setdefault("timeline", {})["enabled"] = True
         config["system"]["timeline"]["format"] = timeline_format
+
+    # Override subtitle file settings from CLI
+    if no_subtitle_file:
+        config.setdefault("system", {}).setdefault("subtitle_file", {})[
+            "enabled"
+        ] = False
+    elif subtitle_file_format:
+        config.setdefault("system", {}).setdefault("subtitle_file", {})[
+            "enabled"
+        ] = True
+        config["system"]["subtitle_file"]["format"] = subtitle_file_format
 
     # Create and run the pipeline
     pipeline = GenerationPipeline(config, no_cache, cache_refresh, jobs)

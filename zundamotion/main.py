@@ -61,6 +61,19 @@ def main():
         help="Disable timeline generation. Overrides config file setting.",
     )
     parser.add_argument(
+        "--subtitle-file",
+        type=str,
+        nargs="?",
+        const="srt",
+        default=None,
+        help='Enable subtitle file generation. Optionally specify format: "srt", "ass", "both". If no format is specified, "srt" is used. Overrides config file setting.',
+    )
+    parser.add_argument(
+        "--no-subtitle-file",
+        action="store_true",
+        help="Disable subtitle file generation. Overrides config file setting.",
+    )
+    parser.add_argument(
         "--log-json",
         action="store_true",
         help="If set, outputs logs in machine-readable JSON format.",
@@ -84,6 +97,8 @@ def main():
             args.jobs,
             args.timeline,
             args.no_timeline,
+            args.subtitle_file,
+            args.no_subtitle_file,
         )
         logger.info("Video generation completed successfully.")
     except ValidationError as e:
