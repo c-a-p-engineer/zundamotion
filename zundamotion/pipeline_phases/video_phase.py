@@ -9,6 +9,7 @@ from zundamotion.cache import CacheManager
 from zundamotion.components.subtitle import SubtitleGenerator
 from zundamotion.components.video import VideoRenderer
 from zundamotion.exceptions import PipelineError
+from zundamotion.timeline import Timeline
 from zundamotion.utils.ffmpeg_utils import get_audio_duration
 from zundamotion.utils.logger import logger
 
@@ -53,6 +54,7 @@ class VideoPhase:
         self,
         scenes: List[Dict[str, Any]],
         line_data_map: Dict[str, Dict[str, Any]],
+        timeline: Timeline,
     ) -> List[Path]:
         """Phase 2: Render video clips for each scene."""
         logger.info(

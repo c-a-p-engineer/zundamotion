@@ -12,6 +12,7 @@ from .components.audio import AudioGenerator
 from .components.script_loader import load_script_and_config
 from .exceptions import PipelineError
 from .pipeline_phases import AudioPhase, BGMPhase, FinalizePhase, VideoPhase
+from .timeline import Timeline
 from .utils.logger import logger
 
 
@@ -32,6 +33,7 @@ class GenerationPipeline:
             no_cache=self.no_cache,
             cache_refresh=self.cache_refresh,
         )
+        self.timeline = Timeline()
 
     def run(self, output_path: str):
         """
@@ -52,12 +54,12 @@ class GenerationPipeline:
 
             # Execute pipeline phases
             audio_phase = AudioPhase(self.config, temp_dir, self.cache_manager)
-            line_data_map = audio_phase.run(scenes)
+            line_data_map = audio_phase.run(scenes, self.timeline)
 
             video_phase = VideoPhase(
                 self.config, temp_dir, self.cache_manager, self.jobs
             )
-            all_clips = video_phase.run(scenes, line_data_map)
+            all_clips = video_phase.run(scenes, line_data_map, self.timeline)
 
             bgm_phase = BGMPhase(self.config, temp_dir)
             final_clips_for_concat = bgm_phase.run(scenes, all_clips)
@@ -66,6 +68,21 @@ class GenerationPipeline:
             finalize_phase.run(
                 output_path, scenes, final_clips_for_concat
             )  # Pass scenes to FinalizePhase
+
+            # Save the timeline if enabled
+            timeline_config = self.config.get("system", {}).get("timeline", {})
+            if timeline_config.get("enabled", False):
+                timeline_format = timeline_config.get("format", "md")
+                output_path_base = Path(output_path)
+
+                if timeline_format in ["md", "both"]:
+                    timeline_output_path_md = output_path_base.with_suffix(".md")
+                    self.timeline.save_as_md(timeline_output_path_md)
+                    logger.info(f"Timeline saved to {timeline_output_path_md}")
+                if timeline_format in ["csv", "both"]:
+                    timeline_output_path_csv = output_path_base.with_suffix(".csv")
+                    self.timeline.save_as_csv(timeline_output_path_csv)
+                    logger.info(f"Timeline saved to {timeline_output_path_csv}")
 
             logger.info("--- Video Generation Pipeline Completed ---")
 
@@ -76,6 +93,8 @@ def run_generation(
     no_cache: bool = False,
     cache_refresh: bool = False,
     jobs: str = "1",
+    timeline_format: Optional[str] = None,
+    no_timeline: bool = False,
 ):
     """
     High-level function to run the entire generation process.
@@ -85,6 +104,13 @@ def run_generation(
 
     # Load script and config
     config = load_script_and_config(script_path, str(default_config_path))
+
+    # Override timeline settings from CLI
+    if no_timeline:
+        config.setdefault("system", {}).setdefault("timeline", {})["enabled"] = False
+    elif timeline_format:
+        config.setdefault("system", {}).setdefault("timeline", {})["enabled"] = True
+        config["system"]["timeline"]["format"] = timeline_format
 
     # Create and run the pipeline
     pipeline = GenerationPipeline(config, no_cache, cache_refresh, jobs)

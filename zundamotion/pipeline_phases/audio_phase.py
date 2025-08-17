@@ -8,6 +8,7 @@ from tqdm import tqdm
 from zundamotion.cache import CacheManager
 from zundamotion.components.audio import AudioGenerator
 from zundamotion.exceptions import PipelineError
+from zundamotion.timeline import Timeline
 from zundamotion.utils.ffmpeg_utils import get_audio_duration
 from zundamotion.utils.logger import logger
 
@@ -25,7 +26,9 @@ class AudioPhase:
             [".mp4", ".mov", ".webm", ".avi", ".mkv"],
         )
 
-    def run(self, scenes: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    def run(
+        self, scenes: List[Dict[str, Any]], timeline: Timeline
+    ) -> Dict[str, Dict[str, Any]]:
         """Phase 1: Generate all audio files and calculate their durations."""
         logger.info("\n--- Phase 1: Generating all audio and calculating durations ---")
         line_data_map: Dict[str, Dict[str, Any]] = {}
@@ -34,6 +37,9 @@ class AudioPhase:
         with tqdm(total=total_lines, desc="Audio Generation", unit="line") as pbar:
             for scene_idx, scene in enumerate(scenes):
                 scene_id = scene["id"]
+                bg = scene.get("bg", self.config.get("background", {}).get("default"))
+                timeline.add_scene_change(scene_id, bg)
+
                 for idx, line in enumerate(scene.get("lines", []), start=1):
                     line_id = f"{scene_id}_{idx}"
 
@@ -46,6 +52,8 @@ class AudioPhase:
                             duration = wait_value.get("duration")
                         else:
                             duration = wait_value
+
+                        timeline.add_event(f"(Wait {duration}s)", duration)
 
                         line_data_map[line_id] = {
                             "type": "wait",
@@ -91,6 +99,9 @@ class AudioPhase:
                             duration = insert_config.get("duration", 2.0)
                     else:
                         duration = get_audio_duration(str(audio_path))
+
+                    character_name = line.get("speaker_name", "Unknown")
+                    timeline.add_event(f'{character_name}: "{text}"', duration)
 
                     line_data_map[line_id] = {
                         "type": "talk",

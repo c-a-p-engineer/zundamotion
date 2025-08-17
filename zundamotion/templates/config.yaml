@@ -2,13 +2,16 @@
 
 # System settings
 system:
-  cache_dir: "cache" # Path to the cache directory for storing intermediate files
-  video_extensions: # List of file extensions to be treated as video files
+  cache_dir: "cache"
+  video_extensions:
     - ".mp4"
     - ".mov"
     - ".webm"
     - ".avi"
     - ".mkv"
+  timeline:
+    enabled: true
+    format: "md" # Can be "md", "csv", "both", or "none"
 
 # Video settings
 video:

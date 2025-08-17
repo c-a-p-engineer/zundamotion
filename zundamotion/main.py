@@ -45,7 +45,20 @@ def main():
         "--jobs",
         type=str,
         default="1",
-        help="Number of parallel jobs for rendering. Use 'auto' to detect CPU cores. Defaults to 1.",
+        help='Number of parallel jobs to use for FFmpeg. "auto" for CPU cores.',
+    )
+    parser.add_argument(
+        "--timeline",
+        type=str,
+        nargs="?",
+        const="md",
+        default=None,
+        help='Enable timeline generation. Optionally specify format: "md", "csv", "both". If no format is specified, "md" is used. Overrides config file setting.',
+    )
+    parser.add_argument(
+        "--no-timeline",
+        action="store_true",
+        help="Disable timeline generation. Overrides config file setting.",
     )
     parser.add_argument(
         "--log-json",
@@ -69,6 +82,8 @@ def main():
             args.no_cache,
             args.cache_refresh,
             args.jobs,
+            args.timeline,
+            args.no_timeline,
         )
         logger.info("Video generation completed successfully.")
     except ValidationError as e:

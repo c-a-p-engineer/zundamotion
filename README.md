@@ -46,6 +46,7 @@ lines:
 
 - **DevContainer対応**: VSCode DevContainerをサポートしており、どこでも一貫した開発環境を簡単に構築できます。
 - **外部設定ファイル**: `config.yaml`を通じて、キャッシュディレクトリや動画拡張子などのシステム設定を柔軟に変更できます。
+- **タイムライン出力**: 動画の各シーンやセリフの開始時刻を記録し、YouTubeのチャプターなどに利用できるタイムラインファイルを自動生成します。出力形式はMarkdown (`.md`)、CSV (`.csv`)、またはその両方を選択できます。
 
 ---
 
@@ -238,6 +239,31 @@ python -m zundamotion.main scripts/sample.yaml --jobs auto
 特定のジョブ数を指定することも可能です（例: 4コアを使用する場合）。
 ```bash
 python -m zundamotion.main scripts/sample.yaml --jobs 4
+```
+
+タイムライン出力を有効にするには、`--timeline`オプションを使用します。フォーマットを指定しない場合、デフォルトでMarkdown形式で出力されます。
+```bash
+python -m zundamotion.main scripts/sample.yaml --timeline
+```
+出力フォーマットをCSVに指定する場合：
+```bash
+python -m zundamotion.main scripts/sample.yaml --timeline csv
+```
+両方のフォーマットで出力する場合：
+```bash
+python -m zundamotion.main scripts/sample.yaml --timeline both
+```
+タイムライン出力を無効にするには、`--no-timeline`オプションを使用します。
+```bash
+python -m zundamotion.main scripts/sample.yaml --no-timeline
+```
+これらの設定は、`config.yaml`でも指定可能です。
+
+```yaml
+system:
+  timeline:
+    enabled: true
+    format: "md" # "md", "csv", "both", "none" から選択
 ```
 
 ---
