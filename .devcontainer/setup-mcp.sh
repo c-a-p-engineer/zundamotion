@@ -2,6 +2,11 @@
 # MCP
 mkdir -p /root/Cline/MCP
 
+# memory-bank-mcp
+echo "memory-bank-mcp START"
+mkdir -p /root/Cline/MCP/memory-bank-mcp
+echo "sequentialmemory-bank-mcpthinking END"
+
 # sequentialthinking
 echo "sequentialthinking START"
 mkdir -p /root/Cline/MCP/sequentialthinking

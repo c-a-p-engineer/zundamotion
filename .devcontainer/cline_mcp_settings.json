@@ -1,5 +1,23 @@
 {
     "mcpServers": {
+        "allpepper-memory-bank": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@allpepper/memory-bank-mcp"
+            ],
+            "env": {
+                "MEMORY_BANK_ROOT": "/root/Cline/MCP/memory-bank-mcp"
+            },
+            "disabled": false,
+            "autoApprove": [
+                "memory_bank_read",
+                "memory_bank_write",
+                "memory_bank_update",
+                "list_projects",
+                "list_project_files"
+            ]
+        },
         "github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking": {
             "autoApprove": [
                 "sequentialthinking"
