@@ -272,7 +272,7 @@ python -m zundamotion.main scripts/sample.yaml --subtitle-file ass
 python -m zundamotion.main scripts/sample.yaml --no-subtitle-file
 ```
 
-キャラクターごとのデフォルト設定は、台本ファイル内の`defaults`セクションで定義します。
+キャラクターごとのデフォルト設定は、台本ファイル内の`defaults`セクションで定義します。音声設定だけでなく、字幕の色などもキャラクターに紐付けて設定できます。
 
 ```yaml
 defaults:
@@ -281,9 +281,15 @@ defaults:
       speaker_id: 3
       pitch: 0.1
       speed: 1.1
+      subtitle:
+        font_color: "#90EE90"
+        stroke_color: "white"
     metan:
       speaker_id: 6
       speed: 0.95
+      subtitle:
+        font_color: "#E6E6FA"
+        stroke_color: "black"
 ```
 
 これらの設定は、`config.yaml`でも指定可能です。

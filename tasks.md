@@ -4,33 +4,6 @@
 
 ## 🚨 P0（必須改善）
 
-### 3. キャラごとのデフォルト設定
-
-* **背景**
-
-  * 現状は各セリフごとに「voice, pitch, speed, subtitle」を全部書かないといけない。
-  * 冗長で台本が読みにくい。
-* **ゴール**
-
-  * `defaults.characters` にキャラごとの設定をまとめ、未指定セリフには自動で反映。
-* **実装イメージ**
-
-  ```yaml
-  defaults:
-    characters:
-      zundamon:
-        voice: 3
-        pitch: 0
-        speed: 1.0
-        subtitle:
-          color: green
-          outline: black
-  ```
-
-  * 実行時、セリフに指定がなければこのデフォルトを使用。
-
----
-
 ### 4. 使用VoiceVox情報の出力
 
 * **背景**

@@ -1,6 +1,6 @@
 meta:
-  title: "サンプル動画！"
-  version: 2
+  title: "キャラクターごとのデフォルト設定サンプル"
+  version: 3
 
 defaults:
   characters:
@@ -8,12 +8,53 @@ defaults:
       speaker_id: 3
       speed: 1.1
       pitch: 0.05
+      subtitle:
+        font_color: "#90EE90" # LightGreen
+        stroke_color: "white"
     metan:
       speaker_id: 6
       speed: 0.95
+      subtitle:
+        font_color: "#E6E6FA" # Lavender
+        stroke_color: "black"
 
 scenes:
-  - id: test
+  - id: subtitle_zundamon
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "こんにちは！ずんだもんです。この字幕はキャラクターデフォルト色なのだ。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            visible: true
+
+      - text: "このセリフだけ、字幕の色を変えてみるのだ。"
+        speaker_name: "zundamon"
+        subtitle:
+          font_color: "yellow" # この行だけデフォルトを上書き
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            visible: true
+
+      - text: "私は四国めたん。私の字幕もデフォルト設定よ。"
+        speaker_name: "metan"
+        characters:
+          - name: "metan"
+            expression: "normal"
+            visible: true
+
+      - text: "このプロジェクト、なかなか面白いじゃない。"
+        speaker_name: "metan"
+        subtitle:
+          stroke_color: "red" # この行だけ縁取りの色を上書き
+        characters:
+          - name: "metan"
+            expression: "normal"
+            visible: true
+
+  - id: voice_zundamon
     bg: "assets/bg/room.png"
     lines:
       - text: "こんにちは！ずんだもんです。これはデフォルト設定で話しているのだ。"
