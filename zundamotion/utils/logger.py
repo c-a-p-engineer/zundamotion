@@ -1,6 +1,8 @@
 import json
 import logging
 import sys
+import time
+from functools import wraps
 from typing import Optional
 
 
@@ -98,6 +100,34 @@ def setup_logging(log_json: bool = False):
         )
 
     return logger
+
+
+def time_log(logger_instance):
+    """A decorator to log the execution time of a function."""
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Check if the function is a method of a class
+            if args and hasattr(args[0], "__class__"):
+                class_name = args[0].__class__.__name__
+                log_name = f"{class_name}.{func.__name__}"
+            else:
+                log_name = func.__name__
+
+            start_time = time.time()
+            logger_instance.info(f"--- Starting: {log_name} ---")
+            result = func(*args, **kwargs)
+            end_time = time.time()
+            duration = end_time - start_time
+            logger_instance.info(
+                f"--- Finished: {log_name}. Duration: {duration:.2f} seconds ---"
+            )
+            return result
+
+        return wrapper
+
+    return decorator
 
 
 # Global logger instance

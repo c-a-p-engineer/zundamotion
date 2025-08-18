@@ -10,7 +10,7 @@ from zundamotion.components.audio import AudioGenerator
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
 from zundamotion.utils.ffmpeg_utils import get_audio_duration
-from zundamotion.utils.logger import logger
+from zundamotion.utils.logger import logger, time_log
 
 
 class AudioPhase:
@@ -26,11 +26,11 @@ class AudioPhase:
             [".mp4", ".mov", ".webm", ".avi", ".mkv"],
         )
 
+    @time_log(logger)
     def run(
         self, scenes: List[Dict[str, Any]], timeline: Timeline
     ) -> Dict[str, Dict[str, Any]]:
         """Phase 1: Generate all audio files and calculate their durations."""
-        logger.info("\n--- Phase 1: Generating all audio and calculating durations ---")
         line_data_map: Dict[str, Dict[str, Any]] = {}
         total_lines = sum(len(s.get("lines", [])) for s in scenes)
 
@@ -113,5 +113,4 @@ class AudioPhase:
                         "line_config": line,
                     }
                     pbar.update(1)
-        logger.info("--- Phase 1 Completed ---")
         return line_data_map

@@ -11,7 +11,7 @@ from zundamotion.components.video import VideoRenderer
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
 from zundamotion.utils.ffmpeg_utils import get_audio_duration
-from zundamotion.utils.logger import logger
+from zundamotion.utils.logger import logger, time_log
 
 
 class VideoPhase:
@@ -50,6 +50,7 @@ class VideoPhase:
             ),  # Add transition config to hash
         }
 
+    @time_log(logger)
     def run(
         self,
         scenes: List[Dict[str, Any]],
@@ -57,9 +58,6 @@ class VideoPhase:
         timeline: Timeline,
     ) -> List[Path]:
         """Phase 2: Render video clips for each scene."""
-        logger.info(
-            "\n--- Phase 2: Preparing scene backgrounds and rendering clips ---"
-        )
         all_clips: List[Path] = []
         bg_default = self.config.get("background", {}).get("default")
         total_scenes = len(scenes)
@@ -215,5 +213,4 @@ class VideoPhase:
                         f"Cleaned up temporary scene background video -> {scene_bg_video_path.name}"
                     )
                 pbar_scenes.update(1)
-        logger.info("--- Phase 2 Completed ---")
         return all_clips

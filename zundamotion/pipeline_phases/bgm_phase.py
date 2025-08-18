@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from zundamotion.exceptions import PipelineError
 from zundamotion.utils.ffmpeg_utils import add_bgm_to_video, get_audio_duration
-from zundamotion.utils.logger import logger
+from zundamotion.utils.logger import logger, time_log
 
 
 class BGMPhase:
@@ -13,15 +13,13 @@ class BGMPhase:
         self.config = config
         self.temp_dir = temp_dir
 
+    @time_log(logger)
     def run(
         self,
         scenes: List[Dict[str, Any]],
         all_clips: List[Path],
     ) -> List[Path]:
         """Phase 3: Apply BGM to each scene clip."""
-        logger.info(
-            "\n--- Phase 3: Applying BGM to scenes and preparing for final concat ---"
-        )
         final_clips_for_concat: List[Path] = []
         total_scenes = len(scenes)
         with tqdm(total=total_scenes, desc="BGM Application", unit="scene") as pbar_bgm:
@@ -68,5 +66,4 @@ class BGMPhase:
                 else:
                     final_clips_for_concat.append(scene_clip_path)
                 pbar_bgm.update(1)
-        logger.info("--- Phase 3 Completed ---")
         return final_clips_for_concat

@@ -13,7 +13,7 @@ from .components.script_loader import load_script_and_config
 from .exceptions import PipelineError
 from .pipeline_phases import AudioPhase, BGMPhase, FinalizePhase, VideoPhase
 from .timeline import Timeline
-from .utils.logger import logger
+from .utils.logger import logger, time_log
 
 
 class GenerationPipeline:
@@ -35,6 +35,7 @@ class GenerationPipeline:
         )
         self.timeline = Timeline()
 
+    @time_log(logger)
     def run(self, output_path: str):
         """
         Executes the full video generation pipeline.

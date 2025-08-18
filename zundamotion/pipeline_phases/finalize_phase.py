@@ -8,7 +8,7 @@ from zundamotion.utils.ffmpeg_utils import (
     apply_transition,
     get_audio_duration,
 )
-from zundamotion.utils.logger import logger
+from zundamotion.utils.logger import logger, time_log
 
 
 class FinalizePhase:
@@ -18,6 +18,7 @@ class FinalizePhase:
         self.jobs = jobs
         self.video_renderer = VideoRenderer(self.config, self.temp_dir, self.jobs)
 
+    @time_log(logger)
     def run(
         self,
         output_path: str,
@@ -25,10 +26,6 @@ class FinalizePhase:
         final_clips_for_concat: List[Path],
     ):
         """Phase 4: Concatenate all clips and apply global BGM and scene transitions."""
-        logger.info(
-            "\n--- Phase 4: Final Concatenation, Transitions, and Global BGM Application ---"
-        )
-
         processed_clips: List[Path] = []
         if not final_clips_for_concat:
             logger.warning("No clips to process in FinalizePhase.")
@@ -204,4 +201,3 @@ class FinalizePhase:
             shutil.copy(
                 current_video_path, Path(output_path)
             )  # Use current_video_path as the source
-        logger.info("--- Phase 4 Completed ---")
