@@ -55,7 +55,7 @@ class GenerationPipeline:
 
             # Execute pipeline phases
             audio_phase = AudioPhase(self.config, temp_dir, self.cache_manager)
-            line_data_map = audio_phase.run(scenes, self.timeline)
+            line_data_map, used_voicevox_info = audio_phase.run(scenes, self.timeline)
 
             video_phase = VideoPhase(
                 self.config, temp_dir, self.cache_manager, self.jobs
@@ -67,8 +67,11 @@ class GenerationPipeline:
 
             finalize_phase = FinalizePhase(self.config, temp_dir, self.jobs)
             finalize_phase.run(
-                output_path, scenes, final_clips_for_concat
-            )  # Pass scenes to FinalizePhase
+                output_path,
+                scenes,
+                final_clips_for_concat,
+                used_voicevox_info,  # Pass used_voicevox_info
+            )
 
             # Save the timeline if enabled
             timeline_config = self.config.get("system", {}).get("timeline", {})

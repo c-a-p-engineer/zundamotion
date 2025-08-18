@@ -79,6 +79,23 @@ class CacheManager:
         logger.debug(f"Cached file -> {cached_path.name}")
         return cached_path
 
+    def save_to_cache(
+        self,
+        source_path: Path,
+        key_data: Dict[str, Any],
+        file_name: str,
+        extension: str,
+    ) -> Path:
+        """Saves a file to the cache."""
+        return self.cache_file(source_path, key_data, file_name, extension)
+
+    def get_cache_path(
+        self, key_data: Dict[str, Any], file_name: str, extension: str
+    ) -> Path:
+        """Returns the expected path of a cached file, without checking existence."""
+        cache_key = self._generate_hash(key_data)
+        return self.cache_dir / f"{file_name}_{cache_key}.{extension}"
+
     def get_or_create(
         self,
         key_data: Dict[str, Any],
@@ -93,7 +110,9 @@ class CacheManager:
         new_file_path = creator_func()
         if new_file_path:
             try:
-                self.cache_file(new_file_path, key_data, file_name, extension)
+                self.save_to_cache(
+                    new_file_path, key_data, file_name, extension
+                )  # Use new method
                 return new_file_path
             except Exception as e:
                 raise CacheError(f"Failed to cache file {file_name}.{extension}: {e}")

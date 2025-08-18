@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+from typing import Tuple  # Add this import
 from typing import Any, Dict, List, Optional
 
 from tqdm import tqdm
@@ -25,11 +26,16 @@ class AudioPhase:
             "video_extensions",
             [".mp4", ".mov", ".webm", ".avi", ".mkv"],
         )
+        self.used_voicevox_info: List[Tuple[int, str]] = (
+            []
+        )  # Initialize list to store (speaker_id, text)
 
     @time_log(logger)
     def run(
         self, scenes: List[Dict[str, Any]], timeline: Timeline
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> Tuple[
+        Dict[str, Dict[str, Any]], List[Tuple[int, str]]
+    ]:  # Return line_data_map and used_voicevox_info
         """Phase 1: Generate all audio files and calculate their durations."""
         line_data_map: Dict[str, Dict[str, Any]] = {}
         total_lines = sum(len(s.get("lines", [])) for s in scenes)
@@ -49,9 +55,11 @@ class AudioPhase:
                         )
                         wait_value = line["wait"]
                         if isinstance(wait_value, dict):
-                            duration = wait_value.get("duration")
+                            duration = float(
+                                wait_value.get("duration", 0.0)
+                            )  # Ensure float and provide default
                         else:
-                            duration = wait_value
+                            duration = float(wait_value)  # Ensure float
 
                         timeline.add_event(f"(Wait {duration}s)", duration, text=None)
 
@@ -70,24 +78,46 @@ class AudioPhase:
                         f"Audio Generation (Scene '{scene_id}', Line {idx}: '{text[:30]}...')"
                     )
 
+                    # Generate audio and get speaker info
+                    audio_path, speaker_id, generated_text = (
+                        self.audio_gen.generate_audio(text, line, line_id)
+                    )
+
+                    if not audio_path:
+                        raise PipelineError(
+                            f"Audio generation failed for line: {line_id}"
+                        )
+
+                    # Record VOICEVOX usage information
+                    if (
+                        generated_text.strip()
+                    ):  # Only record if actual voice was generated
+                        self.used_voicevox_info.append((speaker_id, generated_text))
+
+                    # Cache the generated audio file
                     audio_cache_data = {
                         "text": text,
                         "line_config": line,
                         "voice_config": self.config.get("voice", {}),
                     }
-
-                    audio_path = self.cache_manager.get_or_create(
+                    self.cache_manager.save_to_cache(
                         key_data=audio_cache_data,
                         file_name=line_id,
                         extension="wav",
-                        creator_func=lambda: self.audio_gen.generate_audio(
-                            text, line, line_id
-                        ),
+                        source_path=audio_path,
                     )
-                    if not audio_path:
-                        raise PipelineError(
-                            f"Audio generation failed for line: {line_id}"
-                        )
+                    # Ensure audio_path is the cached path for subsequent use
+                    audio_path = self.cache_manager.get_cache_path(
+                        key_data=audio_cache_data,
+                        file_name=line_id,
+                        extension="wav",
+                    )
+                    if (
+                        not audio_path.exists()
+                    ):  # Fallback if cache path doesn't exist (e.g., no_cache=True)
+                        audio_path = (
+                            self.temp_dir / f"{line_id}_speech.wav"
+                        )  # Use the original temp path
 
                     insert_config = line.get("insert")
                     duration = 0.0
@@ -113,4 +143,4 @@ class AudioPhase:
                         "line_config": line,
                     }
                     pbar.update(1)
-        return line_data_map
+        return line_data_map, self.used_voicevox_info

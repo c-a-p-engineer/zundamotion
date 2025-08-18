@@ -21,7 +21,7 @@ class AudioGenerator:
 
     def generate_audio(
         self, text: str, line_config: Dict[str, Any], output_filename: str
-    ) -> Path:
+    ) -> tuple[Path, int, str]:  # Returns (audio_path, speaker_id, text)
         """
         Generates a single audio file for a line of text.
 
@@ -121,11 +121,17 @@ class AudioGenerator:
             )
             create_silent_audio(str(speech_wav_path), required_speech_duration_for_ses)
             speech_duration = required_speech_duration_for_ses
+            speaker = 0  # Default speaker ID for silent audio
+            text = ""  # Empty text for silent audio
 
         # Handle sound effects
         # sound_effects = line_config.get("sound_effects", []) # Already retrieved above
         if not sound_effects:
-            return speech_wav_path  # No sound effects, return speech audio directly
+            return (
+                speech_wav_path,
+                speaker,
+                text,
+            )  # No sound effects, return speech audio directly
 
         # Prepare audio tracks for mixing
         audio_tracks_to_mix = []
@@ -166,4 +172,4 @@ class AudioGenerator:
             audio_tracks_to_mix, str(mixed_wav_path), total_duration=max_end_time
         )
 
-        return mixed_wav_path
+        return mixed_wav_path, speaker, text
