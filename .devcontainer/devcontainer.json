@@ -1,6 +1,10 @@
 {
   "name": "zundamotion-dev",
   "dockerComposeFile": "docker-compose.yml",
+  "runArgs": [
+    "--env-file",
+    ".devcontainer/.env"
+  ],
   "service": "app",
   "workspaceFolder": "/workspace",
   "features": {
@@ -37,5 +41,5 @@
       ]
     }
   },
-  "postCreateCommand": "bash .devcontainer/setup-mcp.sh"
+  "postCreateCommand": "bash .devcontainer/setup-mcp.sh",
 }

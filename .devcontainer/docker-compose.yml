@@ -1,9 +1,10 @@
 version: "3.8"
+
 services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ${ZUNDA_DOCKER:-Dockerfile.cpu}
     volumes:
       - ..:/workspace:cached
     command: sleep infinity
@@ -11,8 +12,27 @@ services:
       - voicevox
     environment:
       - VOICEVOX_URL=http://voicevox:50021
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    gpus: all
 
   voicevox:
-    image: voicevox/voicevox_engine:cpu-ubuntu20.04-latest
+    image: ${VOICEVOX_IMAGE:-voicevox/voicevox_engine:cpu-ubuntu22.04-latest}
     ports:
       - "50021:50021"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    gpus: all
