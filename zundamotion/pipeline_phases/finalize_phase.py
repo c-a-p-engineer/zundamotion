@@ -34,27 +34,19 @@ class FinalizePhase:
             logger.warning("No clips to process in FinalizePhase.")
             return
 
-        # Add the first clip directly
-        processed_clips.append(final_clips_for_concat[0])
+        # Process clips, applying transitions where specified
+        stitched_clips: List[Path] = []
+        current_clip: Path = final_clips_for_concat[0]
 
-        # Apply transitions between clips
         for i in range(len(final_clips_for_concat) - 1):
-            current_scene_clip = final_clips_for_concat[i]
-            next_scene_clip = final_clips_for_concat[i + 1]
-
-            # Get transition config from the *current* scene, as it defines the transition *to* the next scene
+            next_clip: Path = final_clips_for_concat[i + 1]
             transition_config = scenes[i].get("transition")
 
             if transition_config:
                 transition_type = transition_config["type"]
                 transition_duration = transition_config["duration"]
 
-                # Get duration of the current scene clip
-                current_clip_duration = get_audio_duration(str(current_scene_clip))
-
-                # Calculate offset for xfade filter
-                # The transition starts 'offset' seconds into the first input.
-                # So, it should start 'duration' seconds before the end of the first clip.
+                current_clip_duration = get_audio_duration(str(current_clip))
                 offset = current_clip_duration - transition_duration
                 if offset < 0:
                     logger.warning(
@@ -65,71 +57,34 @@ class FinalizePhase:
                     offset = 0
 
                 transition_output_path = self.temp_dir / f"transition_{i}_{i+1}.mp4"
-
                 logger.info(
                     f"Applying '{transition_type}' transition ({transition_duration}s) "
                     f"between scene '{scenes[i]['id']}' and '{scenes[i+1]['id']}'."
                 )
                 apply_transition(
-                    input_video1_path=str(current_scene_clip),
-                    input_video2_path=str(next_scene_clip),
+                    input_video1_path=str(current_clip),
+                    input_video2_path=str(next_clip),
                     output_path=str(transition_output_path),
                     transition_type=transition_type,
                     duration=transition_duration,
                     offset=offset,
                 )
-        current_video_path = final_clips_for_concat[0]
-        temp_concat_idx = 0
-
-        for i in range(len(final_clips_for_concat) - 1):
-            next_video_path = final_clips_for_concat[i + 1]
-            transition_config = scenes[i].get("transition")
-
-            if transition_config:
-                transition_type = transition_config["type"]
-                transition_duration = transition_config["duration"]
-
-                current_video_duration = get_audio_duration(str(current_video_path))
-
-                offset = current_video_duration - transition_duration
-                if offset < 0:
-                    logger.warning(
-                        f"Transition duration ({transition_duration}s) is longer than "
-                        f"the preceding video ({current_video_duration}s) before scene '{scenes[i+1]['id']}'. "
-                        "Adjusting offset to 0. This might cause unexpected behavior."
-                    )
-                    offset = 0
-
-                transitioned_video_path = (
-                    self.temp_dir / f"temp_transitioned_video_{temp_concat_idx}.mp4"
-                )
-
-                logger.info(
-                    f"Applying '{transition_type}' transition ({transition_duration}s) "
-                    f"between scene '{scenes[i]['id']}' and '{scenes[i+1]['id']}'."
-                )
-                apply_transition(
-                    input_video1_path=str(current_video_path),
-                    input_video2_path=str(next_video_path),
-                    output_path=str(transitioned_video_path),
-                    transition_type=transition_type,
-                    duration=transition_duration,
-                    offset=offset,
-                )
-                current_video_path = transitioned_video_path
-                temp_concat_idx += 1
+                current_clip = transition_output_path
             else:
-                concat_output_path = (
-                    self.temp_dir / f"temp_concat_video_{temp_concat_idx}.mp4"
-                )
-                self.video_renderer.concat_clips(
-                    [current_video_path, next_video_path], str(concat_output_path)
-                )
-                current_video_path = concat_output_path
-                temp_concat_idx += 1
+                stitched_clips.append(current_clip)
+                current_clip = next_clip
+
+        stitched_clips.append(current_clip)
 
         final_output_path_temp = self.temp_dir / "final_video_no_global_bgm.mp4"
-        shutil.copy(current_video_path, final_output_path_temp)
+        if stitched_clips:
+            self.video_renderer.concat_clips(
+                stitched_clips,
+                str(final_output_path_temp),
+            )
+        else:
+            logger.warning("No clips to concatenate after transition processing.")
+            return
 
         global_bgm_config = self.config.get("bgm", {})
         global_bgm_path = global_bgm_config.get("path")
@@ -146,7 +101,7 @@ class FinalizePhase:
                 video_duration=get_audio_duration(str(final_output_path_temp)),
             )
         else:
-            shutil.copy(current_video_path, Path(output_path))
+            shutil.copy(final_output_path_temp, Path(output_path))
 
         # Generate VOICEVOX usage report
         output_path_base = Path(output_path)

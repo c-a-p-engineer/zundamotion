@@ -67,11 +67,21 @@ class SubtitleGenerator:
         """
         return textwrap.fill(text, width=max_chars_per_line)
 
+    def _normalize_newlines(self, s: str) -> str:
+        # 既存の実改行統一 + リテラル "\n" → 実改行
+        return s.replace("\r\n", "\n").replace("\r", "\n").replace("\\n", "\n")
+
     def _escape_text(self, text: str) -> str:
         """
-        Escapes special characters in text for ffmpeg's drawtext filter.
+        FFmpeg drawtext向けエスケープ。
+        - まずリテラル \n を実改行に戻す（ダブルエスケープ対策）
+        - バックスラッシュは1回だけエスケープ
+        - 実改行は '\n' に変換
+        - コロンとシングルクォートも1回だけエスケープ
         """
-        # Characters to escape: ' \ :
-        text = text.replace("'", r"\\\'")
-        text = text.replace(":", r"\\:")
+        text = self._normalize_newlines(text)
+        text = text.replace("\\", r"\\")
+        # text = text.replace("\n", r"\n")
+        text = text.replace(":", r"\:")
+        text = text.replace("'", r"\'")
         return text
