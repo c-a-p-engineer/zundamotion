@@ -20,8 +20,9 @@ import os
 from ..utils.ffmpeg_utils import (
     calculate_overlay_position,
     get_ffmpeg_version,
-    get_hardware_encoder,
+    get_hardware_accelerator,
     get_media_info,
+    get_video_encoder_options,
     has_audio_stream,
     normalize_video,
 )
@@ -34,14 +35,20 @@ class VideoRenderer:
         self.video_config = config.get("video", {})
         self.bgm_config = config.get("bgm", {})
         self.jobs = jobs
-        self.hw_encoder = None
         self.ffmpeg_path = "ffmpeg"  # Assume ffmpeg is in PATH
+        self.hw_accel_options: List[str] = []  # Initialize
+        self.h264_encoder_options: List[str] = []  # Initialize
+        self.hevc_encoder_options: List[str] = []  # Initialize
 
         self._initialize_ffmpeg_settings()
 
     def _initialize_ffmpeg_settings(self):
         """Detects FFmpeg version and available hardware encoders."""
-        self.hw_encoder = None
+        (
+            self.hw_accel_options,
+            self.h264_encoder_options,
+            self.hevc_encoder_options,
+        ) = get_video_encoder_options(self.ffmpeg_path)
 
         if self.jobs == "auto":
             self.num_jobs = multiprocessing.cpu_count()
@@ -76,6 +83,7 @@ class VideoRenderer:
         print(f"[Video] Rendering clip -> {output_path.name}")
 
         cmd = ["ffmpeg", "-y"]
+        cmd.extend(self.hw_accel_options)
         if self.num_jobs > 0:
             cmd.extend(["-threads", str(self.num_jobs)])
 
@@ -305,8 +313,11 @@ class VideoRenderer:
             [
                 "-t",
                 str(duration),
-                "-c:v",
-                "libx264",
+            ]
+        )
+        cmd.extend(self.h264_encoder_options)  # Use detected H.264 encoder options
+        cmd.extend(
+            [
                 "-pix_fmt",
                 "yuv420p",
                 "-c:a",
@@ -350,6 +361,7 @@ class VideoRenderer:
         print(f"[Video] Rendering wait clip -> {output_path.name}")
 
         cmd = ["ffmpeg", "-y"]
+        cmd.extend(self.hw_accel_options)
         if self.num_jobs > 0:
             cmd.extend(["-threads", str(self.num_jobs)])
 
@@ -392,8 +404,11 @@ class VideoRenderer:
             [
                 "-t",
                 str(duration),
-                "-c:v",
-                "libx264",
+            ]
+        )
+        cmd.extend(self.h264_encoder_options)  # Use detected H.264 encoder options
+        cmd.extend(
+            [
                 "-pix_fmt",
                 "yuv420p",
                 "-c:a",
@@ -446,6 +461,7 @@ class VideoRenderer:
             "ffmpeg",
             "-y",
         ]
+        cmd.extend(self.hw_accel_options)
 
         # 並列処理の指定
         if self.num_jobs > 0:
@@ -464,18 +480,11 @@ class VideoRenderer:
             ]
         )
 
-        video_codec = "libx264"
-        if self.hw_encoder == "nvenc":
-            video_codec = "h264_nvenc"
-        elif self.hw_encoder == "vaapi":
-            video_codec = "h264_videotoolbox"
-        elif self.hw_encoder == "videotoolbox":
-            video_codec = "h264_videotoolbox"
+        # Use the H.264 encoder options determined during initialization
+        cmd.extend(self.h264_encoder_options)
 
         cmd.extend(
             [
-                "-c:v",
-                video_codec,
                 "-pix_fmt",
                 "yuv420p",
                 "-r",
@@ -489,28 +498,18 @@ class VideoRenderer:
             subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             print(
-                f"Error during ffmpeg processing for looped background video {output_filename} with {video_codec}:"
+                f"Error during ffmpeg processing for looped background video {output_filename}:"
             )
             print(f"STDOUT: {e.stdout}")
             print(f"STDERR: {e.stderr}")
 
             # ハードウェアエンコードが失敗した場合、ソフトウェアエンコードにフォールバック
-            if self.hw_encoder and video_codec != "libx264":
-                print(
-                    f"Hardware encoding failed. Falling back to libx264 for looped background video {output_filename}."
-                )
-                cmd[cmd.index("-c:v") + 1] = "libx264"  # -c:v の次の要素をlibx264に変更
-                try:
-                    subprocess.run(cmd, check=True, capture_output=True, text=True)
-                except subprocess.CalledProcessError as fallback_e:
-                    print(
-                        f"Error during ffmpeg processing with libx264 for looped background video {output_filename}:"
-                    )
-                    print(f"STDOUT: {fallback_e.stdout}")
-                    print(f"STDERR: {e.stderr}")
-                    raise  # ハードウェアエンコーダーが指定されていないか、libx264で失敗した場合はそのままエラーを再スロー
-            else:
-                raise  # ハードウェアエンコーダーが指定されていないか、libx264で失敗した場合はそのままエラーを再スロー
+            # self.h264_encoder_options に既にフォールバックロジックが含まれているため、ここでは再試行しない
+            print(
+                f"Video encoding failed for looped background video {output_filename}. "
+                "Ensure FFmpeg and required codecs are properly installed and configured."
+            )
+            raise
 
         return output_path
 
@@ -534,6 +533,7 @@ class VideoRenderer:
             "ffmpeg",
             "-y",  # Overwrite output files without asking
         ]
+        cmd.extend(self.hw_accel_options)
 
         # Add all clips as inputs
         for p in clip_paths:
@@ -553,8 +553,11 @@ class VideoRenderer:
                 "[outv]",
                 "-map",
                 "[outa]",
-                "-c:v",
-                "libx264",  # Re-encoding is necessary with concat filter
+            ]
+        )
+        cmd.extend(self.h264_encoder_options)  # Use detected H.264 encoder options
+        cmd.extend(
+            [
                 "-pix_fmt",
                 "yuv420p",
                 "-c:a",

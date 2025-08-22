@@ -22,28 +22,153 @@ def get_ffmpeg_version(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
         return None
 
 
-def get_hardware_encoder(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
+def get_hardware_accelerator(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
     """
-    Detects available hardware encoders (NVENC, VAAPI, VideoToolbox).
-    Returns the name of the first detected encoder or None.
+    Detects available hardware accelerators using 'ffmpeg -hwaccels'.
+    Returns the name of the first detected accelerator or None.
     """
     try:
-        cmd = [ffmpeg_path, "-encoders"]
+        cmd = [ffmpeg_path, "-hwaccels"]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        output = result.stdout
+        output = result.stdout.lower()
 
-        if "h264_nvenc" in output or "hevc_nvenc" in output:
-            return "nvenc"
-        if "h264_vaapi" in output or "hevc_vaapi" in output:
+        if "cuda" in output or "nvenc" in output:
+            return "cuda"
+        if "qsv" in output:
+            return "qsv"
+        if "vaapi" in output:
             return "vaapi"
-        if "h264_videotoolbox" in output or "hevc_videotoolbox" in output:
+        if "videotoolbox" in output:
             return "videotoolbox"
-        # Add more encoders as needed
+        if "amf" in output:
+            return "amf"
+        # Add more accelerators as needed
 
         return None
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        logger.error(f"Error detecting hardware encoder: {e}")
+        logger.error(f"Error detecting hardware accelerators: {e}")
         return None
+
+
+def get_video_encoder_options(
+    ffmpeg_path: str = "ffmpeg",
+) -> Tuple[List[str], List[str], List[str]]:
+    """
+    Determines the best available H.264 and HEVC video encoder options,
+    prioritizing hardware encoders if available, otherwise falling back to CPU.
+
+    Returns:
+        Tuple[List[str], List[str], List[str]]: A tuple containing three lists:
+                                     - HW accel input options (e.g., ['-hwaccel', 'cuda'])
+                                     - H.264 encoder options (e.g., ['-c:v', 'h264_nvenc'])
+                                     - HEVC encoder options (e.g., ['-c:v', 'hevc_nvenc'])
+    """
+    hw_accel = get_hardware_accelerator(ffmpeg_path)
+    hw_accel_options: List[str] = []
+    h264_encoder_options = ["-c:v", "libx264", "-preset", "fast", "-crf", "23"]
+    hevc_encoder_options = [
+        "-c:v",
+        "libx265",
+        "-preset",
+        "fast",
+        "-crf",
+        "28",
+    ]  # HEVC default CRF is higher
+
+    if hw_accel:
+        logger.info(
+            f"Detected hardware accelerator: {hw_accel}. Attempting to use GPU encoding."
+        )
+        if hw_accel == "cuda":
+            # NVIDIA NVENC
+            h264_encoder_options = [
+                "-c:v",
+                "h264_nvenc",
+                "-preset",
+                "fast",
+                "-cq",
+                "23",
+            ]
+            hevc_encoder_options = [
+                "-c:v",
+                "hevc_nvenc",
+                "-preset",
+                "fast",
+                "-cq",
+                "28",
+            ]
+            hw_accel_options = ["-hwaccel", "cuda"]
+        elif hw_accel == "qsv":
+            # Intel QSV
+            h264_encoder_options = [
+                "-c:v",
+                "h264_qsv",
+                "-preset",
+                "veryfast",
+                "-q",
+                "23",
+            ]
+            hevc_encoder_options = [
+                "-c:v",
+                "hevc_qsv",
+                "-preset",
+                "veryfast",
+                "-q",
+                "28",
+            ]
+            hw_accel_options = ["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"]
+        elif hw_accel == "vaapi":
+            # Generic VAAPI (Intel, AMD)
+            h264_encoder_options = ["-c:v", "h264_vaapi", "-qp", "23"]
+            hevc_encoder_options = ["-c:v", "hevc_vaapi", "-qp", "28"]
+            # VAAPI requires a device, typically /dev/dri/renderD128
+            # This might need to be configured externally or detected more robustly
+            hw_accel_options = [
+                "-hwaccel",
+                "vaapi",
+                "-hwaccel_output_format",
+                "vaapi",
+                "-vaapi_device",
+                "/dev/dri/renderD128",
+            ]
+        elif hw_accel == "videotoolbox":
+            # Apple VideoToolbox
+            h264_encoder_options = [
+                "-c:v",
+                "h264_videotoolbox",
+                "-b:v",
+                "5M",
+            ]  # VideoToolbox uses bitrate, not CRF
+            hevc_encoder_options = ["-c:v", "hevc_videotoolbox", "-b:v", "5M"]
+        elif hw_accel == "amf":
+            # AMD AMF (Windows only, typically)
+            h264_encoder_options = [
+                "-c:v",
+                "h264_amf",
+                "-quality",
+                "balanced",
+                "-qp_i",
+                "23",
+                "-qp_p",
+                "23",
+            ]
+            hevc_encoder_options = [
+                "-c:v",
+                "hevc_amf",
+                "-quality",
+                "balanced",
+                "-qp_i",
+                "28",
+                "-qp_p",
+                "28",
+            ]
+            # AMF might not need explicit -hwaccel if it's the encoder itself
+    else:
+        logger.info(
+            "No hardware accelerator detected. Falling back to CPU encoding (libx264/libx265)."
+        )
+
+    return hw_accel_options, h264_encoder_options, hevc_encoder_options
 
 
 def get_audio_duration(file_path: str) -> float:
@@ -160,29 +285,35 @@ def normalize_video(
     video_filter = f"fps={target_fps},setpts=PTS-STARTPTS"
     audio_filter = f"aresample={target_ar},asetpts=PTS-STARTPTS"
 
+    hw_accel_options, h264_encoder_options, _ = get_video_encoder_options()
+
     cmd = [
         "ffmpeg",
         "-y",
-        "-i",
-        input_path,
-        "-vf",
-        video_filter,
-        "-af",
-        audio_filter,
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-preset",
-        "fast",
-        "-crf",
-        "23",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        output_path,
     ]
+    cmd.extend(hw_accel_options)
+    cmd.extend(
+        [
+            "-i",
+            input_path,
+            "-vf",
+            video_filter,
+            "-af",
+            audio_filter,
+        ]
+    )
+    cmd.extend(h264_encoder_options)  # Use detected H.264 encoder options
+    cmd.extend(
+        [
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            output_path,
+        ]
+    )
     try:
         process = subprocess.run(
             cmd, check=True, capture_output=True, text=True, encoding="utf-8"
@@ -421,14 +552,18 @@ def apply_transition(
     has_audio1 = has_audio_stream(input_video1_path)
     has_audio2 = has_audio_stream(input_video2_path)
 
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        input_video1_path,
-        "-i",
-        input_video2_path,
-    ]
+    hw_accel_options, h264_encoder_options, _ = get_video_encoder_options()
+
+    cmd = ["ffmpeg", "-y"]
+    cmd.extend(hw_accel_options)
+    cmd.extend(
+        [
+            "-i",
+            input_video1_path,
+            "-i",
+            input_video2_path,
+        ]
+    )
 
     # 映像は従来どおり
     vf = f"[0:v][1:v]xfade=transition={transition_type}:duration={duration}:offset={offset}[v]"
@@ -473,22 +608,19 @@ def apply_transition(
         cmd += ["-filter_complex", vf, "-map", "[v]"]
 
     # エンコード設定
-    cmd += [
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",  # X(Twitter)互換性のために追加
-        "-preset",
-        "fast",
-        "-crf",
-        "23",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        # "-shortest",  # 必要なら出力を最短ストリーム長に合わせる
-        output_path,
-    ]
+    cmd.extend(h264_encoder_options)
+    cmd.extend(
+        [
+            "-pix_fmt",
+            "yuv420p",  # X(Twitter)互換性のために追加
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            # "-shortest",  # 必要なら出力を最短ストリーム長に合わせる
+            output_path,
+        ]
+    )
 
     try:
         process = subprocess.run(
