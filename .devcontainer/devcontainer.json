@@ -3,7 +3,7 @@
   "dockerComposeFile": "docker-compose.yml",
   "runArgs": [
     "--env-file",
-    ".devcontainer/.env"
+    ".env"
   ],
   "service": "app",
   "workspaceFolder": "/workspace",
