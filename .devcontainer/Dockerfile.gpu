@@ -56,6 +56,7 @@ RUN pip install --upgrade pip \
 # ---------------------------------------------------------
 # FFmpeg パッケージのインストール
 # ---------------------------------------------------------
+RUN add-apt-repository ppa:ubuntuhandbook1/ffmpeg7
 RUN apt-get update && apt-get install -y \
    wget \
    xz-utils \

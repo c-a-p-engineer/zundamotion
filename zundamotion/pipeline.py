@@ -65,13 +65,17 @@ class GenerationPipeline:
             bgm_phase = BGMPhase(self.config, temp_dir)
             final_clips_for_concat = bgm_phase.run(scenes, all_clips)
 
-            finalize_phase = FinalizePhase(self.config, temp_dir, self.jobs)
-            finalize_phase.run(
-                output_path,
+            finalize_phase = FinalizePhase(self.config, temp_dir, self.cache_manager)
+            final_video_path = finalize_phase.run(
                 scenes,
-                final_clips_for_concat,
-                used_voicevox_info,  # Pass used_voicevox_info
+                self.timeline,
+                line_data_map,
+                final_clips_for_concat,  # video_paths に相当
+                used_voicevox_info,
             )
+            # 最終的な動画をoutput_pathにコピー
+            shutil.copy(final_video_path, output_path)
+            logger.info(f"Final video saved to {output_path}")
 
             # Save the timeline if enabled
             timeline_config = self.config.get("system", {}).get("timeline", {})
@@ -113,7 +117,7 @@ def run_generation(
     output_path: str,
     no_cache: bool = False,
     cache_refresh: bool = False,
-    jobs: str = "1",
+    jobs: str = "0",
     timeline_format: Optional[str] = None,
     no_timeline: bool = False,
     subtitle_file_format: Optional[str] = None,

@@ -44,7 +44,7 @@ def main():
     parser.add_argument(
         "--jobs",
         type=str,
-        default="1",
+        default="0",
         help='Number of parallel jobs to use for FFmpeg. "auto" for CPU cores.',
     )
     parser.add_argument(

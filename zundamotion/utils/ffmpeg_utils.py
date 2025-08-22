@@ -1,4 +1,18 @@
+# -*- coding: utf-8 -*-
+"""
+FFmpeg 7 対応のユーティリティ群（全文置き換え用）
+
+ポイント
+- 既定で `-threads 0`（自動スレッド化）＋ `-filter_threads N` ＋ `-filter_complex_threads N` を付与
+- ハードウェアエンコーダは FFmpeg 7 の挙動にあわせて選択（NVENC: -cq / QSV: -global_quality / CPU: -crf）
+- QSV/VAAPI でも **入力側の -hwaccel は原則付与しない**（drawtext/overlay 等を多用するためCPUフィルタと相性を取る）
+  - つまり「デコード＋フィルタ＝CPU」「エンコードのみHW」という方針で安定化
+- バージョン検出＆エンコーダ存在チェックを強化（`ffmpeg -encoders`）
+- 動画長取得の専用関数（`get_media_duration`）を追加（従来の `get_audio_duration` を動画に誤用しない）
+"""
+
 import json
+import os
 import re
 import subprocess
 from typing import List, Optional, Tuple
@@ -6,181 +20,216 @@ from typing import List, Optional, Tuple
 from zundamotion.utils.logger import logger
 
 
-def get_ffmpeg_version(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
-    """
-    Gets the FFmpeg version string.
-    """
+# =========================================================
+# 共通: スレッド＆FFmpeg検出
+# =========================================================
+def get_nproc_value() -> str:
+    """利用可能なCPUコア数（>=1 を保証）を文字列で返す。"""
     try:
-        cmd = [ffmpeg_path, "-version"]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        match = re.search(r"ffmpeg version (\S+)", result.stdout)
-        if match:
-            return match.group(1)
-        return None
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        n = os.cpu_count() or 1
+        if n < 1:
+            logger.warning("Could not detect CPU count, defaulting to 1 thread.")
+            return "1"
+        return str(n)
+    except Exception as e:
+        logger.error(f"Error getting nproc value: {e}, defaulting to 1 thread.")
+        return "1"
+
+
+def _run_ffmpeg(args: List[str]) -> subprocess.CompletedProcess:
+    """ffmpeg/ffprobeを呼び出して CompletedProcess を返す（例外は上位で処理）。"""
+    return subprocess.run(args, capture_output=True, text=True, check=True)
+
+
+def get_ffmpeg_version(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
+    """FFmpeg のバージョン文字列（例: '7.0.2'）を返す。失敗時 None。"""
+    try:
+        result = _run_ffmpeg([ffmpeg_path, "-version"])
+        m = re.search(r"ffmpeg version (\S+)", result.stdout)
+        return m.group(1) if m else None
+    except Exception as e:
         logger.error(f"Error getting FFmpeg version: {e}")
         return None
 
 
-def get_hardware_accelerator(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
-    """
-    Detects available hardware accelerators using 'ffmpeg -hwaccels'.
-    Returns the name of the first detected accelerator or None.
-    """
+def _ffmpeg_major_version(ffmpeg_path: str = "ffmpeg") -> Optional[int]:
+    v = get_ffmpeg_version(ffmpeg_path)
+    if not v:
+        return None
+    # 例: '7.0.2-...'
+    m = re.match(r"(\d+)", v)
+    return int(m.group(1)) if m else None
+
+
+def _list_encoders(ffmpeg_path: str = "ffmpeg") -> str:
+    """`ffmpeg -encoders` の標準出力（小文字化）を返す。失敗時は空文字。"""
     try:
-        cmd = [ffmpeg_path, "-hwaccels"]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        output = result.stdout.lower()
-
-        if "cuda" in output or "nvenc" in output:
-            return "cuda"
-        if "qsv" in output:
-            return "qsv"
-        if "vaapi" in output:
-            return "vaapi"
-        if "videotoolbox" in output:
-            return "videotoolbox"
-        if "amf" in output:
-            return "amf"
-        # Add more accelerators as needed
-
-        return None
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        logger.error(f"Error detecting hardware accelerators: {e}")
-        return None
+        result = _run_ffmpeg([ffmpeg_path, "-encoders"])
+        return result.stdout.lower()
+    except Exception as e:
+        logger.error(f"Error listing FFmpeg encoders: {e}")
+        return ""
 
 
+# =========================================================
+# ハードウェア検出（FFmpeg 7 向け）
+# =========================================================
+def get_hardware_encoder_kind(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
+    """
+    利用可能なH.264/HEVCハードウェア「エンコーダ」を判定して返す。
+    優先順位: nvenc -> qsv -> vaapi -> videotoolbox -> amf
+    戻り値: 'nvenc' | 'qsv' | 'vaapi' | 'videotoolbox' | 'amf' | None
+    """
+    encs = _list_encoders(ffmpeg_path)
+
+    # まずNVENC
+    if " h264_nvenc " in f" {encs} " or " hevc_nvenc " in f" {encs} ":
+        return "nvenc"
+
+    # 次にQSV
+    if " h264_qsv " in f" {encs} " or " hevc_qsv " in f" {encs} ":
+        return "qsv"
+
+    # VAAPI
+    if " h264_vaapi " in f" {encs} " or " hevc_vaapi " in f" {encs} ":
+        return "vaapi"
+
+    # Apple
+    if " h264_videotoolbox " in f" {encs} " or " hevc_videotoolbox " in f" {encs} ":
+        return "videotoolbox"
+
+    # AMD AMF（主にWindows）
+    if " h264_amf " in f" {encs} " or " hevc_amf " in f" {encs} ":
+        return "amf"
+
+    return None
+
+
+# =========================================================
+# エンコーダオプション（FFmpeg 7 向け）
+# =========================================================
 def get_video_encoder_options(
     ffmpeg_path: str = "ffmpeg",
 ) -> Tuple[List[str], List[str], List[str]]:
     """
-    Determines the best available H.264 and HEVC video encoder options,
-    prioritizing hardware encoders if available, otherwise falling back to CPU.
+    H.264/HEVC のエンコーダオプション（FFmpeg 7 向け推奨値）を返す。
+    戻り値: (hw_accel_input_opts, h264_encoder_opts, hevc_encoder_opts)
 
-    Returns:
-        Tuple[List[str], List[str], List[str]]: A tuple containing three lists:
-                                     - HW accel input options (e.g., ['-hwaccel', 'cuda'])
-                                     - H.264 encoder options (e.g., ['-c:v', 'h264_nvenc'])
-                                     - HEVC encoder options (e.g., ['-c:v', 'hevc_nvenc'])
+    注意:
+    - 本関数は **デコード＆フィルタはCPU** 想定。`-hwaccel` は返さない。
+      （drawtext/overlay 等のCPUフィルタと混在時のトラブルを避けるため）
+    - ハードウェア「エンコード」は積極的に使用。
+    - 環境変数で強制切替可:
+        DISABLE_HWENC=1 → CPU固定
+        FORCE_NVENC=1, FORCE_QSV=1, FORCE_VAAPI=1 → 各HWエンコ強制
     """
-    hw_accel = get_hardware_accelerator(ffmpeg_path)
-    hw_accel_options: List[str] = []
-    h264_encoder_options = ["-c:v", "libx264", "-preset", "fast", "-crf", "23"]
-    hevc_encoder_options = [
-        "-c:v",
-        "libx265",
-        "-preset",
-        "fast",
-        "-crf",
-        "28",
-    ]  # HEVC default CRF is higher
+    hw_force_off = os.getenv("DISABLE_HWENC", "0") == "1"
 
-    if hw_accel:
-        logger.info(
-            f"Detected hardware accelerator: {hw_accel}. Attempting to use GPU encoding."
+    hw_kind_env = (
+        "nvenc"
+        if os.getenv("FORCE_NVENC") == "1"
+        else (
+            "qsv"
+            if os.getenv("FORCE_QSV") == "1"
+            else "vaapi" if os.getenv("FORCE_VAAPI") == "1" else None
         )
-        if hw_accel == "cuda":
-            # NVIDIA NVENC
-            h264_encoder_options = [
-                "-c:v",
-                "h264_nvenc",
-                "-preset",
-                "fast",
-                "-cq",
-                "23",
-            ]
-            hevc_encoder_options = [
-                "-c:v",
-                "hevc_nvenc",
-                "-preset",
-                "fast",
-                "-cq",
-                "28",
-            ]
-            hw_accel_options = ["-hwaccel", "cuda"]
-        elif hw_accel == "qsv":
-            # Intel QSV
-            h264_encoder_options = [
-                "-c:v",
-                "h264_qsv",
-                "-preset",
-                "veryfast",
-                "-q",
-                "23",
-            ]
-            hevc_encoder_options = [
-                "-c:v",
-                "hevc_qsv",
-                "-preset",
-                "veryfast",
-                "-q",
-                "28",
-            ]
-            hw_accel_options = ["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"]
-        elif hw_accel == "vaapi":
-            # Generic VAAPI (Intel, AMD)
-            h264_encoder_options = ["-c:v", "h264_vaapi", "-qp", "23"]
-            hevc_encoder_options = ["-c:v", "hevc_vaapi", "-qp", "28"]
-            # VAAPI requires a device, typically /dev/dri/renderD128
-            # This might need to be configured externally or detected more robustly
-            hw_accel_options = [
-                "-hwaccel",
-                "vaapi",
-                "-hwaccel_output_format",
-                "vaapi",
-                "-vaapi_device",
-                "/dev/dri/renderD128",
-            ]
-        elif hw_accel == "videotoolbox":
-            # Apple VideoToolbox
-            h264_encoder_options = [
-                "-c:v",
-                "h264_videotoolbox",
-                "-b:v",
-                "5M",
-            ]  # VideoToolbox uses bitrate, not CRF
-            hevc_encoder_options = ["-c:v", "hevc_videotoolbox", "-b:v", "5M"]
-        elif hw_accel == "amf":
-            # AMD AMF (Windows only, typically)
-            h264_encoder_options = [
-                "-c:v",
-                "h264_amf",
-                "-quality",
-                "balanced",
-                "-qp_i",
-                "23",
-                "-qp_p",
-                "23",
-            ]
-            hevc_encoder_options = [
-                "-c:v",
-                "hevc_amf",
-                "-quality",
-                "balanced",
-                "-qp_i",
-                "28",
-                "-qp_p",
-                "28",
-            ]
-            # AMF might not need explicit -hwaccel if it's the encoder itself
+    )
+
+    hw_kind = (
+        None
+        if hw_force_off
+        else (hw_kind_env or get_hardware_encoder_kind(ffmpeg_path))
+    )
+
+    # 入力側の -hwaccel は返さない（安定性重視）
+    hw_accel_input_opts: List[str] = []
+
+    # 既定はCPU（libx264/libx265）
+    h264_opts = ["-c:v", "libx264", "-preset", "fast", "-crf", "23"]
+    hevc_opts = ["-c:v", "libx265", "-preset", "fast", "-crf", "28"]  # HEVCはCRF高め
+
+    if hw_kind == "nvenc":
+        # NVENC: FFmpeg 7 でも -cq を使用
+        h264_opts = ["-c:v", "h264_nvenc", "-preset", "fast", "-cq", "23"]
+        hevc_opts = ["-c:v", "hevc_nvenc", "-preset", "fast", "-cq", "28"]
+        logger.info("Using NVENC for video encoding.")
+    elif hw_kind == "qsv":
+        # QSV: FFmpeg 7 では -global_quality を使用（-q は避ける）
+        # 品質モードは 'icq' / 'la_icq' などあるが、汎用性重視でICQ相当の指定
+        h264_opts = ["-c:v", "h264_qsv", "-preset", "veryfast", "-global_quality", "23"]
+        hevc_opts = ["-c:v", "hevc_qsv", "-preset", "veryfast", "-global_quality", "28"]
+        logger.info("Using QSV for video encoding.")
+    elif hw_kind == "vaapi":
+        # VAAPI: 明示的な -vaapi_device は「入力側HW化しない」方針のためここでは付けない
+        # （CPUでフィルタ→hwエンコはVAAPI非対応が多い。ここでは素直にCPUにフォールバック推奨）
+        # それでも使いたい場合は別途呼び出し元で format=nv12,hwupload,scale_vaapi 等を構成すること。
+        h264_opts = ["-c:v", "h264_vaapi", "-qp", "23"]
+        hevc_opts = ["-c:v", "hevc_vaapi", "-qp", "28"]
+        logger.info(
+            "Using VAAPI for video encoding (note: filtergraph must be VAAPI-friendly)."
+        )
+    elif hw_kind == "videotoolbox":
+        # Apple VideoToolbox: CRFではなくビットレート指定が一般的
+        h264_opts = ["-c:v", "h264_videotoolbox", "-b:v", "5M"]
+        hevc_opts = ["-c:v", "hevc_videotoolbox", "-b:v", "5M"]
+        logger.info("Using VideoToolbox for video encoding.")
+    elif hw_kind == "amf":
+        # AMD AMF
+        h264_opts = [
+            "-c:v",
+            "h264_amf",
+            "-quality",
+            "balanced",
+            "-qp_i",
+            "23",
+            "-qp_p",
+            "23",
+        ]
+        hevc_opts = [
+            "-c:v",
+            "hevc_amf",
+            "-quality",
+            "balanced",
+            "-qp_i",
+            "28",
+            "-qp_p",
+            "28",
+        ]
+        logger.info("Using AMF for video encoding.")
     else:
-        logger.info(
-            "No hardware accelerator detected. Falling back to CPU encoding (libx264/libx265)."
-        )
+        if hw_force_off:
+            logger.info(
+                "Hardware encoding disabled by DISABLE_HWENC=1. Falling back to CPU."
+            )
+        else:
+            logger.info(
+                "No hardware encoder found. Falling back to CPU (libx264/libx265)."
+            )
 
-    return hw_accel_options, h264_encoder_options, hevc_encoder_options
+    return hw_accel_input_opts, h264_opts, hevc_opts
 
 
+def _threading_flags(ffmpeg_path: str = "ffmpeg") -> List[str]:
+    """
+    FFmpeg 7 を想定したスレッド設定を返す。
+    -threads 0（自動）＋ filter_threads / filter_complex_threads = nproc
+    """
+    nproc = get_nproc_value()
+    return [
+        "-threads",
+        "0",
+        "-filter_threads",
+        nproc,
+        "-filter_complex_threads",
+        nproc,
+    ]
+
+
+# =========================================================
+# ffprobe 系
+# =========================================================
 def get_audio_duration(file_path: str) -> float:
-    """
-    Get the duration of an audio file using ffprobe.
-
-    Args:
-        file_path (str): Path to the audio file.
-
-    Returns:
-        float: Duration in seconds.
-    """
+    """音声ファイルの長さ（秒, 小数2桁丸め）。"""
     try:
         cmd = [
             "ffprobe",
@@ -192,46 +241,48 @@ def get_audio_duration(file_path: str) -> float:
             "json",
             file_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-
-        logger.debug(f"ffprobe stdout for {file_path}: {result.stdout}")
-
-        probe_data = json.loads(result.stdout)
-
-        logger.debug(f"Type of probe_data: {type(probe_data)}, Value: {probe_data}")
-
-        duration = float(probe_data["format"]["duration"])
+        result = _run_ffmpeg(cmd)
+        probe = json.loads(result.stdout)
+        duration = float(probe["format"]["duration"])
         return round(duration, 2)
     except subprocess.CalledProcessError as e:
-        logger.error(f"Error running ffprobe for {file_path}: {e}")
-        logger.error(e.stderr)
+        logger.error(f"Error running ffprobe for {file_path}: {e}\n{e.stderr}")
         raise
-    except (json.JSONDecodeError, KeyError) as e:
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
         logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
         raise
 
 
-def get_media_info(file_path: str) -> dict:
-    """
-    Get media information using ffprobe.
-
-    Args:
-        file_path (str): Path to the media file.
-
-    Returns:
-        dict: A dictionary containing media information.
-    """
+def get_media_duration(file_path: str) -> float:
+    """音声/動画問わず、コンテナから長さ（秒）を取得。"""
     try:
         cmd = [
             "ffprobe",
             "-v",
             "error",
-            "-show_streams",
+            "-show_entries",
+            "format=duration",
             "-of",
             "json",
             file_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = _run_ffmpeg(cmd)
+        probe = json.loads(result.stdout)
+        duration = float(probe["format"]["duration"])
+        return round(duration, 2)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error running ffprobe for {file_path}: {e}\n{e.stderr}")
+        raise
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
+        raise
+
+
+def get_media_info(file_path: str) -> dict:
+    """ffprobe 経由でシンプルなメタ情報を返す。"""
+    try:
+        cmd = ["ffprobe", "-v", "error", "-show_streams", "-of", "json", file_path]
+        result = _run_ffmpeg(cmd)
         info = json.loads(result.stdout)
 
         video_stream = next(
@@ -243,20 +294,32 @@ def get_media_info(file_path: str) -> dict:
 
         media_info = {}
         if video_stream:
+            r_rate = video_stream.get("r_frame_rate", "0/0")
+            try:
+                num, den = map(int, r_rate.split("/"))
+                fps = float(num) / float(den) if den else 0.0
+            except Exception:
+                fps = 0.0
             media_info["video"] = {
                 "width": int(video_stream.get("width", 0)),
                 "height": int(video_stream.get("height", 0)),
                 "pix_fmt": video_stream.get("pix_fmt"),
-                "r_frame_rate": video_stream.get("r_frame_rate", "0/0"),
+                "r_frame_rate": r_rate,
+                "fps": fps,
             }
-            # Convert frame rate to a float
-            num, den = map(int, media_info["video"]["r_frame_rate"].split("/"))
-            media_info["video"]["fps"] = float(num) / float(den) if den != 0 else 0.0
 
         if audio_stream:
             media_info["audio"] = {
-                "sample_rate": int(audio_stream.get("sample_rate", 0)),
-                "channels": int(audio_stream.get("channels", 0)),
+                "sample_rate": (
+                    int(audio_stream.get("sample_rate", 0))
+                    if audio_stream.get("sample_rate")
+                    else 0
+                ),
+                "channels": (
+                    int(audio_stream.get("channels", 0))
+                    if audio_stream.get("channels")
+                    else 0
+                ),
                 "channel_layout": audio_stream.get("channel_layout"),
             }
 
@@ -265,116 +328,13 @@ def get_media_info(file_path: str) -> dict:
     except subprocess.CalledProcessError as e:
         logger.error(f"Error running ffprobe for {file_path}: {e.stderr}")
         raise
-    except (json.JSONDecodeError, KeyError) as e:
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
         logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
         raise
 
 
-def normalize_video(
-    input_path: str, output_path: str, target_fps: int = 30, target_ar: int = 48000
-):
-    """
-    Normalizes a video to a standard format (30fps, 48kHz audio) with timestamp correction.
-
-    Args:
-        input_path (str): Path to the input video file.
-        output_path (str): Path to save the normalized video file.
-        target_fps (int): Target frames per second.
-        target_ar (int): Target audio sample rate.
-    """
-    video_filter = f"fps={target_fps},setpts=PTS-STARTPTS"
-    audio_filter = f"aresample={target_ar},asetpts=PTS-STARTPTS"
-
-    hw_accel_options, h264_encoder_options, _ = get_video_encoder_options()
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-    ]
-    cmd.extend(hw_accel_options)
-    cmd.extend(
-        [
-            "-i",
-            input_path,
-            "-vf",
-            video_filter,
-            "-af",
-            audio_filter,
-        ]
-    )
-    cmd.extend(h264_encoder_options)  # Use detected H.264 encoder options
-    cmd.extend(
-        [
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            output_path,
-        ]
-    )
-    try:
-        process = subprocess.run(
-            cmd, check=True, capture_output=True, text=True, encoding="utf-8"
-        )
-        logger.debug(f"FFmpeg stdout:\n{process.stdout}")
-        logger.debug(f"FFmpeg stderr:\n{process.stderr}")
-        logger.info(f"Successfully normalized {input_path} to {output_path}")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error normalizing video {input_path}: {e}")
-        logger.error(f"FFmpeg stdout:\n{e.stdout}")
-        logger.error(f"FFmpeg stderr:\n{e.stderr}")
-        raise
-
-
-def create_silent_audio(
-    output_path: str, duration: float, sample_rate: int = 44100, channels: int = 2
-):
-    """
-    Creates a silent audio file of a specified duration.
-
-    Args:
-        output_path (str): Path to save the silent audio file.
-        duration (float): Duration of the silent audio in seconds.
-        sample_rate (int): Audio sample rate (Hz).
-        channels (int): Number of audio channels.
-    """
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-f",
-        "lavfi",
-        "-i",
-        f"anullsrc=r={sample_rate}:cl={channels}",
-        "-t",
-        str(duration),
-        "-c:a",
-        "pcm_s16le",  # Use uncompressed PCM for silent audio
-        output_path,
-    ]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
-        logger.debug(
-            f"Created silent audio file: {output_path} with duration {duration}s"
-        )
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error creating silent audio file {output_path}: {e}")
-        logger.error(f"STDOUT: {e.stdout}")
-        logger.error(f"STDERR: {e.stderr}")
-        raise
-
-
 def has_audio_stream(file_path: str) -> bool:
-    """
-    Checks if a video file has an audio stream using ffprobe.
-
-    Args:
-        file_path (str): Path to the video file.
-
-    Returns:
-        bool: True if an audio stream exists, False otherwise.
-    """
+    """動画に音声ストリームがあるか。"""
     try:
         cmd = [
             "ffprobe",
@@ -388,18 +348,111 @@ def has_audio_stream(file_path: str) -> bool:
             "json",
             file_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        probe_data = json.loads(result.stdout)
-        return len(probe_data.get("streams", [])) > 0
+        result = _run_ffmpeg(cmd)
+        probe = json.loads(result.stdout)
+        return len(probe.get("streams", [])) > 0
     except subprocess.CalledProcessError as e:
         logger.error(
-            f"Error running ffprobe to check audio stream for {file_path}: {e}"
+            f"Error running ffprobe to check audio stream for {file_path}: {e}\n{e.stderr}"
         )
-        logger.error(e.stderr)
         return False
     except (json.JSONDecodeError, KeyError) as e:
         logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
         return False
+
+
+# =========================================================
+# 変換・生成
+# =========================================================
+def normalize_video(
+    input_path: str,
+    output_path: str,
+    target_fps: int = 30,
+    target_ar: int = 48000,
+    ffmpeg_path: str = "ffmpeg",
+):
+    """
+    映像を標準フォーマット（30fps, 48kHz）に正規化。タイムスタンプも補正。
+    - デコード＆フィルタ: CPU
+    - エンコード: HWエンコ（存在すれば）/ CPU
+    """
+    video_filter = f"fps={target_fps},setpts=PTS-STARTPTS"
+    audio_filter = f"aresample={target_ar},asetpts=PTS-STARTPTS"
+
+    hw_in, h264_enc, _ = get_video_encoder_options(ffmpeg_path)
+
+    cmd = [ffmpeg_path, "-y"]
+    cmd.extend(_threading_flags(ffmpeg_path))
+    # 入力側HWは付与しない（安定性重視）
+    # cmd.extend(hw_in)
+    cmd.extend(
+        [
+            "-i",
+            input_path,
+            "-vf",
+            video_filter,
+            "-af",
+            audio_filter,
+        ]
+    )
+    cmd.extend(h264_enc)
+    cmd.extend(
+        [
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            output_path,
+        ]
+    )
+
+    try:
+        proc = _run_ffmpeg(cmd)
+        logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
+        logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
+        logger.info(f"Successfully normalized {input_path} to {output_path}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error normalizing video {input_path}: {e}")
+        logger.error(f"FFmpeg stdout:\n{e.stdout}")
+        logger.error(f"FFmpeg stderr:\n{e.stderr}")
+        raise
+
+
+def create_silent_audio(
+    output_path: str,
+    duration: float,
+    sample_rate: int = 44100,
+    channels: int = 2,
+    ffmpeg_path: str = "ffmpeg",
+):
+    """
+    指定秒数の無音WAVを作成（PCM s16le）。
+    FFmpeg 7 では anullsrc の cl は 'mono' / 'stereo' 指定が安全。
+    """
+    cl = "mono" if channels == 1 else "stereo"
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"anullsrc=r={sample_rate}:cl={cl}",
+        "-t",
+        str(duration),
+        "-c:a",
+        "pcm_s16le",
+        output_path,
+    ]
+    try:
+        _run_ffmpeg(cmd)
+        logger.debug(f"Created silent audio: {output_path} ({duration}s)")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error creating silent audio file {output_path}: {e}")
+        logger.error(f"STDOUT: {e.stdout}")
+        logger.error(f"STDERR: {e.stderr}")
+        raise
 
 
 def add_bgm_to_video(
@@ -411,121 +464,81 @@ def add_bgm_to_video(
     fade_in_duration: float = 0.0,
     fade_out_duration: float = 0.0,
     video_duration: Optional[float] = None,
+    ffmpeg_path: str = "ffmpeg",
 ):
     """
-    Adds background music to a video file with fade-in/out and volume control.
-    If the input video has no audio stream, the BGM will be added as the primary audio.
-
-    Args:
-        video_path (str): Path to the input video file.
-        bgm_path (str): Path to the background music file.
-        output_path (str): Path for the output video file with BGM.
-        bgm_volume (float): Volume of the BGM (0.0 to 1.0).
-        bgm_start_time (float): Start time of the BGM in the video (seconds).
-        fade_in_duration (float): Duration of BGM fade-in (seconds).
-        fade_out_duration (float): Duration of BGM fade-out (seconds).
-        video_duration (Optional[float]): Duration of the video in seconds.
-                                          If None, it will be detected automatically.
+    BGM を動画にミックス。動画側に音声がなければBGMのみを載せる。
+    - デコード＆フィルタ: CPU
+    - 映像はコピー（`-c:v copy`）で再エンコード回避
     """
     if video_duration is None:
-        video_duration = get_audio_duration(
-            video_path
-        )  # Assuming video duration can be obtained like audio
+        video_duration = get_media_duration(video_path)
 
     bgm_duration = get_audio_duration(bgm_path)
+    _ = min(video_duration, bgm_start_time + bgm_duration)  # 有効長（使い道があれば）
 
-    # Calculate effective BGM end time
-    effective_bgm_end_time = min(video_duration, bgm_start_time + bgm_duration)
+    cmd = [ffmpeg_path, "-y"]
+    cmd.extend(_threading_flags(ffmpeg_path))
+    cmd.extend(["-i", video_path, "-i", bgm_path, "-filter_complex"])
 
-    # FFmpeg command construction
-    cmd = [
-        "ffmpeg",
-        "-i",
-        video_path,
-        "-i",
-        bgm_path,
-        "-filter_complex",
-    ]
-
-    # Determine if the input video has an audio stream
     video_has_audio = has_audio_stream(video_path)
 
-    # Audio filter for BGM
-    audio_filters = []
-    audio_filters.append(f"volume={bgm_volume}")
-
+    # BGM用フィルタ
+    af = [f"volume={bgm_volume}"]
     if fade_in_duration > 0:
-        audio_filters.append(f"afade=t=in:st=0:d={fade_in_duration}")
-
+        af.append(f"afade=t=in:st=0:d={fade_in_duration}")
     if fade_out_duration > 0:
-        # フェードアウトはBGMファイルの終了位置から逆算
-        fade_out_start_relative_to_bgm = bgm_duration - fade_out_duration
-        if fade_out_start_relative_to_bgm < 0:
-            fade_out_start_relative_to_bgm = 0  # BGMの長さよりフェードアウトが長い場合
-        audio_filters.append(
-            f"afade=t=out:st={fade_out_start_relative_to_bgm}:d={fade_out_duration}"
-        )
-
-    # Apply audio filters to BGM stream
-    bgm_filter_str = f"[1:a]{','.join(audio_filters)}[bgm_filtered]"
-
-    # Delay the filtered BGM
-    delayed_bgm_str = (
-        f"[bgm_filtered]adelay={int(bgm_start_time * 1000)}:all=1[delayed_bgm]"
-    )
+        st = max(0.0, bgm_duration - fade_out_duration)
+        af.append(f"afade=t=out:st={st}:d={fade_out_duration}")
+    bgm_chain = f"[1:a]{','.join(af)}[bgm_filtered]"
+    delayed = f"[bgm_filtered]adelay={int(bgm_start_time * 1000)}:all=1[delayed_bgm]"
 
     if video_has_audio:
-        # Mix original video audio with delayed BGM
-        filter_complex_str = f"{bgm_filter_str};{delayed_bgm_str};[0:a][delayed_bgm]amix=inputs=2:duration=shortest[aout]"
-        cmd.append(filter_complex_str)
+        # 元音声 + BGM をミックス
+        filter_complex = f"{bgm_chain};{delayed};[0:a][delayed_bgm]amix=inputs=2:duration=shortest[aout]"
+        cmd.append(filter_complex)
         cmd.extend(
             [
                 "-map",
-                "0:v",  # Map video stream from input 0 (original video)
+                "0:v",
                 "-map",
-                "[aout]",  # Map the mixed audio stream
+                "[aout]",
                 "-c:v",
-                "copy",  # Copy video codec
+                "copy",
                 "-c:a",
-                "aac",  # Encode audio to AAC
+                "aac",
                 "-b:a",
-                "192k",  # Audio bitrate
-                "-shortest",  # Finish encoding when the shortest input stream ends (video)
+                "192k",
+                "-shortest",
                 output_path,
             ]
         )
     else:
-        # If no audio stream in video, just add BGM as the primary audio
-        # The [aout] label should be the output of the adelay filter directly.
-        filter_complex_str = f"{bgm_filter_str};{delayed_bgm_str}"
-        cmd.append(filter_complex_str)
+        # 元音声がない→ BGMのみ
+        filter_complex = f"{bgm_chain};{delayed}"
+        cmd.append(filter_complex)
         cmd.extend(
             [
                 "-map",
-                "0:v",  # Map video stream from input 0 (original video)
+                "0:v",
                 "-map",
-                "[delayed_bgm]",  # Map the BGM as the audio stream (output of adelay)
+                "[delayed_bgm]",
                 "-c:v",
-                "copy",  # Copy video codec
+                "copy",
                 "-c:a",
-                "aac",  # Encode audio to AAC
+                "aac",
                 "-b:a",
-                "192k",  # Audio bitrate
-                "-shortest",  # Finish encoding when the shortest input stream ends (video)
+                "192k",
+                "-shortest",
                 output_path,
             ]
         )
 
     try:
-        # FFmpegの出力を捕捉し、logger.debugでログに記録
-        process = subprocess.run(
-            cmd, check=True, capture_output=True, text=True, encoding="utf-8"
-        )
-        logger.debug(f"FFmpeg stdout:\n{process.stdout}")
-        logger.debug(f"FFmpeg stderr:\n{process.stderr}")
-        logger.info(
-            f"Successfully added BGM to {video_path} and saved to {output_path}"
-        )
+        proc = _run_ffmpeg(cmd)
+        logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
+        logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
+        logger.info(f"Successfully added BGM to {video_path} -> {output_path}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error adding BGM to video: {e}")
         logger.error(f"FFmpeg stdout:\n{e.stdout}")
@@ -540,39 +553,26 @@ def apply_transition(
     transition_type: str,
     duration: float,
     offset: float,
+    ffmpeg_path: str = "ffmpeg",
 ):
     """
-    映像は xfade、音声は acrossfade で正しくクロスフェードさせる。
+    映像: xfade、音声: acrossfade でクロスフェード。
+    - デコード＆フィルタ: CPU
+    - エンコード: HW（存在すれば）/ CPU
     """
-    import logging
-    import subprocess
+    has_a1 = has_audio_stream(input_video1_path)
+    has_a2 = has_audio_stream(input_video2_path)
 
-    logger = logging.getLogger(__name__)
+    _, h264_enc, _ = get_video_encoder_options(ffmpeg_path)
 
-    has_audio1 = has_audio_stream(input_video1_path)
-    has_audio2 = has_audio_stream(input_video2_path)
+    cmd = [ffmpeg_path, "-y"]
+    cmd.extend(_threading_flags(ffmpeg_path))
+    cmd.extend(["-i", input_video1_path, "-i", input_video2_path])
 
-    hw_accel_options, h264_encoder_options, _ = get_video_encoder_options()
-
-    cmd = ["ffmpeg", "-y"]
-    cmd.extend(hw_accel_options)
-    cmd.extend(
-        [
-            "-i",
-            input_video1_path,
-            "-i",
-            input_video2_path,
-        ]
-    )
-
-    # 映像は従来どおり
     vf = f"[0:v][1:v]xfade=transition={transition_type}:duration={duration}:offset={offset}[v]"
+    parts = [vf]
 
-    filter_parts = [vf]
-
-    # 音声：両方ある→ acrossfade、どちらかのみ→それ用の処理
-    if has_audio1 and has_audio2:
-        # 形式を統一してから acrossfade
+    if has_a1 and has_a2:
         af = (
             "[0:a]aresample=async=1:first_pts=0,"
             "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a0];"
@@ -580,56 +580,48 @@ def apply_transition(
             "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a1];"
             f"[a0][a1]acrossfade=d={duration}:c1=tri:c2=tri[a]"
         )
-        filter_parts.append(af)
-        cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[v]", "-map", "[a]"]
-
-    elif has_audio1:
-        # 1本目だけ音声 → 映像のトランジションに合わせてフェードアウト
+        parts.append(af)
+        cmd += ["-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]"]
+    elif has_a1:
         af = (
             "[0:a]aresample=async=1:first_pts=0,"
             "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
             f"afade=t=out:st={offset}:d={duration}[a]"
         )
-        filter_parts.append(af)
-        cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[v]", "-map", "[a]"]
-
-    elif has_audio2:
-        # 2本目だけ音声 → offset だけ無音で遅らせてからフェードイン
+        parts.append(af)
+        cmd += ["-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]"]
+    elif has_a2:
         delay_ms = int(offset * 1000)
         af = (
             "[1:a]aresample=async=1:first_pts=0,"
             "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
-            f"adelay={delay_ms}|{delay_ms},afade=t=in:st=0:d={duration}[a]"
+            f"adelay={delay_ms}:all=1,afade=t=in:st=0:d={duration}[a]"
         )
-        filter_parts.append(af)
-        cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[v]", "-map", "[a]"]
+        parts.append(af)
+        cmd += ["-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]"]
     else:
-        # 音声なし
         cmd += ["-filter_complex", vf, "-map", "[v]"]
 
-    # エンコード設定
-    cmd.extend(h264_encoder_options)
+    # 映像エンコード設定（FFmpeg 7 推奨に準拠）
+    cmd.extend(h264_enc)
     cmd.extend(
         [
             "-pix_fmt",
-            "yuv420p",  # X(Twitter)互換性のために追加
+            "yuv420p",
             "-c:a",
             "aac",
             "-b:a",
             "192k",
-            # "-shortest",  # 必要なら出力を最短ストリーム長に合わせる
             output_path,
         ]
     )
 
     try:
-        process = subprocess.run(
-            cmd, check=True, capture_output=True, text=True, encoding="utf-8"
-        )
-        logger.debug("FFmpeg stdout:\n%s", process.stdout)
-        logger.debug("FFmpeg stderr:\n%s", process.stderr)
+        proc = _run_ffmpeg(cmd)
+        logger.debug("FFmpeg stdout:\n%s", proc.stdout)
+        logger.debug("FFmpeg stderr:\n%s", proc.stderr)
         logger.info(
-            "Applied '%s' transition with proper audio crossfade: %s + %s -> %s",
+            "Applied '%s' transition with audio crossfade: %s + %s -> %s",
             transition_type,
             input_video1_path,
             input_video2_path,
@@ -652,67 +644,58 @@ def calculate_overlay_position(
     offset_y: str = "0",
 ) -> Tuple[str, str]:
     """
-    Calculates the x and y expressions for FFmpeg's overlay filter based on anchor and offset.
-
-    Args:
-        bg_width_expr (str): FFmpeg expression for background width (e.g., "W").
-        bg_height_expr (str): FFmpeg expression for background height (e.g., "H").
-        fg_width_expr (str): FFmpeg expression for foreground width (e.g., "w").
-        fg_height_expr (str): FFmpeg expression for foreground height (e.g., "h").
-        anchor (str): Anchor point (e.g., "top_left", "bottom_center").
-        offset_x (str): X-axis offset.
-        offset_y (str): Y-axis offset.
-
-    Returns:
-        Tuple[str, str]: A tuple containing the x and y expressions for the overlay filter.
+    overlay の配置式をアンカーとオフセットから計算。
     """
     x_expr = ""
     y_expr = ""
 
     if anchor == "top_left":
-        x_expr = "0"
-        y_expr = "0"
+        x_expr, y_expr = "0", "0"
     elif anchor == "top_center":
-        x_expr = f"({bg_width_expr}-{fg_width_expr})/2"
-        y_expr = "0"
+        x_expr, y_expr = f"({bg_width_expr}-{fg_width_expr})/2", "0"
     elif anchor == "top_right":
-        x_expr = f"{bg_width_expr}-{fg_width_expr}"
-        y_expr = "0"
+        x_expr, y_expr = f"{bg_width_expr}-{fg_width_expr}", "0"
     elif anchor == "middle_left":
-        x_expr = "0"
-        y_expr = f"({bg_height_expr}-{fg_height_expr})/2"
+        x_expr, y_expr = "0", f"({bg_height_expr}-{fg_height_expr})/2"
     elif anchor == "middle_center":
-        x_expr = f"({bg_width_expr}-{fg_width_expr})/2"
-        y_expr = f"({bg_height_expr}-{fg_height_expr})/2"
+        x_expr, y_expr = (
+            f"({bg_width_expr}-{fg_width_expr})/2",
+            f"({bg_height_expr}-{fg_height_expr})/2",
+        )
     elif anchor == "middle_right":
-        x_expr = f"{bg_width_expr}-{fg_width_expr}"
-        y_expr = f"({bg_height_expr}-{fg_height_expr})/2"
+        x_expr, y_expr = (
+            f"{bg_width_expr}-{fg_width_expr}",
+            f"({bg_height_expr}-{fg_height_expr})/2",
+        )
     elif anchor == "bottom_left":
-        x_expr = "0"
-        y_expr = f"{bg_height_expr}-{fg_height_expr}"
+        x_expr, y_expr = "0", f"{bg_height_expr}-{fg_height_expr}"
     elif anchor == "bottom_center":
-        x_expr = f"({bg_width_expr}-{fg_width_expr})/2"
-        y_expr = f"{bg_height_expr}-{fg_height_expr}"
+        x_expr, y_expr = (
+            f"({bg_width_expr}-{fg_width_expr})/2",
+            f"{bg_height_expr}-{fg_height_expr}",
+        )
     elif anchor == "bottom_right":
-        x_expr = f"{bg_width_expr}-{fg_width_expr}"
-        y_expr = f"{bg_height_expr}-{fg_height_expr}"
+        x_expr, y_expr = (
+            f"{bg_width_expr}-{fg_width_expr}",
+            f"{bg_height_expr}-{fg_height_expr}",
+        )
     else:
-        # Default to top_left if anchor is unknown
-        x_expr = "0"
-        y_expr = "0"
         logger.warning(f"Unknown anchor point: {anchor}. Defaulting to top_left.")
+        x_expr, y_expr = "0", "0"
 
-    # Apply offsets
+    # オフセット加算
     if offset_x and offset_x != "0":
-        if offset_x.startswith("-"):
-            x_expr = f"{x_expr}{offset_x}"
-        else:
-            x_expr = f"{x_expr}+{offset_x}"
+        x_expr = (
+            f"{x_expr}{offset_x}"
+            if offset_x.startswith("-")
+            else f"{x_expr}+{offset_x}"
+        )
     if offset_y and offset_y != "0":
-        if offset_y.startswith("-"):
-            y_expr = f"{y_expr}{offset_y}"
-        else:
-            y_expr = f"{y_expr}+{offset_y}"
+        y_expr = (
+            f"{y_expr}{offset_y}"
+            if offset_y.startswith("-")
+            else f"{y_expr}+{offset_y}"
+        )
 
     return x_expr, y_expr
 
@@ -721,47 +704,29 @@ def mix_audio_tracks(
     audio_tracks: List[Tuple[str, float, float]],
     output_path: str,
     total_duration: float,
+    ffmpeg_path: str = "ffmpeg",
 ):
     """
-    Mixes multiple audio tracks using FFmpeg.
-
-    Args:
-        audio_tracks (List[Tuple[str, float, float]]): A list of tuples, where each tuple
-            contains the path to the audio file, the start time in seconds, and the volume.
-        output_path (str): The path to the output audio file.
-        total_duration (float): The total duration of the mixed audio.
+    複数音声（path, start_time(sec), volume）をミックスし MP3 で出力。
     """
     try:
-        # Build the FFmpeg command
-        cmd = ["ffmpeg", "-y"]  # -y: Overwrite output file if it exists
+        cmd = [ffmpeg_path, "-y"]
+        cmd.extend(_threading_flags(ffmpeg_path))
 
-        # Add input files
-        for i, track in enumerate(audio_tracks):
+        # 入力
+        for track in audio_tracks:
             cmd.extend(["-i", track[0]])
 
-        # Create the filter complex string
-        filter_complex = ""
-        amix_inputs = len(audio_tracks)
-        for i, track in enumerate(audio_tracks):
-            track_path, start_time, volume = track
-            # Apply volume and delay to each track
-            filter_complex += (
-                f"[{i}:a]volume={volume},adelay={int(start_time * 1000)}:all=1[a{i}];"
-            )
-
-        # Mix all tracks
-        mix_string = "".join([f"[a{i}]" for i in range(amix_inputs)])
-        filter_complex += (
-            f"{mix_string}amix=inputs={amix_inputs}:dropout_transition=0[aout]"
+        # フィルタ構築
+        parts = []
+        for i, (_, start, vol) in enumerate(audio_tracks):
+            parts.append(f"[{i}:a]volume={vol},adelay={int(start * 1000)}:all=1[a{i}]")
+        mix_in = "".join(f"[a{i}]" for i in range(len(audio_tracks)))
+        parts.append(
+            f"{mix_in}amix=inputs={len(audio_tracks)}:dropout_transition=0[aout]"
         )
 
-        # Add the filter complex to the command
-        cmd.extend(["-filter_complex", filter_complex])
-
-        # Map the output audio stream
-        cmd.extend(["-map", "[aout]"])
-
-        # Set the output format and path, and explicitly set total duration
+        cmd.extend(["-filter_complex", ";".join(parts), "-map", "[aout]"])
         cmd.extend(
             [
                 "-acodec",
@@ -775,13 +740,9 @@ def mix_audio_tracks(
         )
 
         logger.debug(f"FFmpeg command: {' '.join(cmd)}")
-
-        # Execute the command
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True
-        )  # Removed encoding="utf-8"
-        logger.debug(f"FFmpeg stdout:\n{result.stdout}")
-        logger.debug(f"FFmpeg stderr:\n{result.stderr}")
+        proc = _run_ffmpeg(cmd)
+        logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
+        logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
         logger.info(f"Successfully mixed audio tracks to {output_path}")
 
     except subprocess.CalledProcessError as e:
