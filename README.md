@@ -27,7 +27,7 @@ Zundamotionは、VOICEVOXによる高品質な音声合成とFFmpegを用いた�
     - `bottom_left`: 画像の左下を基準点とします。
     - `bottom_center`: 画像の底辺中央を基準点とします（デフォルト）。
     - `bottom_right`: 画像の右下を基準点とします。
-  - `position`: `x`, `y` 座標は、指定された `anchor` からのオフセットとして機能します。例えば、`anchor: bottom_center` で `position: {x: 0, y: 0}` の場合、キャラクターの底辺中央が背景の底辺中央に配置されます。`position: {x: 100, y: -50}` の場合、底辺中央から右に100ピクセル、上に50ピクセル移動します。
+    - `position`: `x`, `y` 座標は、指定された `anchor` からのオフセットとして機能します。例えば、`anchor: bottom_center` で `position: {x: 0, y: 0}` の場合、キャラクターの底辺中央が背景の底辺中央に配置されます。`position: {x: 100, y: -50}` の場合、底辺中央から右に100ピクセル、上に50ピクセル移動します。
 
 以下は、台本ファイルでのキャラクター設定の記述例です。
 
@@ -52,15 +52,56 @@ lines:
 
 ---
 
-## 🧱 ファイル構成（概要）
+## 🛠️ 技術スタック
 
-```plaintext
-.devcontainer/ # 開発環境設定
-scripts/       # 台本ファイル
-voices/        # 生成された音声・字幕
-assets/        # 動画素材（背景、立ち絵など）
-output/        # 最終出力動画
-zundamotion/   # Pythonソースコード
+- **言語**: Python 3.x
+- **主要ライブラリ**:
+    - `PyYAML`: YAML設定ファイルの読み込みと解析
+    - `requests`: VOICEVOX APIとのHTTP通信
+- **外部ツール**:
+    - `FFmpeg`: 動画および音声の処理、結合、レンダリング
+    - `VOICEVOX`: 音声合成エンジン (ローカルで実行されている必要があります)
+
+---
+
+## 🧱 プロジェクト構造
+
+```
+.
+├── assets/                 # 動画生成に使用されるアセット（背景動画、キャラクター画像、BGM、効果音）
+│   ├── bg/                 # 背景動画/画像
+│   ├── bgm/                # 背景音楽
+│   ├── characters/         # キャラクター画像
+│   └── se/                 # 効果音
+├── cache/                  # 生成された中間ファイルやキャッシュデータ
+├── output/                 # 最終的な出力動画
+├── scripts/                # サンプルスクリプトや設定ファイル
+│   └── sample.yaml         # サンプルスクリプト
+├── zundamotion/            # メインアプリケーションのソースコード
+│   ├── __init__.py
+│   ├── cache.py            # キャッシュ管理 (`CacheManager` クラス)
+│   ├── exceptions.py       # カスタム例外定義
+│   ├── main.py             # エントリーポイント (`main` 関数)
+│   ├── pipeline.py         # 動画生成パイプラインの定義 (`GenerationPipeline` クラス, `run_generation` 関数)
+│   ├── components/         # パイプラインの各ステップで使用されるコンポーネント
+│   │   ├── audio.py        # 音声生成 (`AudioGenerator` クラス)
+│   │   ├── script_loader.py# スクリプトと設定の読み込み、マージ、検証
+│   │   ├── subtitle.py     # 字幕生成 (`SubtitleGenerator` クラス)
+│   │   ├── video.py        # 動画レンダリング (`VideoRenderer` クラス)
+│   │   └── voicevox_client.py # VOICEVOX APIクライアント (`generate_voice` 関数)
+│   ├── pipeline_phases/    # 動画生成パイプラインの各フェーズ
+│   │   ├── audio_phase.py  # 音声生成フェーズ (`AudioPhase` クラス)
+│   │   ├── bgm_phase.py    # BGM追加フェーズ (`BGMPhase` クラス)
+│   │   ├── finalize_phase.py # 最終化フェーズ (`FinalizePhase` クラス)
+│   │   └── video_phase.py  # 動画生成フェーズ (`VideoPhase` クラス)
+│   ├── reporting/          # レポート生成関連
+│   │   └── voice_report_generator.py # VOICEVOX使用情報レポート生成
+│   ├── templates/          # 設定テンプレート
+│   │   └── config.yaml     # デフォルト設定テンプレート
+│   └── utils/              # ユーティリティ関数
+│       ├── ffmpeg_utils.py # FFmpeg関連ユーティリティ
+│       └── logger.py       # ロギングユーティリティ
+└── requirements.txt        # Pythonの依存関係
 ```
 
 ---

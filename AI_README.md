@@ -54,6 +54,8 @@ Zundamotionは、スクリプトとアセット（音声、BGM、ビデオ）を
 │   │   ├── bgm_phase.py    # BGM追加フェーズ (`BGMPhase` クラス)
 │   │   ├── finalize_phase.py # 最終化フェーズ (`FinalizePhase` クラス)
 │   │   └── video_phase.py  # 動画生成フェーズ (`VideoPhase` クラス)
+│   ├── reporting/          # レポート生成関連
+│   │   └── voice_report_generator.py # VOICEVOX使用情報レポート生成
 │   ├── templates/          # 設定テンプレート
 │   │   └── config.yaml     # デフォルト設定テンプレート
 │   └── utils/              # ユーティリティ関数
@@ -81,7 +83,7 @@ pip install -r requirements.txt
 
 ```bash
 # サンプルスクリプトを実行
-python -m zundamotion.main --config scripts/sample.yaml
+python -m zundamotion.main scripts/sample.yaml
 ```
 
 ## 5. 主要機能とコードマッピング
@@ -102,6 +104,8 @@ python -m zundamotion.main --config scripts/sample.yaml
     - 概要: 生成された動画にBGMを追加します。
 - **最終化処理**: `zundamotion/pipeline_phases/finalize_phase.py` (`FinalizePhase` クラス)
     - 概要: 最終的な動画ファイルの出力を行います。
+- **レポート生成**: `zundamotion/reporting/voice_report_generator.py`
+    - 概要: VOICEVOXの使用状況に関するレポートを生成します。
 - **キャッシュ管理**: `zundamotion/cache.py` (`CacheManager` クラス)
     - 概要: 生成された中間ファイルやキャッシュデータの管理を行います。
 - **ユーティリティ**: `zundamotion/utils/ffmpeg_utils.py`, `zundamotion/utils/logger.py`
