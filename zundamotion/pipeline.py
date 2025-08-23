@@ -69,7 +69,7 @@ class GenerationPipeline:
             )
             all_clips = video_phase.run(scenes, line_data_map, self.timeline)
 
-            bgm_phase = BGMPhase(self.config, temp_dir, self.audio_params)
+            bgm_phase = BGMPhase(self.config, temp_dir)
             final_clips_for_concat = bgm_phase.run(scenes, all_clips)
 
             finalize_phase = FinalizePhase(

@@ -4,7 +4,11 @@ from typing import Any, Dict, List
 from tqdm import tqdm
 
 from zundamotion.exceptions import PipelineError
-from zundamotion.utils.ffmpeg_utils import add_bgm_to_video, get_audio_duration
+from zundamotion.utils.ffmpeg_utils import (
+    AudioParams,
+    add_bgm_to_video,
+    get_audio_duration,
+)
 from zundamotion.utils.logger import logger, time_log
 
 
@@ -41,10 +45,18 @@ class BGMPhase:
                     scene_output_with_bgm_path = (
                         self.temp_dir / f"scene_with_bgm_{scene_idx}.mp4"
                     )
+                    audio_config = self.config.get("audio", {})
+                    audio_params = AudioParams(
+                        sample_rate=audio_config.get("sample_rate", 48000),
+                        channels=audio_config.get("channels", 2),
+                        codec=audio_config.get("codec", "aac"),
+                        bitrate_kbps=audio_config.get("bitrate_kbps", 192),
+                    )
                     add_bgm_to_video(
                         video_path=str(scene_clip_path),
                         bgm_path=bgm_path,
                         output_path=str(scene_output_with_bgm_path),
+                        audio_params=audio_params,
                         bgm_volume=scene_bgm_config.get(
                             "volume", self.config.get("bgm", {}).get("volume", 0.5)
                         ),
