@@ -278,51 +278,77 @@ def get_media_duration(file_path: str) -> float:
         raise
 
 
-def get_media_info(file_path: str) -> dict:
-    """ffprobe 経由でシンプルなメタ情報を返す。"""
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
+
+# ... (既存のインポートは省略)
+
+
+class VideoInfo(TypedDict, total=False):
+    codec_name: str
+    width: int
+    height: int
+    pix_fmt: str
+    r_frame_rate: str
+    fps: float
+
+
+class AudioInfo(TypedDict, total=False):
+    codec_name: str
+    sample_rate: int
+    channels: int
+    channel_layout: str
+
+
+class MediaInfo(TypedDict, total=False):
+    video: Optional[VideoInfo]
+    audio: Optional[AudioInfo]
+
+
+# ... (既存の関数は省略)
+
+
+def get_media_info(file_path: str) -> MediaInfo:
+    """ffprobe 経由で動画/音声の主要なメタ情報を返す。"""
     try:
-        cmd = ["ffprobe", "-v", "error", "-show_streams", "-of", "json", file_path]
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_streams",
+            "-of",
+            "json",
+            file_path,
+        ]
         result = _run_ffmpeg(cmd)
         info = json.loads(result.stdout)
 
-        video_stream = next(
-            (s for s in info.get("streams", []) if s.get("codec_type") == "video"), None
-        )
-        audio_stream = next(
-            (s for s in info.get("streams", []) if s.get("codec_type") == "audio"), None
-        )
+        media_info: MediaInfo = {"video": None, "audio": None}
 
-        media_info = {}
-        if video_stream:
-            r_rate = video_stream.get("r_frame_rate", "0/0")
-            try:
-                num, den = map(int, r_rate.split("/"))
-                fps = float(num) / float(den) if den else 0.0
-            except Exception:
-                fps = 0.0
-            media_info["video"] = {
-                "width": int(video_stream.get("width", 0)),
-                "height": int(video_stream.get("height", 0)),
-                "pix_fmt": video_stream.get("pix_fmt"),
-                "r_frame_rate": r_rate,
-                "fps": fps,
-            }
-
-        if audio_stream:
-            media_info["audio"] = {
-                "sample_rate": (
-                    int(audio_stream.get("sample_rate", 0))
-                    if audio_stream.get("sample_rate")
-                    else 0
-                ),
-                "channels": (
-                    int(audio_stream.get("channels", 0))
-                    if audio_stream.get("channels")
-                    else 0
-                ),
-                "channel_layout": audio_stream.get("channel_layout"),
-            }
-
+        for s in info.get("streams", []):
+            if s.get("codec_type") == "video" and media_info["video"] is None:
+                r_rate = s.get("r_frame_rate", "0/0")
+                try:
+                    num, den = map(int, r_rate.split("/"))
+                    fps = float(num) / float(den) if den else 0.0
+                except Exception:
+                    fps = 0.0
+                media_info["video"] = {
+                    "codec_name": s.get("codec_name"),
+                    "width": int(s.get("width", 0)),
+                    "height": int(s.get("height", 0)),
+                    "pix_fmt": s.get("pix_fmt"),
+                    "r_frame_rate": r_rate,
+                    "fps": fps,
+                }
+            elif s.get("codec_type") == "audio" and media_info["audio"] is None:
+                media_info["audio"] = {
+                    "codec_name": s.get("codec_name"),
+                    "sample_rate": (
+                        int(s.get("sample_rate", 0)) if s.get("sample_rate") else 0
+                    ),
+                    "channels": (int(s.get("channels", 0)) if s.get("channels") else 0),
+                    "channel_layout": s.get("channel_layout"),
+                }
         return media_info
 
     except subprocess.CalledProcessError as e:
@@ -331,6 +357,128 @@ def get_media_info(file_path: str) -> dict:
     except (json.JSONDecodeError, KeyError, ValueError) as e:
         logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
         raise
+
+
+def compare_media_params(file_paths: List[str]) -> bool:
+    """
+    複数の動画ファイルの主要なパラメータ（コーデック、解像度、フレームレート、ピクセルフォーマット、
+    サンプルレート、チャンネル数、チャンネルレイアウト）が全て一致するかどうかを判定する。
+    """
+    if not file_paths:
+        return True  # ファイルがない場合は一致とみなす
+
+    base_info_val: Optional[MediaInfo] = None
+    for i, path in enumerate(file_paths):
+        try:
+            info = get_media_info(path)
+            if i == 0:
+                base_info_val = info
+            else:
+                if base_info_val is None:  # base_info_valがNoneの場合は比較できない
+                    logger.warning(
+                        f"Base media info is None, cannot compare with {path}"
+                    )
+                    return False
+
+                # 動画ストリームの比較
+                base_video = base_info_val.get("video")
+                current_video = info.get("video")
+                if base_video and current_video:
+                    if not (
+                        base_video.get("codec_name") == current_video.get("codec_name")
+                        and base_video.get("width") == current_video.get("width")
+                        and base_video.get("height") == current_video.get("height")
+                        and base_video.get("pix_fmt") == current_video.get("pix_fmt")
+                        and base_video.get("r_frame_rate")
+                        == current_video.get("r_frame_rate")
+                    ):
+                        logger.warning(
+                            f"Video parameters mismatch between {file_paths[0]} and {path}"
+                        )
+                        return False
+                elif (base_video is not None) != (
+                    current_video is not None
+                ):  # 片方だけ動画ストリームがある場合
+                    logger.warning(
+                        f"Video stream presence mismatch between {file_paths[0]} and {path}"
+                    )
+                    return False
+
+                # 音声ストリームの比較
+                base_audio = base_info_val.get("audio")
+                current_audio = info.get("audio")
+                if base_audio and current_audio:
+                    if not (
+                        base_audio.get("codec_name") == current_audio.get("codec_name")
+                        and base_audio.get("sample_rate")
+                        == current_audio.get("sample_rate")
+                        and base_audio.get("channels") == current_audio.get("channels")
+                        and base_audio.get("channel_layout")
+                        == current_audio.get("channel_layout")
+                    ):
+                        logger.warning(
+                            f"Audio parameters mismatch between {file_paths[0]} and {path}"
+                        )
+                        return False
+                elif (base_audio is not None) != (
+                    current_audio is not None
+                ):  # 片方だけ音声ストリームがある場合
+                    logger.warning(
+                        f"Audio stream presence mismatch between {file_paths[0]} and {path}"
+                    )
+                    return False
+
+        except Exception as e:
+            logger.error(f"Error comparing media params for {path}: {e}")
+            return False
+    return True
+
+
+def concat_videos_copy(
+    input_paths: List[str], output_path: str, ffmpeg_path: str = "ffmpeg"
+):
+    """
+    -f concat -c copy を使用して動画を再エンコードなしで結合する。
+    事前に compare_media_params でパラメータの一致を確認していることを前提とする。
+    """
+    if not input_paths:
+        logger.warning("No input paths provided for concat_videos_copy.")
+        return
+
+    list_file_path = "concat_list.txt"  # 一時ファイル名
+    with open(list_file_path, "w", encoding="utf-8") as f:
+        for path in input_paths:
+            f.write(f"file '{os.path.abspath(path)}'\n")
+
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",  # 危険なファイルパスを許可（絶対パスを使用するため）
+        "-i",
+        list_file_path,
+        "-c",
+        "copy",
+        output_path,
+    ]
+
+    try:
+        proc = _run_ffmpeg(cmd)
+        logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
+        logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
+        logger.info(
+            f"Successfully concatenated videos without re-encoding to {output_path}"
+        )
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error concatenating videos with -c copy: {e}")
+        logger.error(f"FFmpeg stdout:\n{e.stdout}")
+        logger.error(f"FFmpeg stderr:\n{e.stderr}")
+        raise
+    finally:
+        if os.path.exists(list_file_path):
+            os.remove(list_file_path)
 
 
 def has_audio_stream(file_path: str) -> bool:

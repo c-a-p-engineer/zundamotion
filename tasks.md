@@ -1,32 +1,10 @@
-# 📋 新タスクリスト（詳細版）
+# 📋 新タスクリスト（詳細版・統合版）
 
-## P0（最優先）
-
----
-
-### 01. “copy concat” 実用化
-
-**詳細**
-現在は `filter_complex concat` による再エンコード方式。これを `-f concat -c copy` で無再エンコード化する。前提として映像・音声のパラメータが全て一致している必要あり。
-
-**ゴール**
-
-* すべてのクリップが `ffprobe` で同一仕様を持ち、`ffmpeg -f concat` 経由で最終MP4が生成できる。
-* 1分動画を数秒で結合可能。
-
-**実装イメージ**
-
-* クリップごとに `ffprobe` → パラメータ比較。
-* 一致すれば `list.txt` を生成：
-
-  ```sh
-  ffmpeg -f concat -safe 0 -i list.txt -c copy final.mp4
-  ```
-* 差異があれば従来の再エンコードフローへフォールバック。
+## P0（最優先：性能と安定性）
 
 ---
 
-### 02. Video/Audio Params のデータクラス化
+### 01. Video/Audio Params のデータクラス化
 
 **詳細**
 各フェーズで出力指定がバラけると仕様ズレが発生する。共通クラスで統一し、参照必須とする。
@@ -54,7 +32,7 @@ class VideoParams:
 
 ---
 
-### 03. 背景/挿入動画の Normalization キャッシュ
+### 02. 背景/挿入動画の Normalization キャッシュ
 
 **詳細**
 同じ素材を各シーンで毎回 `scale`/`fps`/`pix_fmt` 変換している。事前に正規化してキャッシュすれば再利用可能。
@@ -72,7 +50,7 @@ class VideoParams:
 
 ---
 
-### 04. NVENC 高速プリセット切替
+### 03. NVENC 高速プリセット切替
 
 **詳細**
 現状 libx264（CPUエンコード）を使用。NVENC を使えば 1650 Max-Q でも 2〜3倍高速化が期待できる。
@@ -92,7 +70,7 @@ class VideoParams:
 
 ---
 
-### 05. CUDA hwaccel 利用
+### 04. CUDA hwaccel 利用
 
 **詳細**
 フィルタ処理で CPU⇔GPU 間を往復している。`-hwaccel cuda` を明示し、転送を最小化。
@@ -112,7 +90,7 @@ ffmpeg -hwaccel cuda -hwaccel_output_format cuda ...
 
 ---
 
-### 06. ジョブ並列（--jobs N）
+### 05. ジョブ並列（--jobs N）
 
 **詳細**
 シーンを直列処理している。ProcessPoolExecutor を使って並列化し、NVENCセッション数やVRAM使用を監視。
@@ -131,7 +109,7 @@ with ProcessPoolExecutor(max_workers=N) as ex:
 
 ---
 
-### 07. BGM統合処理
+### 06. BGM統合処理
 
 **詳細**
 BGMを別フェーズで適用すると I/O が増える。可能なら Finalize に統合する。
@@ -150,7 +128,7 @@ BGMを別フェーズで適用すると I/O が増える。可能なら Finalize
 
 ---
 
-### 08. ベンチ/メトリクス出力
+### 07. ベンチ/メトリクス出力
 
 **詳細**
 最適化の効果が見えにくい。実行時間・FFmpegの speed/fps を記録し、退行検知する。
@@ -169,7 +147,7 @@ AudioPhase,00:00,00:09,9.48,—
 
 ---
 
-# 🧩 P1（中規模：負荷削減＆表現力強化）
+## P1（中規模：負荷削減＆表現力強化）
 
 ---
 
@@ -189,8 +167,6 @@ AudioPhase,00:00,00:09,9.48,—
 from PIL import Image, ImageDraw, ImageFont
 # テキストをレンダ → PNG → overlay
 ```
-
-* 時間制御は `enable='between(t,...)'` または分割クリップ。
 
 ---
 
@@ -342,7 +318,7 @@ se:
 
 ---
 
-# 🪄 P2（拡張・利便性向上）
+## P2（拡張・利便性向上）
 
 ---
 

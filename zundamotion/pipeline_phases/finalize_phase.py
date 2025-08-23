@@ -7,10 +7,14 @@ from pathlib import Path  # Add this import
 from typing import Any, Dict, List, Optional, Tuple
 
 from zundamotion.cache import CacheManager
-from zundamotion.exceptions import PipelineError  # Add this import
+from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
-from zundamotion.utils.ffmpeg_utils import (  # Add this import
+from zundamotion.utils.ffmpeg_utils import compare_media_params  # 追加
+from zundamotion.utils.ffmpeg_utils import concat_videos_copy  # 追加
+from zundamotion.utils.ffmpeg_utils import (  # get_audio_duration は add_bgm_to_video で使用されているため残す
     _threading_flags,
+    get_audio_duration,
+    get_media_duration,
     get_video_encoder_options,
 )
 from zundamotion.utils.logger import logger, time_log
@@ -138,17 +142,6 @@ def _pick_encoder(ffmpeg_path: str = "ffmpeg") -> Dict[str, Any]:
         }
 
 
-# 既存コード互換: (hw_accel_options, h264_opts, hevc_opts) を返すAPIを維持
-def get_video_encoder_options(
-    ffmpeg_path: str = "ffmpeg",
-) -> Tuple[List[str], List[str], List[str]]:
-    """
-    旧API互換。内部では実プローブした結果を使い、-hwaccel は返さない（フィルタとの相性問題回避）。
-    """
-    enc = _pick_encoder(ffmpeg_path)
-    return [], enc["h264"], enc["hevc"]
-
-
 # pix_fmt も欲しい場合のヘルパ
 def get_encoder_and_pix_fmt(
     ffmpeg_path: str = "ffmpeg",
@@ -163,70 +156,9 @@ def get_encoder_and_pix_fmt(
 # ========== メディア情報/変換 ==========
 
 
-def get_audio_duration(file_path: str) -> float:
-    """ffprobeで音声(または動画)の長さを秒で取得"""
-    try:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            file_path,
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        probe = json.loads(result.stdout)
-        return round(float(probe["format"]["duration"]), 2)
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error running ffprobe for {file_path}: {e}")
-        logger.error(e.stderr)
-        raise
-    except (json.JSONDecodeError, KeyError) as e:
-        logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
-        raise
-
-
-def get_media_info(file_path: str) -> dict:
-    """ffprobeで基本の video/audio 情報を返す"""
-    try:
-        cmd = ["ffprobe", "-v", "error", "-show_streams", "-of", "json", file_path]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        info = json.loads(result.stdout)
-
-        v = next(
-            (s for s in info.get("streams", []) if s.get("codec_type") == "video"), None
-        )
-        a = next(
-            (s for s in info.get("streams", []) if s.get("codec_type") == "audio"), None
-        )
-
-        media = {}
-        if v:
-            r = v.get("r_frame_rate", "0/0")
-            num, den = (int(x) for x in r.split("/")) if "/" in r else (0, 0)
-            fps = float(num) / float(den) if den else 0.0
-            media["video"] = {
-                "width": int(v.get("width", 0)),
-                "height": int(v.get("height", 0)),
-                "pix_fmt": v.get("pix_fmt"),
-                "r_frame_rate": r,
-                "fps": fps,
-            }
-        if a:
-            media["audio"] = {
-                "sample_rate": int(a.get("sample_rate", 0)),
-                "channels": int(a.get("channels", 0)),
-                "channel_layout": a.get("channel_layout"),
-            }
-        return media
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error running ffprobe for {file_path}: {e.stderr}")
-        raise
-    except (json.JSONDecodeError, KeyError) as e:
-        logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
-        raise
+# get_audio_duration は add_bgm_to_video で使用されているため残す
+# get_media_duration は ffmpeg_utils からインポート済み
+# get_media_info は ffmpeg_utils からインポート済み
 
 
 def normalize_video(
@@ -675,34 +607,50 @@ class FinalizePhase:
             raise PipelineError("No video clips to finalize.")
 
         # 結合リストファイルを作成
-        concat_list_path = self.temp_dir / "concat_list.txt"
-        total_expected_duration = 0.0
-        with open(concat_list_path, "w", encoding="utf-8") as f:
-            for i, p in enumerate(scene_video_paths):
-                f.write(f"file '{p.resolve()}'\n")
-                try:
-                    duration = get_audio_duration(str(p.resolve()))
-                    logger.info(
-                        f"FinalizePhase: Clip {i+1}: '{p.name}' duration: {duration:.2f}s"
-                    )
-                    total_expected_duration += duration
-                except Exception as e:
-                    logger.warning(
-                        f"FinalizePhase: Could not get duration for '{p.name}': {e}"
-                    )
+        output_video_path = self.temp_dir / "final_output.mp4"
+        input_video_str_paths = [str(p.resolve()) for p in scene_video_paths]
 
+        # パラメータが一致するかどうかを確認
+        if compare_media_params(input_video_str_paths):
+            logger.info(
+                "FinalizePhase: All video clips have identical parameters. Attempting -c copy concat."
+            )
+            try:
+                concat_videos_copy(input_video_str_paths, str(output_video_path))
+                logger.info(
+                    f"FinalizePhase: Successfully concatenated videos using -c copy to {output_video_path}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"FinalizePhase: Failed to concat with -c copy: {e}. Falling back to re-encode concat."
+                )
+                # フォールバック処理
+                self._reencode_concat(scene_video_paths, output_video_path)
+        else:
+            logger.warning(
+                "FinalizePhase: Video parameters mismatch. Falling back to re-encode concat."
+            )
+            # フォールバック処理
+            self._reencode_concat(scene_video_paths, output_video_path)
+
+        # 最終動画の長さを取得してログに出力
+        final_video_duration = get_media_duration(str(output_video_path))
         logger.info(
-            f"FinalizePhase: Total expected duration from clips: {total_expected_duration:.2f}s"
+            f"FinalizePhase: Final video '{output_video_path.name}' actual duration: {final_video_duration:.2f}s"
         )
 
-        output_video_path = self.temp_dir / "final_output.mp4"
+        return output_video_path
 
-        # FFmpeg concat デマルチプレクサを使用して動画を結合
-        # ffmpeg_utils からスレッド設定を取得
-        _, h264_enc, _ = get_video_encoder_options()
-        threading_flags = _threading_flags()
+    def _reencode_concat(self, scene_video_paths: List[Path], output_video_path: Path):
+        """
+        従来の再エンコード方式で動画を結合する。
+        """
+        logger.info(
+            "FinalizePhase: Performing re-encode concat using -filter_complex concat."
+        )
 
-        # FFmpeg concat フィルターを使用して動画を結合
+        # ハードウェアエンコーダーを無効にする
+        os.environ["DISABLE_HWENC"] = "1"
         # ffmpeg_utils からスレッド設定を取得
         _, h264_enc, _ = get_video_encoder_options()
         threading_flags = _threading_flags()
@@ -718,11 +666,7 @@ class FinalizePhase:
             cmd.extend(["-i", str(p.resolve())])
 
         # concat フィルターの構築
-        # 各入力ストリームを [i:v] と [i:a] として参照し、concat フィルターに渡す
-        # v=1:a=1:shortest=1 で動画と音声を1つずつ出力し、最短のストリームに合わせる
         num_clips = len(scene_video_paths)
-
-        # 動画ストリームと音声ストリームをそれぞれ concat する
         video_inputs = "".join([f"[{i}:v]" for i in range(num_clips)])
         audio_inputs = "".join([f"[{i}:a]" for i in range(num_clips)])
 
@@ -750,26 +694,19 @@ class FinalizePhase:
             ]
         )
 
-        logger.info(f"FinalizePhase: FFmpeg concat command: {' '.join(cmd)}")
+        logger.info(f"FinalizePhase: FFmpeg re-encode concat command: {' '.join(cmd)}")
 
         try:
             proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
             logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
             logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
             logger.info(
-                f"Successfully concatenated all scene videos to {output_video_path}"
+                f"Successfully concatenated all scene videos with re-encoding to {output_video_path}"
             )
-
-            # 最終動画の長さを取得してログに出力
-            final_video_duration = get_audio_duration(str(output_video_path))
-            logger.info(
-                f"FinalizePhase: Final video '{output_video_path.name}' actual duration: {final_video_duration:.2f}s"
-            )
-
         except subprocess.CalledProcessError as e:
-            logger.error(f"Error concatenating final video: {e}")
+            logger.error(f"Error concatenating final video with re-encoding: {e}")
             logger.error(f"FFmpeg stdout:\n{e.stdout}")
             logger.error(f"FFmpeg stderr:\n{e.stderr}")
-            raise PipelineError(f"Failed to finalize video: {e}")
+            raise PipelineError(f"Failed to finalize video with re-encoding: {e}")
 
         return output_video_path
