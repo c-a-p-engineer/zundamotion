@@ -298,58 +298,58 @@ def load_script_and_config(
     final_config = default_config.copy()
     final_config["script"] = script_data
 
-    # Process character speaker IDs and merge defaults
-    characters_config = final_config.get("characters", {})
-    script_defaults = script_data.get("defaults", {})
-    character_defaults = script_defaults.get("characters", {})
-    global_voice_defaults = final_config.get("voice", {})
-    global_subtitle_defaults = final_config.get("subtitle", {})
+    # Allow script's top-level defaults to override default_config's defaults
+    if "defaults" in script_data:
+        final_config["defaults"] = merge_configs(
+            final_config.get("defaults", {}), script_data["defaults"]
+        )
+
+    # Extract defaults for easier access
+    global_defaults = final_config.get("defaults", {})
+    character_defaults = global_defaults.get("characters", {})
 
     for scene in final_config["script"].get("scenes", []):
-        for line in scene.get("lines", []):
-            # Start with global defaults
-            merged_line = global_voice_defaults.copy()
-            merged_line.update(global_subtitle_defaults)
+        for line_idx, line in enumerate(scene.get("lines", [])):
+            # Initialize merged_line with a copy of the current line to preserve its original structure
+            current_line_data = line.copy()
 
-            speaker_name = line.get("speaker_name")
-            if speaker_name:
-                # Apply character defaults from script
-                if speaker_name in character_defaults:
-                    merged_line = merge_configs(
-                        merged_line, character_defaults[speaker_name]
-                    )
+            # Start with global defaults (if any)
+            merged_line_settings = global_defaults.copy()
+            # Remove 'characters' from global_defaults to avoid deep merging issues with line-specific character lists
+            merged_line_settings.pop("characters", None)
 
-            # Apply line-specific settings
-            merged_line = merge_configs(merged_line, line)
-            line.clear()
-            line.update(merged_line)
+            speaker_name = current_line_data.get("speaker_name")
+            if speaker_name and speaker_name in character_defaults:
+                # Apply character-specific defaults
+                merged_line_settings = merge_configs(
+                    merged_line_settings, character_defaults[speaker_name]
+                )
 
-            character_name = line.get("character")
-            if character_name and character_name in characters_config:
-                character_settings = characters_config[character_name]
-                # 1. If voice_style is specified, try to use it first
-                voice_style = line.get("voice_style")
-                if voice_style:
-                    if (
-                        "voice_styles" in character_settings
-                        and voice_style in character_settings["voice_styles"]
-                    ):
-                        line["speaker_id"] = character_settings["voice_styles"][
-                            voice_style
-                        ]
-                    else:
-                        # If voice_style is specified but not found, log a warning and fall back to default_speaker_id if available
-                        print(
-                            f"Warning: Voice style '{voice_style}' not found for character '{character_name}'. Falling back to default_speaker_id."
+            # Apply line-specific settings, overriding previous defaults
+            merged_line_settings = merge_configs(
+                merged_line_settings, current_line_data
+            )
+
+            # Handle character-specific settings within the 'characters' list in the line
+            if "characters" in current_line_data and isinstance(
+                current_line_data["characters"], list
+            ):
+                processed_characters = []
+                for char_entry in current_line_data["characters"]:
+                    char_name = char_entry.get("name")
+                    if char_name and char_name in character_defaults:
+                        # Merge character defaults into the specific character entry
+                        merged_char_entry = merge_configs(
+                            character_defaults[char_name], char_entry
                         )
+                        processed_characters.append(merged_char_entry)
+                    else:
+                        processed_characters.append(char_entry)
+                merged_line_settings["characters"] = processed_characters
 
-                # 2. If speaker_id is still not explicitly set in the line, use default from character config
-                if "speaker_id" not in line:
-                    line["speaker_id"] = character_settings.get("default_speaker_id")
-
-    # Allow script to override defaults
-    if "defaults" in script_data:
-        final_config = merge_configs(final_config, script_data["defaults"])
+            # Update the original line dictionary with the merged settings
+            line.clear()
+            line.update(merged_line_settings)
 
     # Validate the final configuration
     _validate_config(final_config)

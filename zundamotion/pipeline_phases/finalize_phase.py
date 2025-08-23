@@ -676,13 +676,33 @@ class FinalizePhase:
 
         # 結合リストファイルを作成
         concat_list_path = self.temp_dir / "concat_list.txt"
+        total_expected_duration = 0.0
         with open(concat_list_path, "w", encoding="utf-8") as f:
-            for p in scene_video_paths:
+            for i, p in enumerate(scene_video_paths):
                 f.write(f"file '{p.resolve()}'\n")
+                try:
+                    duration = get_audio_duration(str(p.resolve()))
+                    logger.info(
+                        f"FinalizePhase: Clip {i+1}: '{p.name}' duration: {duration:.2f}s"
+                    )
+                    total_expected_duration += duration
+                except Exception as e:
+                    logger.warning(
+                        f"FinalizePhase: Could not get duration for '{p.name}': {e}"
+                    )
+
+        logger.info(
+            f"FinalizePhase: Total expected duration from clips: {total_expected_duration:.2f}s"
+        )
 
         output_video_path = self.temp_dir / "final_output.mp4"
 
         # FFmpeg concat デマルチプレクサを使用して動画を結合
+        # ffmpeg_utils からスレッド設定を取得
+        _, h264_enc, _ = get_video_encoder_options()
+        threading_flags = _threading_flags()
+
+        # FFmpeg concat フィルターを使用して動画を結合
         # ffmpeg_utils からスレッド設定を取得
         _, h264_enc, _ = get_video_encoder_options()
         threading_flags = _threading_flags()
@@ -692,16 +712,30 @@ class FinalizePhase:
             "-y",
         ]
         cmd.extend(threading_flags)
-        cmd.extend(
-            [
-                "-f",
-                "concat",
-                "-safe",
-                "0",  # 安全でないファイル名（絶対パスなど）を許可
-                "-i",
-                str(concat_list_path),
-            ]
+
+        # 各シーン動画を個別の入力として追加
+        for p in scene_video_paths:
+            cmd.extend(["-i", str(p.resolve())])
+
+        # concat フィルターの構築
+        # 各入力ストリームを [i:v] と [i:a] として参照し、concat フィルターに渡す
+        # v=1:a=1:shortest=1 で動画と音声を1つずつ出力し、最短のストリームに合わせる
+        num_clips = len(scene_video_paths)
+
+        # 動画ストリームと音声ストリームをそれぞれ concat する
+        video_inputs = "".join([f"[{i}:v]" for i in range(num_clips)])
+        audio_inputs = "".join([f"[{i}:a]" for i in range(num_clips)])
+
+        filter_complex = (
+            f"{video_inputs}concat=n={num_clips}:v=1:a=0[v_out];"
+            f"{audio_inputs}concat=n={num_clips}:v=0:a=1[a_out]"
         )
+
+        cmd.extend(["-filter_complex", filter_complex])
+        cmd.extend(
+            ["-map", "[v_out]", "-map", "[a_out]"]
+        )  # フィルターからの出力をマップ
+
         cmd.extend(h264_enc)
         cmd.extend(
             [
@@ -711,9 +745,12 @@ class FinalizePhase:
                 "aac",
                 "-b:a",
                 "192k",
+                "-shortest",  # 最も短い入力ストリームの長さに合わせる
                 str(output_video_path),  # Pathオブジェクトをstrに変換
             ]
         )
+
+        logger.info(f"FinalizePhase: FFmpeg concat command: {' '.join(cmd)}")
 
         try:
             proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
@@ -722,6 +759,13 @@ class FinalizePhase:
             logger.info(
                 f"Successfully concatenated all scene videos to {output_video_path}"
             )
+
+            # 最終動画の長さを取得してログに出力
+            final_video_duration = get_audio_duration(str(output_video_path))
+            logger.info(
+                f"FinalizePhase: Final video '{output_video_path.name}' actual duration: {final_video_duration:.2f}s"
+            )
+
         except subprocess.CalledProcessError as e:
             logger.error(f"Error concatenating final video: {e}")
             logger.error(f"FFmpeg stdout:\n{e.stdout}")

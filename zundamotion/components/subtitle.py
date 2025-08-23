@@ -21,8 +21,17 @@ class SubtitleGenerator:
             Dict[str, Any]: A dictionary of drawtext options.
         """
         # Get style from config, allowing line-specific overrides
+        # Start with global subtitle config
         style = self.subtitle_config.copy()
-        if "subtitle" in line_config:
+
+        # Merge line-specific subtitle settings, which should already include character defaults
+        # The script_loader should have merged character defaults and line-specific overrides into line_config
+        # So, we just need to merge line_config itself, as it contains the final merged settings
+        style.update(line_config)
+
+        # If there's a nested 'subtitle' key in line_config (from character defaults or line override),
+        # merge that as well. This handles cases where subtitle settings are explicitly nested.
+        if "subtitle" in line_config and isinstance(line_config["subtitle"], dict):
             style.update(line_config["subtitle"])
 
         # 自動改行を適用

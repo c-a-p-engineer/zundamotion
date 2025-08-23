@@ -357,17 +357,9 @@ class VideoRenderer:
             if not char_config.get("visible", False) or i not in character_indices:
                 continue
             ffmpeg_index = character_indices[i]
-            scale = float(
-                char_config.get(
-                    "scale", self.config.get("characters", {}).get("default_scale", 1.0)
-                )
-            )
-            anchor = char_config.get(
-                "anchor",
-                self.config.get("characters", {}).get(
-                    "default_anchor", "bottom_center"
-                ),
-            )
+            # scale, anchor, position should already be merged into char_config by script_loader.py
+            scale = float(char_config.get("scale", 1.0))
+            anchor = char_config.get("anchor", "bottom_center")
             pos = char_config.get("position", {"x": "0", "y": "0"})
             x_expr, y_expr = calculate_overlay_position(
                 "W",
