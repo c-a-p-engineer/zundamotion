@@ -15,9 +15,90 @@ import json
 import os
 import re
 import subprocess
-from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 from zundamotion.utils.logger import logger
+
+
+# =========================================================
+# データクラス
+# =========================================================
+@dataclass
+class VideoParams:
+    width: int = 1920
+    height: int = 1080
+    fps: int = 30
+    pix_fmt: str = "yuv420p"
+    profile: str = "main"  # H.264/HEVC プロファイル (例: 'main', 'high')
+    bitrate_kbps: Optional[int] = (
+        None  # ビットレート (kbps)。指定しない場合は CRF/CQ を使用
+    )
+    crf: Optional[int] = (
+        None  # CRF 値 (CPUエンコーダ用)。指定しない場合はデフォルト値を使用
+    )
+    cq: Optional[int] = None  # CQ 値 (NVENC用)。指定しない場合はデフォルト値を使用
+    global_quality: Optional[int] = None  # QSV用。指定しない場合はデフォルト値を使用
+    qp: Optional[int] = None  # VAAPI/AMF用。指定しない場合はデフォルト値を使用
+
+    def to_ffmpeg_opts(self, hw_kind: Optional[str] = None) -> List[str]:
+        opts: List[str] = []
+        opts.extend(["-r", str(self.fps)])
+        opts.extend(["-s", f"{self.width}x{self.height}"])
+        opts.extend(["-pix_fmt", self.pix_fmt])
+
+        if hw_kind == "nvenc":
+            opts.extend(["-profile:v", self.profile])
+            if self.cq is not None:
+                opts.extend(["-cq", str(self.cq)])
+            elif self.bitrate_kbps is not None:
+                opts.extend(["-b:v", f"{self.bitrate_kbps}k"])
+            else:
+                opts.extend(["-cq", "23"])  # デフォルト
+        elif hw_kind == "qsv":
+            if self.global_quality is not None:
+                opts.extend(["-global_quality", str(self.global_quality)])
+            elif self.bitrate_kbps is not None:
+                opts.extend(["-b:v", f"{self.bitrate_kbps}k"])
+            else:
+                opts.extend(["-global_quality", "23"])  # デフォルト
+        elif hw_kind == "vaapi" or hw_kind == "amf":
+            if self.qp is not None:
+                opts.extend(["-qp", str(self.qp)])
+            elif self.bitrate_kbps is not None:
+                opts.extend(["-b:v", f"{self.bitrate_kbps}k"])
+            else:
+                opts.extend(["-qp", "23"])  # デフォルト
+        elif hw_kind == "videotoolbox":
+            if self.bitrate_kbps is not None:
+                opts.extend(["-b:v", f"{self.bitrate_kbps}k"])
+            else:
+                opts.extend(["-b:v", "5M"])  # デフォルト
+        else:  # CPU
+            if self.crf is not None:
+                opts.extend(["-crf", str(self.crf)])
+            elif self.bitrate_kbps is not None:
+                opts.extend(["-b:v", f"{self.bitrate_kbps}k"])
+            else:
+                opts.extend(["-crf", "23"])  # デフォルト
+
+        return opts
+
+
+@dataclass
+class AudioParams:
+    sample_rate: int = 48000
+    channels: int = 2
+    codec: str = "aac"
+    bitrate_kbps: int = 192
+
+    def to_ffmpeg_opts(self) -> List[str]:
+        opts: List[str] = []
+        opts.extend(["-ar", str(self.sample_rate)])
+        opts.extend(["-ac", str(self.channels)])
+        opts.extend(["-c:a", self.codec])
+        opts.extend(["-b:a", f"{self.bitrate_kbps}k"])
+        return opts
 
 
 # =========================================================
@@ -108,20 +189,10 @@ def get_hardware_encoder_kind(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
 # =========================================================
 # エンコーダオプション（FFmpeg 7 向け）
 # =========================================================
-def get_video_encoder_options(
-    ffmpeg_path: str = "ffmpeg",
-) -> Tuple[List[str], List[str], List[str]]:
+def get_hw_encoder_kind_for_video_params(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
     """
-    H.264/HEVC のエンコーダオプション（FFmpeg 7 向け推奨値）を返す。
-    戻り値: (hw_accel_input_opts, h264_encoder_opts, hevc_encoder_opts)
-
-    注意:
-    - 本関数は **デコード＆フィルタはCPU** 想定。`-hwaccel` は返さない。
-      （drawtext/overlay 等のCPUフィルタと混在時のトラブルを避けるため）
-    - ハードウェア「エンコード」は積極的に使用。
-    - 環境変数で強制切替可:
-        DISABLE_HWENC=1 → CPU固定
-        FORCE_NVENC=1, FORCE_QSV=1, FORCE_VAAPI=1 → 各HWエンコ強制
+    VideoParams.to_ffmpeg_opts で使用するためのハードウェアエンコーダの種類を判定して返す。
+    環境変数による強制設定も考慮する。
     """
     hw_force_off = os.getenv("DISABLE_HWENC", "0") == "1"
 
@@ -141,72 +212,15 @@ def get_video_encoder_options(
         else (hw_kind_env or get_hardware_encoder_kind(ffmpeg_path))
     )
 
-    # 入力側の -hwaccel は返さない（安定性重視）
-    hw_accel_input_opts: List[str] = []
-
-    # 既定はCPU（libx264/libx265）
-    h264_opts = ["-c:v", "libx264", "-preset", "fast", "-crf", "23"]
-    hevc_opts = ["-c:v", "libx265", "-preset", "fast", "-crf", "28"]  # HEVCはCRF高め
-
-    if hw_kind == "nvenc":
-        # NVENC: FFmpeg 7 でも -cq を使用
-        h264_opts = ["-c:v", "h264_nvenc", "-preset", "fast", "-cq", "23"]
-        hevc_opts = ["-c:v", "hevc_nvenc", "-preset", "fast", "-cq", "28"]
-        logger.info("Using NVENC for video encoding.")
-    elif hw_kind == "qsv":
-        # QSV: FFmpeg 7 では -global_quality を使用（-q は避ける）
-        # 品質モードは 'icq' / 'la_icq' などあるが、汎用性重視でICQ相当の指定
-        h264_opts = ["-c:v", "h264_qsv", "-preset", "veryfast", "-global_quality", "23"]
-        hevc_opts = ["-c:v", "hevc_qsv", "-preset", "veryfast", "-global_quality", "28"]
-        logger.info("Using QSV for video encoding.")
-    elif hw_kind == "vaapi":
-        # VAAPI: 明示的な -vaapi_device は「入力側HW化しない」方針のためここでは付けない
-        # （CPUでフィルタ→hwエンコはVAAPI非対応が多い。ここでは素直にCPUにフォールバック推奨）
-        # それでも使いたい場合は別途呼び出し元で format=nv12,hwupload,scale_vaapi 等を構成すること。
-        h264_opts = ["-c:v", "h264_vaapi", "-qp", "23"]
-        hevc_opts = ["-c:v", "hevc_vaapi", "-qp", "28"]
+    if hw_kind:
+        logger.info(f"Using {hw_kind.upper()} for video encoding.")
+    elif hw_force_off:
         logger.info(
-            "Using VAAPI for video encoding (note: filtergraph must be VAAPI-friendly)."
+            "Hardware encoding disabled by DISABLE_HWENC=1. Falling back to CPU."
         )
-    elif hw_kind == "videotoolbox":
-        # Apple VideoToolbox: CRFではなくビットレート指定が一般的
-        h264_opts = ["-c:v", "h264_videotoolbox", "-b:v", "5M"]
-        hevc_opts = ["-c:v", "hevc_videotoolbox", "-b:v", "5M"]
-        logger.info("Using VideoToolbox for video encoding.")
-    elif hw_kind == "amf":
-        # AMD AMF
-        h264_opts = [
-            "-c:v",
-            "h264_amf",
-            "-quality",
-            "balanced",
-            "-qp_i",
-            "23",
-            "-qp_p",
-            "23",
-        ]
-        hevc_opts = [
-            "-c:v",
-            "hevc_amf",
-            "-quality",
-            "balanced",
-            "-qp_i",
-            "28",
-            "-qp_p",
-            "28",
-        ]
-        logger.info("Using AMF for video encoding.")
     else:
-        if hw_force_off:
-            logger.info(
-                "Hardware encoding disabled by DISABLE_HWENC=1. Falling back to CPU."
-            )
-        else:
-            logger.info(
-                "No hardware encoder found. Falling back to CPU (libx264/libx265)."
-            )
-
-    return hw_accel_input_opts, h264_opts, hevc_opts
+        logger.info("No hardware encoder found. Falling back to CPU (libx264/libx265).")
+    return hw_kind
 
 
 def _threading_flags(ffmpeg_path: str = "ffmpeg") -> List[str]:
@@ -515,24 +529,24 @@ def has_audio_stream(file_path: str) -> bool:
 def normalize_video(
     input_path: str,
     output_path: str,
-    target_fps: int = 30,
-    target_ar: int = 48000,
+    video_params: VideoParams,
+    audio_params: AudioParams,
     ffmpeg_path: str = "ffmpeg",
 ):
     """
-    映像を標準フォーマット（30fps, 48kHz）に正規化。タイムスタンプも補正。
+    映像を標準フォーマットに正規化。タイムスタンプも補正。
     - デコード＆フィルタ: CPU
     - エンコード: HWエンコ（存在すれば）/ CPU
     """
-    video_filter = f"fps={target_fps},setpts=PTS-STARTPTS"
-    audio_filter = f"aresample={target_ar},asetpts=PTS-STARTPTS"
+    video_filter = f"fps={video_params.fps},setpts=PTS-STARTPTS"
+    audio_filter = f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"
 
-    hw_in, h264_enc, _ = get_video_encoder_options(ffmpeg_path)
+    hw_kind = get_hw_encoder_kind_for_video_params(ffmpeg_path)
+    video_opts = video_params.to_ffmpeg_opts(hw_kind)
+    audio_opts = audio_params.to_ffmpeg_opts()
 
     cmd = [ffmpeg_path, "-y"]
     cmd.extend(_threading_flags(ffmpeg_path))
-    # 入力側HWは付与しない（安定性重視）
-    # cmd.extend(hw_in)
     cmd.extend(
         [
             "-i",
@@ -543,18 +557,9 @@ def normalize_video(
             audio_filter,
         ]
     )
-    cmd.extend(h264_enc)
-    cmd.extend(
-        [
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            output_path,
-        ]
-    )
+    cmd.extend(video_opts)
+    cmd.extend(audio_opts)
+    cmd.extend([output_path])
 
     try:
         proc = _run_ffmpeg(cmd)
@@ -571,28 +576,26 @@ def normalize_video(
 def create_silent_audio(
     output_path: str,
     duration: float,
-    sample_rate: int = 44100,
-    channels: int = 2,
+    audio_params: AudioParams,
     ffmpeg_path: str = "ffmpeg",
 ):
     """
     指定秒数の無音WAVを作成（PCM s16le）。
     FFmpeg 7 では anullsrc の cl は 'mono' / 'stereo' 指定が安全。
     """
-    cl = "mono" if channels == 1 else "stereo"
+    cl = "mono" if audio_params.channels == 1 else "stereo"
     cmd = [
         ffmpeg_path,
         "-y",
         "-f",
         "lavfi",
         "-i",
-        f"anullsrc=r={sample_rate}:cl={cl}",
+        f"anullsrc=r={audio_params.sample_rate}:cl={cl}",
         "-t",
         str(duration),
-        "-c:a",
-        "pcm_s16le",
-        output_path,
     ]
+    cmd.extend(audio_params.to_ffmpeg_opts())
+    cmd.extend([output_path])
     try:
         _run_ffmpeg(cmd)
         logger.debug(f"Created silent audio: {output_path} ({duration}s)")
@@ -607,6 +610,7 @@ def add_bgm_to_video(
     video_path: str,
     bgm_path: str,
     output_path: str,
+    audio_params: AudioParams,
     bgm_volume: float = 0.5,
     bgm_start_time: float = 0.0,
     fade_in_duration: float = 0.0,
@@ -641,6 +645,8 @@ def add_bgm_to_video(
     bgm_chain = f"[1:a]{','.join(af)}[bgm_filtered]"
     delayed = f"[bgm_filtered]adelay={int(bgm_start_time * 1000)}:all=1[delayed_bgm]"
 
+    audio_opts = audio_params.to_ffmpeg_opts()
+
     if video_has_audio:
         # 元音声 + BGM をミックス
         filter_complex = f"{bgm_chain};{delayed};[0:a][delayed_bgm]amix=inputs=2:duration=shortest[aout]"
@@ -653,14 +659,10 @@ def add_bgm_to_video(
                 "[aout]",
                 "-c:v",
                 "copy",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "192k",
-                "-shortest",
-                output_path,
             ]
         )
+        cmd.extend(audio_opts)
+        cmd.extend(["-shortest", output_path])
     else:
         # 元音声がない→ BGMのみ
         filter_complex = f"{bgm_chain};{delayed}"
@@ -673,14 +675,10 @@ def add_bgm_to_video(
                 "[delayed_bgm]",
                 "-c:v",
                 "copy",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "192k",
-                "-shortest",
-                output_path,
             ]
         )
+        cmd.extend(audio_opts)
+        cmd.extend(["-shortest", output_path])
 
     try:
         proc = _run_ffmpeg(cmd)
@@ -701,6 +699,8 @@ def apply_transition(
     transition_type: str,
     duration: float,
     offset: float,
+    video_params: VideoParams,
+    audio_params: AudioParams,
     ffmpeg_path: str = "ffmpeg",
 ):
     """
@@ -711,7 +711,9 @@ def apply_transition(
     has_a1 = has_audio_stream(input_video1_path)
     has_a2 = has_audio_stream(input_video2_path)
 
-    _, h264_enc, _ = get_video_encoder_options(ffmpeg_path)
+    hw_kind = get_hw_encoder_kind_for_video_params(ffmpeg_path)
+    video_opts = video_params.to_ffmpeg_opts(hw_kind)
+    audio_opts = audio_params.to_ffmpeg_opts()
 
     cmd = [ffmpeg_path, "-y"]
     cmd.extend(_threading_flags(ffmpeg_path))
@@ -722,18 +724,18 @@ def apply_transition(
 
     if has_a1 and has_a2:
         af = (
-            "[0:a]aresample=async=1:first_pts=0,"
-            "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a0];"
-            "[1:a]aresample=async=1:first_pts=0,"
-            "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a1];"
+            f"[0:a]aresample=async=1:first_pts=0,"
+            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts=stereo[a0];"
+            f"[1:a]aresample=async=1:first_pts=0,"
+            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts=stereo[a1];"
             f"[a0][a1]acrossfade=d={duration}:c1=tri:c2=tri[a]"
         )
         parts.append(af)
         cmd += ["-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]"]
     elif has_a1:
         af = (
-            "[0:a]aresample=async=1:first_pts=0,"
-            "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+            f"[0:a]aresample=async=1:first_pts=0,"
+            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts=stereo,"
             f"afade=t=out:st={offset}:d={duration}[a]"
         )
         parts.append(af)
@@ -741,8 +743,8 @@ def apply_transition(
     elif has_a2:
         delay_ms = int(offset * 1000)
         af = (
-            "[1:a]aresample=async=1:first_pts=0,"
-            "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+            f"[1:a]aresample=async=1:first_pts=0,"
+            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts=stereo,"
             f"adelay={delay_ms}:all=1,afade=t=in:st=0:d={duration}[a]"
         )
         parts.append(af)
@@ -750,19 +752,10 @@ def apply_transition(
     else:
         cmd += ["-filter_complex", vf, "-map", "[v]"]
 
-    # 映像エンコード設定（FFmpeg 7 推奨に準拠）
-    cmd.extend(h264_enc)
-    cmd.extend(
-        [
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            output_path,
-        ]
-    )
+    # 映像エンコード設定
+    cmd.extend(video_opts)
+    cmd.extend(audio_opts)
+    cmd.extend([output_path])
 
     try:
         proc = _run_ffmpeg(cmd)

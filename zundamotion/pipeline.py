@@ -1,5 +1,3 @@
-import hashlib
-import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -8,11 +6,11 @@ from typing import Any, Dict, List, Optional
 from tqdm import tqdm
 
 from .cache import CacheManager
-from .components.audio import AudioGenerator
 from .components.script_loader import load_script_and_config
 from .exceptions import PipelineError
 from .pipeline_phases import AudioPhase, BGMPhase, FinalizePhase, VideoPhase
 from .timeline import Timeline
+from .utils.ffmpeg_utils import AudioParams, VideoParams
 from .utils.logger import logger, time_log
 
 
@@ -23,6 +21,8 @@ class GenerationPipeline:
         no_cache: bool = False,
         cache_refresh: bool = False,
         jobs: str = "1",
+        video_params: Optional[VideoParams] = None,
+        audio_params: Optional[AudioParams] = None,
     ):
         self.config = config
         self.no_cache = no_cache
@@ -34,6 +34,8 @@ class GenerationPipeline:
             cache_refresh=self.cache_refresh,
         )
         self.timeline = Timeline()
+        self.video_params = video_params if video_params else VideoParams()
+        self.audio_params = audio_params if audio_params else AudioParams()
 
     @time_log(logger)
     def run(self, output_path: str):
@@ -54,23 +56,34 @@ class GenerationPipeline:
             scenes = script.get("scenes", [])
 
             # Execute pipeline phases
-            audio_phase = AudioPhase(self.config, temp_dir, self.cache_manager)
+            audio_phase = AudioPhase(
+                self.config, temp_dir, self.cache_manager, self.audio_params
+            )
             line_data_map, used_voicevox_info = audio_phase.run(scenes, self.timeline)
 
             video_phase = VideoPhase(
-                self.config, temp_dir, self.cache_manager, self.jobs
+                self.config,
+                temp_dir,
+                self.cache_manager,
+                self.jobs,
             )
             all_clips = video_phase.run(scenes, line_data_map, self.timeline)
 
-            bgm_phase = BGMPhase(self.config, temp_dir)
+            bgm_phase = BGMPhase(self.config, temp_dir, self.audio_params)
             final_clips_for_concat = bgm_phase.run(scenes, all_clips)
 
-            finalize_phase = FinalizePhase(self.config, temp_dir, self.cache_manager)
+            finalize_phase = FinalizePhase(
+                self.config,
+                temp_dir,
+                self.cache_manager,
+                self.video_params,
+                self.audio_params,
+            )
             final_video_path = finalize_phase.run(
                 scenes,
                 self.timeline,
                 line_data_map,
-                final_clips_for_concat,  # video_paths に相当
+                final_clips_for_concat,
                 used_voicevox_info,
             )
             # 最終的な動画をoutput_pathにコピー
@@ -150,6 +163,13 @@ def run_generation(
         ] = True
         config["system"]["subtitle_file"]["format"] = subtitle_file_format
 
-    # Create and run the pipeline
-    pipeline = GenerationPipeline(config, no_cache, cache_refresh, jobs)
+    # Create and run the pipeline with default VideoParams and AudioParams
+    pipeline = GenerationPipeline(
+        config,
+        no_cache,
+        cache_refresh,
+        jobs,
+        video_params=VideoParams(),  # デフォルトのVideoParamsを渡す
+        audio_params=AudioParams(),  # デフォルトのAudioParamsを渡す
+    )
     pipeline.run(output_path)

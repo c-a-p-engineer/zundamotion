@@ -10,18 +10,22 @@ from zundamotion.cache import CacheManager
 from zundamotion.components.audio import AudioGenerator
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
-from zundamotion.utils.ffmpeg_utils import get_audio_duration
+from zundamotion.utils.ffmpeg_utils import AudioParams, get_audio_duration
 from zundamotion.utils.logger import logger, time_log
 
 
 class AudioPhase:
     def __init__(
-        self, config: Dict[str, Any], temp_dir: Path, cache_manager: CacheManager
+        self,
+        config: Dict[str, Any],
+        temp_dir: Path,
+        cache_manager: CacheManager,
+        audio_params: AudioParams,
     ):
         self.config = config
         self.temp_dir = temp_dir
         self.cache_manager = cache_manager
-        self.audio_gen = AudioGenerator(self.config, self.temp_dir)
+        self.audio_gen = AudioGenerator(self.config, self.temp_dir, audio_params)
         self.video_extensions = self.config.get("system", {}).get(
             "video_extensions",
             [".mp4", ".mov", ".webm", ".avi", ".mkv"],

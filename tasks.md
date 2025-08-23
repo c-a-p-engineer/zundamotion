@@ -4,34 +4,6 @@
 
 ---
 
-### 01. Video/Audio Params のデータクラス化
-
-**詳細**
-各フェーズで出力指定がバラけると仕様ズレが発生する。共通クラスで統一し、参照必須とする。
-
-**ゴール**
-
-* `VideoParams`, `AudioParams` を必ず経由してコマンド構築。
-* `ffprobe` で全クリップが完全一致。
-* copy concat のフォールバック率がゼロに近づく。
-
-**実装イメージ**
-
-```python
-@dataclass
-class VideoParams:
-    width: int = 1920
-    height: int = 1080
-    fps: int = 30
-    pix_fmt: str = "yuv420p"
-    profile: str = "main"
-```
-
-* AudioParams も同様。
-* ffmpeg コマンドは `CommandBuilder` を経由して生成。
-
----
-
 ### 02. 背景/挿入動画の Normalization キャッシュ
 
 **詳細**

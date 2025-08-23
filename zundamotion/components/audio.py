@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from ..utils.ffmpeg_utils import (
+    AudioParams,
     create_silent_audio,
     get_audio_duration,
     mix_audio_tracks,
@@ -11,13 +12,16 @@ from .voicevox_client import generate_voice
 
 
 class AudioGenerator:
-    def __init__(self, config: Dict[str, Any], temp_dir: Path):
+    def __init__(
+        self, config: Dict[str, Any], temp_dir: Path, audio_params: AudioParams
+    ):
         self.config = config
         self.temp_dir = temp_dir
         self.voice_config = config.get("voice", {})
         self.voicevox_url = os.getenv(
             "VOICEVOX_URL", self.voice_config.get("url", "http://127.0.0.1:50021")
         )
+        self.audio_params = audio_params
 
     def generate_audio(
         self, text: str, line_config: Dict[str, Any], output_filename: str
@@ -83,7 +87,11 @@ class AudioGenerator:
             print(
                 f"[Audio] Empty text, creating silent WAV for {speech_wav_path.name} with duration {required_speech_duration_for_ses}s"
             )
-            create_silent_audio(str(speech_wav_path), required_speech_duration_for_ses)
+            create_silent_audio(
+                str(speech_wav_path),
+                required_speech_duration_for_ses,
+                self.audio_params,
+            )
             speech_duration = required_speech_duration_for_ses
             speaker = 0  # Default speaker ID for silent audio
             text = ""  # Empty text for silent audio
