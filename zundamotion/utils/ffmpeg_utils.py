@@ -18,6 +18,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
+from zundamotion.cache import CacheManager
 from zundamotion.utils.logger import logger
 
 
@@ -526,6 +527,23 @@ def has_audio_stream(file_path: str) -> bool:
 # =========================================================
 # 変換・生成
 # =========================================================
+import hashlib
+from pathlib import Path
+
+
+def generate_normalization_hash_data(
+    input_path: Path, video_params: VideoParams, audio_params: AudioParams
+) -> Dict[str, Any]:
+    """
+    動画正規化のためのハッシュ生成に必要なデータを辞書形式で返す。
+    """
+    return {
+        "input_path": input_path,
+        "video_params": video_params.__dict__,  # dataclass を辞書に変換
+        "audio_params": audio_params.__dict__,  # dataclass を辞書に変換
+    }
+
+
 def normalize_video(
     input_path: str,
     output_path: str,
@@ -565,7 +583,15 @@ def normalize_video(
         proc = _run_ffmpeg(cmd)
         logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
         logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
-        logger.info(f"Successfully normalized {input_path} to {output_path}")
+        if Path(output_path).exists():
+            logger.info(
+                f"Successfully normalized {input_path} to {output_path} (file exists)."
+            )
+        else:
+            logger.error(
+                f"Failed to normalize {input_path} to {output_path} (file does NOT exist)."
+            )
+        return Path(output_path)
     except subprocess.CalledProcessError as e:
         logger.error(f"Error normalizing video {input_path}: {e}")
         logger.error(f"FFmpeg stdout:\n{e.stdout}")
@@ -891,3 +917,99 @@ def mix_audio_tracks(
         logger.error(f"FFmpeg stdout:\n{e.stdout}")
         logger.error(f"FFmpeg stderr:\n{e.stderr}")
         raise
+
+
+def normalize_media(
+    input_path: Path,
+    video_params: VideoParams,
+    audio_params: AudioParams,
+    cache_manager: CacheManager,
+    ffmpeg_path: str = "ffmpeg",
+) -> Path:
+    """
+    背景・挿入動画を指定されたパラメータに正規化し、キャッシュする。
+    キャッシュがHITすれば、変換処理をスキップしてキャッシュパスを返す。
+    """
+    key_data = {
+        "input_path": str(input_path.resolve()),
+        "video_params": video_params.__dict__,
+        "audio_params": audio_params.__dict__,
+    }
+
+    cached_path = cache_manager.get_cache_path(key_data, "normalized", "mp4")
+
+    if (
+        not cache_manager.no_cache
+        and not cache_manager.cache_refresh
+        and cached_path.exists()
+    ):
+        logger.info(f"[Cache] Normalized hit: {cached_path}")
+        return cached_path
+
+    logger.info(f"[Cache] Normalized miss: {input_path} -> generating...")
+
+    def creator_func(output_path: Path) -> Path:
+        # メディアに音声ストリームがあるか確認
+        has_audio = has_audio_stream(str(input_path))
+
+        # -vf フィルタグラフの構築
+        vf_filters = []
+        if video_params.width and video_params.height:
+            vf_filters.append(f"scale={video_params.width}:{video_params.height}")
+        if video_params.fps:
+            vf_filters.append(f"fps={video_params.fps}")
+        if video_params.pix_fmt:
+            vf_filters.append(f"format={video_params.pix_fmt}")
+
+        vf_filter_str = ",".join(vf_filters)
+
+        cmd = [
+            ffmpeg_path,
+            "-y",
+            "-i",
+            str(input_path),
+        ]
+        cmd.extend(_threading_flags(ffmpeg_path))
+
+        if vf_filter_str:
+            cmd.extend(["-vf", vf_filter_str])
+
+        # Video options
+        # CPUエンコードを強制（HWエンコーダは最終出力用とし、中間ファイルは安定性重視）
+        cmd.extend(["-c:v", "libx264"])
+        if video_params.pix_fmt:
+            cmd.extend(["-pix_fmt", video_params.pix_fmt])
+        if video_params.profile:
+            cmd.extend(["-profile:v", video_params.profile])
+        cmd.extend(["-crf", "18"])  # 高品質な中間ファイル
+
+        # Audio options
+        if has_audio:
+            cmd.extend(["-c:a", "aac"])
+            if audio_params.bitrate_kbps:
+                cmd.extend(["-b:a", f"{audio_params.bitrate_kbps}k"])
+            if audio_params.sample_rate:
+                cmd.extend(["-ar", str(audio_params.sample_rate)])
+            if audio_params.channels:
+                cmd.extend(["-ac", str(audio_params.channels)])
+        else:
+            # 音声がない場合は -an を指定
+            cmd.extend(["-an"])
+
+        cmd.append(str(output_path))
+
+        try:
+            _run_ffmpeg(cmd)
+            return output_path
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error normalizing media {input_path}: {e}")
+            logger.error(f"FFmpeg stdout:\n{e.stdout}")
+            logger.error(f"FFmpeg stderr:\n{e.stderr}")
+            raise
+
+    return cache_manager.get_or_create(
+        key_data=key_data,
+        file_name="normalized",
+        extension="mp4",
+        creator_func=creator_func,
+    )

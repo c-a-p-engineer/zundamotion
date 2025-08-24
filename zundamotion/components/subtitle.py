@@ -90,7 +90,7 @@ class SubtitleGenerator:
         """
         text = self._normalize_newlines(text)
         text = text.replace("\\", r"\\")
-        # text = text.replace("\n", r"\n")
+        text = text.replace("\n", r"\n")
         text = text.replace(":", r"\:")
         text = text.replace("'", r"\'")
         return text

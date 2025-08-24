@@ -21,6 +21,7 @@ class CacheManager:
 
         try:
             self.cache_dir.mkdir(exist_ok=True)
+            logger.info(f"Cache directory initialized: {self.cache_dir.resolve()}")
             if self.no_cache:
                 logger.info(
                     "Cache is disabled (--no-cache). All files will be regenerated."
@@ -101,22 +102,49 @@ class CacheManager:
         key_data: Dict[str, Any],
         file_name: str,
         extension: str,
-        creator_func: Callable[[], Optional[Path]],
-    ) -> Optional[Path]:
-        cached_path = self.get_cached_path(key_data, file_name, extension)
-        if cached_path:
+        creator_func: Callable[
+            [Path], Path
+        ],  # creator_func は出力パスを受け取り、生成されたファイルのパスを返す
+    ) -> Path:
+        cache_key = self._generate_hash(key_data)
+        cached_path = self.cache_dir / f"{file_name}_{cache_key}.{extension}"
+        logger.debug(
+            f"Attempting to get_or_create for key: {cache_key}, expected path: {cached_path.name}"
+        )
+
+        if self.no_cache:
+            # キャッシュ無効時は一時ファイルとして生成し、キャッシュディレクトリには保存しない
+            temp_output_path = (
+                self.cache_dir / f"temp_{file_name}_{cache_key}.{extension}"
+            )
+            logger.debug(
+                f"Cache disabled. Generating temporary file: {temp_output_path.name}"
+            )
+            return creator_func(temp_output_path)
+
+        if self.cache_refresh and cached_path.exists():
+            logger.debug(
+                f"Cache refresh requested. Removing existing cache: {cached_path.name}"
+            )
+            cached_path.unlink()  # 既存のキャッシュを削除
+
+        if cached_path.exists():
+            logger.debug(f"Using cached file -> {cached_path.name}")
             return cached_path
 
-        new_file_path = creator_func()
-        if new_file_path:
-            try:
-                self.save_to_cache(
-                    new_file_path, key_data, file_name, extension
-                )  # Use new method
-                return new_file_path
-            except Exception as e:
-                raise CacheError(f"Failed to cache file {file_name}.{extension}: {e}")
-        else:
+        logger.debug(
+            f"Cache miss. Calling creator_func to generate file to cache: {cached_path.name}"
+        )
+        try:
+            # creator_func にキャッシュパスを直接渡し、そこにファイルを生成させる
+            generated_path = creator_func(cached_path)
+            if generated_path != cached_path:
+                # creator_func が別のパスに生成した場合、キャッシュパスにコピー
+                shutil.copy(generated_path, cached_path)
+                generated_path.unlink()  # 元の一時ファイルを削除
+            logger.debug(f"Generated and cached file -> {cached_path.name}")
+            return cached_path
+        except Exception as e:
             raise CacheError(
-                f"Creator function failed to generate file for {file_name}.{extension}"
+                f"Failed to generate or cache file {file_name}.{extension}: {e}"
             )

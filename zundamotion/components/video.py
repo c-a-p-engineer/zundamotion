@@ -5,11 +5,14 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..cache import CacheManager
 from ..utils.ffmpeg_utils import (
+    AudioParams,
+    VideoParams,
     calculate_overlay_position,
     get_media_info,
     has_audio_stream,
-    normalize_video,
+    normalize_media,
 )
 
 
@@ -47,9 +50,16 @@ def _format_drawtext_filter(drawtext_params: Dict[str, Any]) -> str:
 # 本体
 # --------------------------
 class VideoRenderer:
-    def __init__(self, config: Dict[str, Any], temp_dir: Path, jobs: str = "0"):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        temp_dir: Path,
+        cache_manager: CacheManager,
+        jobs: str = "0",
+    ):
         self.config = config
         self.temp_dir = temp_dir
+        self.cache_manager = cache_manager
         self.video_config = config.get("video", {})
         self.bgm_config = config.get("bgm", {})
         self.jobs = jobs
@@ -60,6 +70,19 @@ class VideoRenderer:
         self.h264_encoder_options: List[str] = []
         self.hevc_encoder_options: List[str] = []
         self._pix_fmt: str = "yuv420p"  # QSV 使用時は nv12 に切替
+
+        # 正規化用のデフォルトパラメータ
+        self.default_video_params = VideoParams(
+            width=self.video_config.get("width", 1920),
+            height=self.video_config.get("height", 1080),
+            fps=self.video_config.get("fps", 30),
+            pix_fmt=self.video_config.get("pix_fmt", "yuv420p"),
+        )
+        self.default_audio_params = AudioParams(
+            sample_rate=self.video_config.get("audio_sample_rate", 48000),
+            channels=self.video_config.get("audio_channels", 2),
+            bitrate_kbps=self.video_config.get("audio_bitrate_kbps", 192),
+        )
 
         self._initialize_ffmpeg_settings()
 
@@ -220,18 +243,15 @@ class VideoRenderer:
         if background_config.get("type") == "video":
             try:
                 media_info = get_media_info(str(bg_path))
-                video_info = media_info.get("video", {})
-                audio_info = media_info.get("audio", {})
+                video_info = media_info.get("video")
+                audio_info = media_info.get("audio")
 
-                is_standard = (
-                    int(round(video_info.get("fps", 0))) == 30
-                    and audio_info.get("sample_rate") == 48000
+                bg_path = normalize_media(
+                    input_path=bg_path,
+                    video_params=self.default_video_params,
+                    audio_params=self.default_audio_params,
+                    cache_manager=self.cache_manager,
                 )
-                if not is_standard:
-                    print(f"[Video] Normalizing background video: {bg_path.name}")
-                    normalized_bg_path = self.temp_dir / f"normalized_{bg_path.name}"
-                    normalize_video(str(bg_path), str(normalized_bg_path))
-                    bg_path = normalized_bg_path
             except Exception as e:
                 print(
                     f"[Warning] Could not inspect/normalize BG video {bg_path.name}: {e}. Using as-is."
@@ -269,19 +289,15 @@ class VideoRenderer:
             if is_video:
                 try:
                     media_info = get_media_info(str(insert_path))
-                    video_info = media_info.get("video", {})
-                    audio_info = media_info.get("audio", {})
-                    is_standard = (
-                        int(round(video_info.get("fps", 0))) == 30
-                        and audio_info.get("sample_rate") == 48000
+                    video_info = media_info.get("video")
+                    audio_info = media_info.get("audio")
+
+                    insert_path = normalize_media(
+                        input_path=insert_path,
+                        video_params=self.default_video_params,
+                        audio_params=self.default_audio_params,
+                        cache_manager=self.cache_manager,
                     )
-                    if not is_standard:
-                        print(f"[Video] Normalizing insert video: {insert_path.name}")
-                        normalized_insert_path = (
-                            self.temp_dir / f"normalized_{insert_path.name}"
-                        )
-                        normalize_video(str(insert_path), str(normalized_insert_path))
-                        insert_path = normalized_insert_path
                 except Exception as e:
                     print(
                         f"[Warning] Could not inspect/normalize insert video {insert_path.name}: {e}. Using as-is."

@@ -10,7 +10,7 @@ from zundamotion.components.subtitle import SubtitleGenerator
 from zundamotion.components.video import VideoRenderer
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
-from zundamotion.utils.ffmpeg_utils import get_audio_duration
+from zundamotion.utils.ffmpeg_utils import AudioParams, VideoParams, normalize_media
 from zundamotion.utils.logger import logger, time_log
 
 
@@ -27,7 +27,9 @@ class VideoPhase:
         self.cache_manager = cache_manager
         self.jobs = jobs
         self.subtitle_gen = SubtitleGenerator(self.config)
-        self.video_renderer = VideoRenderer(self.config, self.temp_dir, self.jobs)
+        self.video_renderer = VideoRenderer(
+            self.config, self.temp_dir, self.cache_manager, self.jobs
+        )
         self.video_extensions = self.config.get("system", {}).get(
             "video_extensions",
             [".mp4", ".mov", ".webm", ".avi", ".mkv"],
@@ -93,10 +95,37 @@ class VideoPhase:
 
                 scene_bg_video_path: Optional[Path] = None
                 if is_bg_video:
+                    # 正規化用のパラメータを取得
+                    video_params = VideoParams(
+                        width=self.config.get("video", {}).get("width", 1920),
+                        height=self.config.get("video", {}).get("height", 1080),
+                        fps=self.config.get("video", {}).get("fps", 30),
+                        pix_fmt=self.config.get("video", {}).get("pix_fmt", "yuv420p"),
+                    )
+                    audio_params = AudioParams(
+                        sample_rate=self.config.get("video", {}).get(
+                            "audio_sample_rate", 48000
+                        ),
+                        channels=self.config.get("video", {}).get("audio_channels", 2),
+                        bitrate_kbps=self.config.get("video", {}).get(
+                            "audio_bitrate_kbps", 192
+                        ),
+                    )
+
+                    # 背景動画を正規化
+                    normalized_bg_path = normalize_media(
+                        input_path=Path(bg_image),
+                        video_params=video_params,
+                        audio_params=audio_params,
+                        cache_manager=self.cache_manager,
+                    )
+
                     scene_bg_video_filename = f"scene_bg_{scene_id}"
                     scene_bg_video_path = (
                         self.video_renderer.render_looped_background_video(
-                            bg_image, scene_duration, scene_bg_video_filename
+                            str(normalized_bg_path),
+                            scene_duration,
+                            scene_bg_video_filename,
                         )
                     )
                     logger.debug(
@@ -134,9 +163,13 @@ class VideoPhase:
                             key_data=wait_cache_data,
                             file_name=line_id,
                             extension="mp4",
-                            creator_func=lambda: self.video_renderer.render_wait_clip(
-                                duration, background_config, line_id, line_config
-                            ),
+                            creator_func=lambda output_path: self.video_renderer.render_wait_clip(
+                                duration,
+                                background_config,
+                                output_path.stem,
+                                line_config,
+                            )
+                            or output_path,
                         )
                         if clip_path:
                             scene_line_clips.append(clip_path)
@@ -174,15 +207,16 @@ class VideoPhase:
                             key_data=video_cache_data,
                             file_name=line_id,
                             extension="mp4",
-                            creator_func=lambda: self.video_renderer.render_clip(
+                            creator_func=lambda output_path: self.video_renderer.render_clip(
                                 audio_path,
                                 duration,
                                 drawtext_filter,
                                 background_config,
                                 line.get("characters", []),
-                                line_id,
+                                output_path.stem,
                                 insert_config=line_config.get("insert"),
-                            ),
+                            )
+                            or output_path,
                         )
                         if clip_path:
                             scene_line_clips.append(clip_path)
