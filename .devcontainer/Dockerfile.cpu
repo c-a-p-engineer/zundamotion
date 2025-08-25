@@ -1,75 +1,76 @@
 # =========================================================
-# FFmpeg + Python3.13 環境（Ubuntu 22.04 ベース）
+# CPU + FFmpeg(prebuilt) + Python3.13（Ubuntu 22.04）
 # =========================================================
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-ENV DEBIAN_FRONTEND=noninteractive
-
 # ---------------------------------------------------------
-# 基本ツールの導入
+# 基本ツール
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y \
-   curl unzip git \
-   && apt-get clean
+    curl unzip git xz-utils ca-certificates gnupg2 software-properties-common \
+ && apt-get clean
 
 # ---------------------------------------------------------
 # 日本語フォント（IPAゴシック）
-#   → 字幕レンダリングや日本語出力に必要
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y \
-   fonts-ipafont-gothic \
-   && apt-get clean
+    fonts-ipafont-gothic \
+ && apt-get clean
 
 # ---------------------------------------------------------
-# Python 3.13 の導入準備
-#   - deadsnakes PPA を追加して最新の 3.13 を取得
-#   - build関連パッケージも合わせて導入
+# Python 3.13
 # ---------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
-   gnupg2 curl software-properties-common \
-   && add-apt-repository ppa:deadsnakes/ppa -y \
-   && apt-get update \
-   && apt-get install -y --no-install-recommends \
-   python3.13 python3.13-venv python3.13-dev \
-   && apt-get clean
+RUN add-apt-repository ppa:deadsnakes/ppa -y \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+    python3.13 python3.13-venv python3.13-dev \
+ && apt-get clean
 
 # ---------------------------------------------------------
-# pip 導入 & Python 3.13 の仮想環境を作成
-#   - get-pip.py は非推奨 → ensurepip を利用
-#   - /opt/pyenv を仮想環境のデフォルトに設定
+# venv / pip
 # ---------------------------------------------------------
 RUN python3.13 -m ensurepip --upgrade \
-   && python3.13 -m pip install --no-cache-dir --upgrade pip setuptools wheel \
-   && python3.13 -m venv /opt/pyenv \
-   && /opt/pyenv/bin/pip install --no-cache-dir --upgrade pip
+ && python3.13 -m pip install --no-cache-dir --upgrade pip setuptools wheel \
+ && python3.13 -m venv /opt/pyenv \
+ && /opt/pyenv/bin/pip install --no-cache-dir --upgrade pip
 
 ENV PATH="/opt/pyenv/bin:${PATH}"
 
 # ---------------------------------------------------------
-# Python パッケージのインストール
-#   - requirements.txt にまとめて管理
+# Python パッケージ
 # ---------------------------------------------------------
 COPY requirements.txt .
 RUN pip install --upgrade pip \
-   && pip install --no-cache-dir -r requirements.txt
+ && pip install --no-cache-dir -r requirements.txt
 
 # ---------------------------------------------------------
-# FFmpeg パッケージのインストール
+# FFmpeg（CPU版 prebuilt）
+#   - BtbN ビルド (GPL / shared)
+#   - NVENC 無しでも動作可能
 # ---------------------------------------------------------
-RUN add-apt-repository ppa:ubuntuhandbook1/ffmpeg7
-RUN apt-get update && apt-get install -y \
-   wget \
-   xz-utils \
-   ffmpeg 
+ARG FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl-shared.tar.xz"
+
+RUN curl -L -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" \
+ && mkdir -p /opt/ffmpeg \
+ && tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1 \
+ && ln -sf /opt/ffmpeg/bin/ffmpeg  /usr/local/bin/ffmpeg \
+ && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
+ && rm -f /tmp/ffmpeg.tar.xz
+
+ENV LD_LIBRARY_PATH="/opt/ffmpeg/lib:${LD_LIBRARY_PATH}"
+RUN echo "/opt/ffmpeg/lib" > /etc/ld.so.conf.d/ffmpeg.conf && ldconfig
+
+# CPU版なので NVENC 確認は不要
+RUN ffmpeg -hide_banner -encoders | grep -E 'libx264|libx265'
 
 # ---------------------------------------------------------
-# ワークスペース設定
+# ワークスペース
 # ---------------------------------------------------------
 WORKDIR /workspace
 
 # ---------------------------------------------------------
-# 動作確認（バージョン表示）
+# 動作確認
 # ---------------------------------------------------------
 RUN python3.13 --version && python --version && pip --version

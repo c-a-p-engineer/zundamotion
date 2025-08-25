@@ -105,25 +105,6 @@ AudioPhase,00:00,00:09,9.48,—
 
 ---
 
-### 01. 字幕の事前レンダ（PNG化）
-
-**詳細**
-`drawtext` はCPUフィルタ依存で重い。静的テキストを Pillow で事前生成し、`overlay` で合成すれば軽量化可能。
-
-**ゴール**
-
-* 同一シーンで `drawtext` 版より ≥1.4倍 高速。
-* 縁取り・ボックス表現が正しく再現される。
-
-**実装イメージ**
-
-```python
-from PIL import Image, ImageDraw, ImageFont
-# テキストをレンダ → PNG → overlay
-```
-
----
-
 ### 02. 立ち絵の事前スケール
 
 **詳細**

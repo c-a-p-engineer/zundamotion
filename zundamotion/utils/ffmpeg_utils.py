@@ -5,7 +5,7 @@ FFmpeg 7 対応のユーティリティ群（全文置き換え用）
 ポイント
 - 既定で `-threads 0`（自動スレッド化）＋ `-filter_threads N` ＋ `-filter_complex_threads N` を付与
 - ハードウェアエンコーダは FFmpeg 7 の挙動にあわせて選択（NVENC: -cq / QSV: -global_quality / CPU: -crf）
-- QSV/VAAPI でも **入力側の -hwaccel は原則付与しない**（drawtext/overlay 等を多用するためCPUフィルタと相性を取る）
+- QSV/VAAPI でも **入力側の -hwaccel は原則付与しない**（overlay 等を多用するためCPUフィルタと相性を取る）
   - つまり「デコード＋フィルタ＝CPU」「エンコードのみHW」という方針で安定化
 - バージョン検出＆エンコーダ存在チェックを強化（`ffmpeg -encoders`）
 - 動画長取得の専用関数（`get_media_duration`）を追加（従来の `get_audio_duration` を動画に誤用しない）
@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 from zundamotion.cache import CacheManager
@@ -120,7 +121,24 @@ def get_nproc_value() -> str:
 
 def _run_ffmpeg(args: List[str]) -> subprocess.CompletedProcess:
     """ffmpeg/ffprobeを呼び出して CompletedProcess を返す（例外は上位で処理）。"""
-    return subprocess.run(args, capture_output=True, text=True, check=True)
+    try:
+        # FFmpeg/ffprobeのコマンドをデバッグログに出力
+        logger.debug(f"Running FFmpeg command: {' '.join(args)}")
+        proc = subprocess.run(args, capture_output=True, text=True, check=True)
+        # 成功した場合も、標準エラーに何か情報があればデバッグログに出力
+        if proc.stderr:
+            logger.debug(f"FFmpeg stderr (on success):\n{proc.stderr}")
+        return proc
+    except subprocess.CalledProcessError as e:
+        # 失敗した場合は、コマンド、標準出力、標準エラーをエラーログに詳細に出力
+        logger.error(f"FFmpeg command failed with exit code {e.returncode}")
+        logger.error(f"Command: {' '.join(map(str, e.args))}")
+        if e.stdout:
+            logger.error(f"FFmpeg stdout:\n{e.stdout}")
+        if e.stderr:
+            logger.error(f"FFmpeg stderr:\n{e.stderr}")
+        # 元の例外を再送出
+        raise
 
 
 def get_ffmpeg_version(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
@@ -156,17 +174,73 @@ def _list_encoders(ffmpeg_path: str = "ffmpeg") -> str:
 # =========================================================
 # ハードウェア検出（FFmpeg 7 向け）
 # =========================================================
+@lru_cache(maxsize=None)
+def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
+    """
+    h264_nvencエンコーダが利用可能かスモークテストで確認する。
+    0.1秒のテストエンコードを実行し、成功すればTrueを返す。
+    結果はキャッシュされる。
+    """
+    # First, check if 'h264_nvenc' is listed in encoders (fast fail)
+    try:
+        encoders = _list_encoders(ffmpeg_path)
+        if "h264_nvenc" not in encoders:
+            logger.info("h264_nvenc not found in `ffmpeg -encoders` list.")
+            return False
+    except Exception as e:
+        logger.error(f"Error listing FFmpeg encoders: {e}")
+        return False
+
+    # Perform a smoke test
+    logger.info("Performing a quick smoke test for h264_nvenc...")
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=128x128:d=0.1",
+        "-vcodec",
+        "h264_nvenc",
+        "-preset",
+        "p1",  # Use the fastest preset for the test
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        # Use a timeout to prevent hanging
+        subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=10)
+        logger.info("h264_nvenc smoke test successful. NVENC is available.")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.warning(
+            "h264_nvenc smoke test failed. NVENC is not available or not configured correctly. Falling back to CPU."
+        )
+        logger.debug(f"FFmpeg stderr for smoke test:\n{e.stderr}")
+        return False
+    except subprocess.TimeoutExpired:
+        logger.error("h264_nvenc smoke test timed out. Assuming it's not available.")
+        return False
+    except FileNotFoundError:
+        logger.error(f"ffmpeg command not found at '{ffmpeg_path}'.")
+        return False
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during NVENC smoke test: {e}")
+        return False
+
+
 def get_hardware_encoder_kind(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
     """
     利用可能なH.264/HEVCハードウェア「エンコーダ」を判定して返す。
     優先順位: nvenc -> qsv -> vaapi -> videotoolbox -> amf
     戻り値: 'nvenc' | 'qsv' | 'vaapi' | 'videotoolbox' | 'amf' | None
     """
-    encs = _list_encoders(ffmpeg_path)
-
-    # まずNVENC
-    if " h264_nvenc " in f" {encs} " or " hevc_nvenc " in f" {encs} ":
+    # まずNVENC (スモークテストで確認)
+    if is_nvenc_available(ffmpeg_path):
         return "nvenc"
+
+    encs = _list_encoders(ffmpeg_path)
 
     # 次にQSV
     if " h264_qsv " in f" {encs} " or " hevc_qsv " in f" {encs} ":
@@ -190,6 +264,57 @@ def get_hardware_encoder_kind(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
 # =========================================================
 # エンコーダオプション（FFmpeg 7 向け）
 # =========================================================
+def get_encoder_options(
+    hw_encoder: str, quality: str, ffmpeg_path: str = "ffmpeg"
+) -> Tuple[str, List[str]]:
+    """
+    --hw-encoder と --quality の設定に基づき、エンコーダ名とffmpegオプションを返す。
+
+    :return: (エンコーダ名, ffmpegオプションのリスト)
+    """
+    use_nvenc = False
+    nvenc_available = is_nvenc_available(ffmpeg_path)
+
+    if hw_encoder == "auto":
+        use_nvenc = nvenc_available
+    elif hw_encoder == "gpu":
+        use_nvenc = nvenc_available
+        if not nvenc_available:
+            logger.warning("NVENC is not available, falling back to CPU.")
+    # hw_encoder == "cpu" の場合は use_nvenc は False のまま
+
+    if use_nvenc:
+        encoder = "h264_nvenc"
+        if quality == "speed":
+            preset = "p7"
+            opts = ["-preset", preset, "-cq", "30"]
+        elif quality == "balanced":
+            preset = "p5"
+            opts = ["-preset", preset, "-cq", "23"]
+        else:  # quality
+            preset = "p4"
+            opts = ["-preset", preset, "-cq", "20"]
+        logger.info(
+            f"Using Encoder: '{encoder}', Preset: '{preset}', Quality setting: '{quality}'"
+        )
+    else:
+        encoder = "libx264"
+        if quality == "speed":
+            preset = "ultrafast"
+            opts = ["-preset", preset, "-crf", "30"]
+        elif quality == "balanced":
+            preset = "medium"
+            opts = ["-preset", preset, "-crf", "23"]
+        else:  # quality
+            preset = "slow"
+            opts = ["-preset", preset, "-crf", "20"]
+        logger.info(
+            f"Using Encoder: '{encoder}', Preset: '{preset}', Quality setting: '{quality}'"
+        )
+
+    return encoder, opts
+
+
 def get_hw_encoder_kind_for_video_params(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
     """
     VideoParams.to_ffmpeg_opts で使用するためのハードウェアエンコーダの種類を判定して返す。
@@ -897,9 +1022,7 @@ def mix_audio_tracks(
         cmd.extend(
             [
                 "-acodec",
-                "libmp3lame",
-                "-ab",
-                "192k",
+                "pcm_s16le",  # WAVファイルにはPCMコーデックを使用
                 "-t",
                 str(total_duration),
                 output_path,
@@ -975,13 +1098,30 @@ def normalize_media(
             cmd.extend(["-vf", vf_filter_str])
 
         # Video options
-        # CPUエンコードを強制（HWエンコーダは最終出力用とし、中間ファイルは安定性重視）
-        cmd.extend(["-c:v", "libx264"])
+        hw_kind = get_hw_encoder_kind_for_video_params(ffmpeg_path)
+        if hw_kind == "nvenc":
+            encoder = "h264_nvenc"
+            preset = "p5"
+            opts = ["-preset", preset, "-cq", "20"]  # 高品質な中間ファイル
+            logger.info(
+                f"Using Encoder for normalization: '{encoder}', Preset: '{preset}'"
+            )
+            cmd.extend(["-c:v", encoder])
+            cmd.extend(opts)
+        else:
+            encoder = "libx264"
+            preset = "medium"
+            opts = ["-preset", preset, "-crf", "18"]  # 高品質な中間ファイル
+            logger.info(
+                f"Using Encoder for normalization: '{encoder}', Preset: '{preset}'"
+            )
+            cmd.extend(["-c:v", encoder])
+            cmd.extend(opts)
+
         if video_params.pix_fmt:
             cmd.extend(["-pix_fmt", video_params.pix_fmt])
         if video_params.profile:
             cmd.extend(["-profile:v", video_params.profile])
-        cmd.extend(["-crf", "18"])  # 高品質な中間ファイル
 
         # Audio options
         if has_audio:

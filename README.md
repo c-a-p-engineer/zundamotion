@@ -284,6 +284,16 @@ python -m zundamotion.main scripts/sample.yaml --jobs auto
 python -m zundamotion.main scripts/sample.yaml --jobs 4
 ```
 
+ハードウェアエンコーダーを指定したい場合は、`--hw-encoder`オプションを使用します。`auto`を指定すると利用可能な場合にGPUを使用し、`gpu`はGPUを強制（CPUフォールバックあり）、`cpu`はCPUを強制します。
+```bash
+python -m zundamotion.main scripts/sample.yaml --hw-encoder gpu
+```
+
+エンコード品質を指定したい場合は、`--quality`オプションを使用します。`speed`, `balanced`, `quality`から選択できます。
+```bash
+python -m zundamotion.main scripts/sample.yaml --quality quality
+```
+
 タイムライン出力を有効にするには、`--timeline`オプションを使用します。フォーマットを指定しない場合、デフォルトでMarkdown形式で出力されます。
 ```bash
 python -m zundamotion.main scripts/sample.yaml --timeline
@@ -311,6 +321,11 @@ python -m zundamotion.main scripts/sample.yaml --subtitle-file ass
 
 # 字幕ファイル出力を無効化
 python -m zundamotion.main scripts/sample.yaml --no-subtitle-file
+```
+
+ログをファイルに出力
+```
+python -u -m zundamotion.main scripts/sample.yaml --no-cache | tee run.log
 ```
 
 キャラクターごとのデフォルト設定は、台本ファイル内の`defaults`セクションで定義します。音声設定だけでなく、字幕の色などもキャラクターに紐付けて設定できます。

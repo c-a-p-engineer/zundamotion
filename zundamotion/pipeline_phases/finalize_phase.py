@@ -15,7 +15,7 @@ from zundamotion.utils.ffmpeg_utils import (
     compare_media_params,
     concat_videos_copy,
     get_audio_duration,
-    get_hw_encoder_kind_for_video_params,
+    get_encoder_options,
     get_media_duration,
     get_nproc_value,
 )
@@ -30,12 +30,16 @@ class FinalizePhase:
         cache_manager: CacheManager,
         video_params: VideoParams,
         audio_params: AudioParams,
+        hw_encoder: str = "auto",
+        quality: str = "balanced",
     ):
         self.config = config
         self.temp_dir = temp_dir
         self.cache_manager = cache_manager
         self.video_params = video_params
         self.audio_params = audio_params
+        self.hw_encoder = hw_encoder
+        self.quality = quality
 
     @time_log(logger)
     def run(
@@ -90,9 +94,7 @@ class FinalizePhase:
             "FinalizePhase: Performing re-encode concat using -filter_complex concat."
         )
 
-        os.environ["DISABLE_HWENC"] = "1"
-        hw_kind = get_hw_encoder_kind_for_video_params()
-        video_opts = self.video_params.to_ffmpeg_opts(hw_kind)
+        encoder, video_opts = get_encoder_options(self.hw_encoder, self.quality)
         audio_opts = self.audio_params.to_ffmpeg_opts()
         threading_flags = _threading_flags()
 
@@ -117,6 +119,7 @@ class FinalizePhase:
         cmd.extend(["-filter_complex", filter_complex])
         cmd.extend(["-map", "[v_out]", "-map", "[a_out]"])
 
+        cmd.extend(["-c:v", encoder])
         cmd.extend(video_opts)
         cmd.extend(audio_opts)
         cmd.extend(

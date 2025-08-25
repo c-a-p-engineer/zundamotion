@@ -78,6 +78,20 @@ def main():
         action="store_true",
         help="If set, outputs logs in machine-readable JSON format.",
     )
+    parser.add_argument(
+        "--hw-encoder",
+        type=str,
+        default="auto",
+        choices=["auto", "cpu", "gpu"],
+        help="Hardware encoder selection. 'auto' uses GPU if available, 'gpu' forces GPU with CPU fallback, 'cpu' forces CPU.",
+    )
+    parser.add_argument(
+        "--quality",
+        type=str,
+        default="balanced",
+        choices=["speed", "balanced", "quality"],
+        help="Encoding quality preset.",
+    )
 
     args = parser.parse_args()
 
@@ -99,6 +113,8 @@ def main():
             args.no_timeline,
             args.subtitle_file,
             args.no_subtitle_file,
+            args.hw_encoder,
+            args.quality,
         )
         logger.info("Video generation completed successfully.")
     except ValidationError as e:

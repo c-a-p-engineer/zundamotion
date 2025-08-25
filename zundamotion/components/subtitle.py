@@ -1,96 +1,88 @@
-import textwrap
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
+
+from zundamotion.cache import CacheManager
+
+from .subtitle_png import SubtitlePNGRenderer
 
 
 class SubtitleGenerator:
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], cache_manager: CacheManager):
         self.subtitle_config = config.get("subtitle", {})
+        self.png_renderer = SubtitlePNGRenderer(cache_manager)
 
-    def get_drawtext_filter(
-        self, text: str, duration: float, line_config: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def build_subtitle_overlay(
+        self,
+        text: str,
+        duration: float,
+        line_config: Dict[str, Any],
+        in_label: str,
+        index: int,
+    ) -> Tuple[Dict[str, Any], str]:
         """
-        Creates a dictionary of options for ffmpeg's drawtext filter.
+        Generates a subtitle PNG and returns FFmpeg filter snippet and extra input.
 
         Args:
             text (str): The text to display.
             duration (float): The duration the text should be visible.
             line_config (Dict[str, Any]): The specific config for this line.
+            in_label (str): The input video stream label to overlay on.
+            index (int): The index of the subtitle input stream (e.g., 3 for [3:v]).
 
         Returns:
-            Dict[str, Any]: A dictionary of drawtext options.
+            Tuple[Dict[str, Any], str]:
+                - Dict: extra_input for FFmpeg (e.g., {"-loop": "1", "-i": "path/to/sub.png"})
+                - str: FFmpeg filter snippet for overlay.
         """
-        # Get style from config, allowing line-specific overrides
-        # Start with global subtitle config
         style = self.subtitle_config.copy()
-
-        # Merge line-specific subtitle settings, which should already include character defaults
-        # The script_loader should have merged character defaults and line-specific overrides into line_config
-        # So, we just need to merge line_config itself, as it contains the final merged settings
         style.update(line_config)
-
-        # If there's a nested 'subtitle' key in line_config (from character defaults or line override),
-        # merge that as well. This handles cases where subtitle settings are explicitly nested.
         if "subtitle" in line_config and isinstance(line_config["subtitle"], dict):
             style.update(line_config["subtitle"])
 
-        # 自動改行を適用
-        max_chars = style.get("max_chars_per_line")
-        if max_chars:
-            wrapped_text = self._wrap_text(text, max_chars)
-        else:
-            wrapped_text = text
-
-        # Escape text for ffmpeg
-        escaped_text = self._escape_text(wrapped_text)
+        png_path, dims = self.png_renderer.render(text, style)
+        subtitle_w = dims["w"]
+        subtitle_h = dims["h"]
 
         # y座標の基本式を取得
-        y_base_expression = style.get("y")
-        # 自動改行後の行数を取得
-        num_lines = wrapped_text.count("\n") + 1
-        # 行数に応じた追加のオフセットを計算
-        line_offset_per_line = style.get("line_spacing_offset_per_line", 0)
-        additional_y_offset = (num_lines - 1) * line_offset_per_line
-        # y式にオフセットを組み込む
-        if additional_y_offset > 0:
-            final_y_expression = f"{y_base_expression} - {additional_y_offset}"
-        else:
-            final_y_expression = y_base_expression
+        y_base_expression = style.get("y", "H-100")  # Default to H-100 if not specified
+        # 行数に応じた追加のオフセットを計算 (PNGレンダラで折り返し済みなので、ここでは不要)
+        # ただし、y_base_expressionがH-hのような相対位置の場合、overlay_hを使う必要がある
+        # ここでは、y_base_expressionをそのまま使い、overlay_hを考慮した式に変換する
 
-        return {
-            "text": escaped_text,
-            "fontfile": style.get("font_path"),
-            "fontcolor": style.get("font_color"),
-            "fontsize": style.get("font_size"),
-            "x": style.get("x"),
-            "y": final_y_expression,
-            "box": 1,
-            "boxcolor": "black@0.5",
-            "boxborderw": 5,
-            "enable": f"between(t,0,{duration})",
-        }
+        # 位置式の互換: W/H -> main_w/main_h, w/h -> overlay_w/overlay_h に置換
+        # FFmpegのoverlayフィルタは、入力ストリームのラベルを自動的にmain_w/main_h, overlay_w/overlay_hにマッピングする
+        # そのため、ここでは元のy式をそのまま使用し、FFmpegが解釈できるようにする
+        # ただし、overlay_h/overlay_w を明示的に使う場合は、y_base_expressionを調整する必要がある
 
-    def _wrap_text(self, text: str, max_chars_per_line: int) -> str:
-        """
-        Wraps text to a specified maximum number of characters per line.
-        """
-        return textwrap.fill(text, width=max_chars_per_line)
+        # 例: y='H-100-h/2' の場合、Hはmain_h、hはoverlay_hになる
+        # y='main_h-100-overlay_h/2'
 
-    def _normalize_newlines(self, s: str) -> str:
-        # 既存の実改行統一 + リテラル "\n" → 実改行
-        return s.replace("\r\n", "\n").replace("\r", "\n").replace("\\n", "\n")
+        # ユーザー指定のy式をそのまま使うが、overlay_hを考慮した調整が必要な場合はここで変換する
+        # 現状のタスク指示では「W/H → main_w/main_h、w/h → overlay_w/overlay_h に置換」とあるので、
+        # y_base_expression が 'H-h' のような形式の場合、'main_h-overlay_h' に変換する
 
-    def _escape_text(self, text: str) -> str:
-        """
-        FFmpeg drawtext向けエスケープ。
-        - まずリテラル \n を実改行に戻す（ダブルエスケープ対策）
-        - バックスラッシュは1回だけエスケープ
-        - 実改行は '\n' に変換
-        - コロンとシングルクォートも1回だけエスケープ
-        """
-        text = self._normalize_newlines(text)
-        text = text.replace("\\", r"\\")
-        text = text.replace("\n", r"\n")
-        text = text.replace(":", r"\:")
-        text = text.replace("'", r"\'")
-        return text
+        # 簡単な置換ロジック
+        final_y_expression = y_base_expression.replace("H", "main_h").replace(
+            "W", "main_w"
+        )
+        final_y_expression = final_y_expression.replace("h", "overlay_h").replace(
+            "w", "overlay_w"
+        )
+
+        # x座標も同様に変換
+        x_base_expression = style.get("x", "(W-w)/2")  # Default to center
+        final_x_expression = x_base_expression.replace("H", "main_h").replace(
+            "W", "main_w"
+        )
+        final_x_expression = final_x_expression.replace("h", "overlay_h").replace(
+            "w", "overlay_w"
+        )
+
+        extra_input = {"-loop": "1", "-i": str(png_path)}
+        filter_snippet = (
+            f"[{in_label}][{index}:v]overlay="
+            f"x='{final_x_expression}':"
+            f"y='{final_y_expression}':"
+            f"enable='between(t,0,{duration})'[with_subtitle_{index}]"
+        )
+
+        return extra_input, filter_snippet

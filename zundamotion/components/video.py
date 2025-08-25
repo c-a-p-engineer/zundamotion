@@ -12,43 +12,11 @@ from ..utils.ffmpeg_utils import (
     calculate_overlay_position,
     get_media_info,
     has_audio_stream,
+    is_nvenc_available,
     normalize_media,
 )
 
 
-# --------------------------
-# drawtext ヘルパ
-# --------------------------
-def _escape_drawtext_value(key: str, value: Any) -> str:
-    """
-    FFmpeg drawtext 用の値エスケープ。
-    - 全キー: バックスラッシュとシングルクォートをエスケープ
-    - text/fontfile: ':' と 改行 も FFmpeg 仕様でエスケープ
-    """
-    s = str(value)
-    s = s.replace("\\", "\\\\").replace("'", "\\'")
-    if key in ("text", "fontfile"):
-        s = s.replace(":", r"\:").replace("\n", r"\n")
-    return s
-
-
-def _format_drawtext_filter(drawtext_params: Dict[str, Any]) -> str:
-    """drawtext のパラメータ辞書を 'key='value':key2='value2'' 形式に整形"""
-    parts: List[str] = []
-    for k, v in drawtext_params.items():
-        if isinstance(v, bool):
-            v_str = "1" if v else "0"
-        elif isinstance(v, (int, float)):
-            v_str = str(v)
-        else:
-            v_str = _escape_drawtext_value(k, v)
-        parts.append(f"{k}='{v_str}'")
-    return ":".join(parts)
-
-
-# --------------------------
-# 本体
-# --------------------------
 class VideoRenderer:
     def __init__(
         self,
@@ -157,17 +125,70 @@ class VideoRenderer:
             return False
 
     def _initialize_ffmpeg_settings(self):
-        # 環境変数で強制指定
-        force_cpu = os.environ.get("ZUNDAMOTION_FORCE_CPU") == "1"
-        force_qsv = os.environ.get("ZUNDAMOTION_FORCE_QSV") == "1"
+        """
+        シンプル版: ハードウェア自動選択のみ
+        優先度: NVENC > QSV > CPU
+        品質指定: config["encoder"]["quality"] or config["video"]["quality"] or "balanced"
+            - "speed"    -> NVENC: preset p7, cq=30/31
+            - "balanced" -> NVENC: preset p5, cq=23/24
+            - "quality"  -> NVENC: preset p4, cq=20/21
+        QSV/CPU は固定設定（必要なら後で拡張）
+        """
+        # 既定リセット
+        self.using_nvenc = False
+        self.using_qsv = False
+        self._pix_fmt = "yuv420p"
 
+        # ---- 1) NVENC 可否 ----
+        nvenc_ok = False
+        try:
+            nvenc_ok = is_nvenc_available(self.ffmpeg_path)
+        except Exception as e:
+            print(f"[Encoder] NVENC check error: {e}")
+
+        # ---- 2) QSV 可否（NVENC不可のときだけ試す）----
         qsv_ok = False
-        if not force_cpu:
-            # デバイスがあり、かつ実試行が成功したら QSV を採用
-            if self._qsv_device_available() or force_qsv:
-                qsv_ok = self._probe_qsv_encode()
+        if not nvenc_ok and self._qsv_device_available():
+            qsv_ok = self._probe_qsv_encode()
 
-        if qsv_ok:
+        # ---- 3) 採用とオプション設定 ----
+        if nvenc_ok:
+            # 品質プロファイル（configのみ）
+            quality = (
+                self.config.get("encoder", {}).get("quality")
+                or self.config.get("video", {}).get("quality")
+                or "balanced"
+            ).lower()
+
+            if quality == "speed":
+                preset, cq_h264, cq_hevc = "p7", "30", "31"
+            elif quality == "quality":
+                preset, cq_h264, cq_hevc = "p4", "20", "21"
+            else:  # balanced
+                preset, cq_h264, cq_hevc = "p5", "23", "24"
+
+            self.using_nvenc = True
+            self.h264_encoder_options = [
+                "-c:v",
+                "h264_nvenc",
+                "-preset",
+                preset,
+                "-cq",
+                cq_h264,
+            ]
+            self.hevc_encoder_options = [
+                "-c:v",
+                "hevc_nvenc",
+                "-preset",
+                preset,
+                "-cq",
+                cq_hevc,
+            ]
+            # NVENC は yuv420p でOK（10bit/HDRは別途）
+            self._pix_fmt = "yuv420p"
+            print(f"[Encoder] Using NVENC (h264_nvenc), preset={preset}, cq={cq_h264}")
+
+        elif qsv_ok:
             self.using_qsv = True
             self.h264_encoder_options = [
                 "-c:v",
@@ -185,10 +206,12 @@ class VideoRenderer:
                 "-global_quality",
                 "28",
             ]
-            self._pix_fmt = "nv12"  # QSV は nv12 が安定
+            # QSV は nv12 が安定
+            self._pix_fmt = "nv12"
             print("[Encoder] Using QSV (Intel Quick Sync) for video encoding.")
+
         else:
-            self.using_qsv = False
+            # CPU フォールバック
             self.h264_encoder_options = [
                 "-c:v",
                 "libx264",
@@ -208,33 +231,41 @@ class VideoRenderer:
             self._pix_fmt = "yuv420p"
             print("[Encoder] Using CPU (libx264/libx265) for video encoding.")
 
-    # --------------------------
-    # クリップ生成
-    # --------------------------
     def render_clip(
         self,
         audio_path: Path,
         duration: float,
-        drawtext_filter: Dict[str, Any],
         background_config: Dict[str, Any],
         characters_config: List[Dict[str, Any]],
         output_filename: str,
+        extra_subtitle_inputs: Optional[Dict[str, Any]] = None,
+        subtitle_filter_snippet: Optional[str] = None,  # ← 互換のため残すが未使用
         insert_config: Optional[Dict[str, Any]] = None,
     ) -> Optional[Path]:
+        """
+        drawtext 全廃版:
+        - 字幕は PNG 事前生成入力（-loop 1 -i png）→ overlay のみで合成
+        - 位置はデフォルトで下中央（下マージン: subtitle.bottom_margin_px or 100）
+        - subtitle_filter_snippet は無視（誤式混入防止）
+        """
         output_path = self.temp_dir / f"{output_filename}.mp4"
         width = self.video_config.get("width", 1280)
         height = self.video_config.get("height", 720)
         fps = self.video_config.get("fps", 30)
+
+        # 下マージン（px）
+        subtitle_cfg = self.config.get("subtitle", {})
+        bottom_margin = int(subtitle_cfg.get("bottom_margin_px", 100))
 
         print(f"[Video] Rendering clip -> {output_path.name}")
 
         cmd: List[str] = [self.ffmpeg_path, "-y"]
         cmd.extend(self._thread_flags())
 
-        # --- Inputs ---
+        # --- Inputs -------------------------------------------------------------
         input_layers: List[Dict[str, Any]] = []
 
-        # 1) Background
+        # 0) Background
         bg_path_str = background_config.get("path")
         if not bg_path_str:
             raise ValueError("Background path is missing.")
@@ -242,10 +273,8 @@ class VideoRenderer:
 
         if background_config.get("type") == "video":
             try:
-                media_info = get_media_info(str(bg_path))
-                video_info = media_info.get("video")
-                audio_info = media_info.get("audio")
-
+                # 正規化（失敗時は as-is）
+                _ = get_media_info(str(bg_path))
                 bg_path = normalize_media(
                     input_path=bg_path,
                     video_params=self.default_video_params,
@@ -256,7 +285,6 @@ class VideoRenderer:
                 print(
                     f"[Warning] Could not inspect/normalize BG video {bg_path.name}: {e}. Using as-is."
                 )
-
             cmd.extend(
                 [
                     "-ss",
@@ -269,10 +297,24 @@ class VideoRenderer:
             cmd.extend(["-loop", "1", "-i", str(bg_path)])
         input_layers.append({"type": "video", "index": len(input_layers)})
 
-        # 2) Speech audio
+        # 1) Speech audio
         cmd.extend(["-i", str(audio_path)])
         speech_audio_index = len(input_layers)
         input_layers.append({"type": "audio", "index": speech_audio_index})
+
+        # 2) Subtitle PNG (optional)
+        subtitle_ffmpeg_index = -1
+        if isinstance(extra_subtitle_inputs, dict) and extra_subtitle_inputs.get("-i"):
+            # 期待形式: {"-loop": "1", "-i": "/abs/path/subs.png"}
+            loop_val = extra_subtitle_inputs.get("-loop", "1")
+            png_path = extra_subtitle_inputs["-i"]
+            cmd.extend(["-loop", loop_val, "-i", str(Path(png_path).resolve())])
+            subtitle_ffmpeg_index = len(input_layers)
+            input_layers.append({"type": "video", "index": subtitle_ffmpeg_index})
+        elif extra_subtitle_inputs:
+            print(
+                f"[Warning] extra_subtitle_inputs has unexpected format: {extra_subtitle_inputs}. Subtitle overlay will be skipped."
+            )
 
         # 3) Insert media (optional)
         insert_ffmpeg_index = -1
@@ -288,10 +330,7 @@ class VideoRenderer:
             ]
             if is_video:
                 try:
-                    media_info = get_media_info(str(insert_path))
-                    video_info = media_info.get("video")
-                    audio_info = media_info.get("audio")
-
+                    _ = get_media_info(str(insert_path))
                     insert_path = normalize_media(
                         input_path=insert_path,
                         video_params=self.default_video_params,
@@ -304,25 +343,22 @@ class VideoRenderer:
                     )
                 cmd.extend(["-i", str(insert_path)])
             else:
-                cmd.extend(["-loop", "1", "-i", str(insert_path)])
-
+                cmd.extend(["-loop", "1", "-i", str(insert_path.resolve())])
             insert_ffmpeg_index = len(input_layers)
             input_layers.append({"type": "video", "index": insert_ffmpeg_index})
             if is_video and has_audio_stream(str(insert_path)):
-                insert_audio_index = insert_ffmpeg_index  # 同じ入力に音声も載る
+                insert_audio_index = insert_ffmpeg_index
 
-        # 4) Character images
+        # 4) Characters (optional)
         character_indices: Dict[int, int] = {}
         for i, char_config in enumerate(characters_config):
             if not char_config.get("visible", False):
                 continue
-
             char_name = char_config.get("name")
             char_expression = char_config.get("expression", "default")
             if not char_name:
                 print("[Warning] Skipping character with missing name.")
                 continue
-
             char_image_path = Path(
                 f"assets/characters/{char_name}/{char_expression}.png"
             )
@@ -333,15 +369,14 @@ class VideoRenderer:
                         f"[Warning] Character image not found for {char_name}/{char_expression} (and default). Skipping."
                     )
                     continue
-
             character_indices[i] = len(input_layers)
             cmd.extend(["-loop", "1", "-i", str(char_image_path.resolve())])
             input_layers.append({"type": "video", "index": len(input_layers)})
 
-        # --- Filter Graph ---
+        # --- Filter Graph -------------------------------------------------------
         filter_complex_parts: List[str] = []
 
-        # 背景スケール（CPUフィルタ）
+        # BG scale
         filter_complex_parts.append(f"[0:v]scale={width}:{height}[bg_scaled]")
         last_video_stream = "[bg_scaled]"
 
@@ -359,21 +394,18 @@ class VideoRenderer:
                 str(pos.get("x", "0")),
                 str(pos.get("y", "0")),
             )
-            filter_complex_parts.append(
-                f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[insert_scaled]"
-            )
-            filter_complex_parts.append(f"[insert_scaled]format=rgba[insert_rgba]")
-            filter_complex_parts.append(
-                f"{last_video_stream}[insert_rgba]overlay=x={x_expr}:y={y_expr}[with_insert]"
-            )
+            filter_complex_parts += [
+                f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[insert_scaled]",
+                f"[insert_scaled]format=rgba[insert_rgba]",
+                f"{last_video_stream}[insert_rgba]overlay=x={x_expr}:y={y_expr}[with_insert]",
+            ]
             last_video_stream = "[with_insert]"
 
-        # Character overlays
+        # Characters overlay
         for i, char_config in enumerate(characters_config):
             if not char_config.get("visible", False) or i not in character_indices:
                 continue
             ffmpeg_index = character_indices[i]
-            # scale, anchor, position should already be merged into char_config by script_loader.py
             scale = float(char_config.get("scale", 1.0))
             anchor = char_config.get("anchor", "bottom_center")
             pos = char_config.get("position", {"x": "0", "y": "0"})
@@ -386,42 +418,45 @@ class VideoRenderer:
                 str(pos.get("x", "0")),
                 str(pos.get("y", "0")),
             )
-            filter_complex_parts.append(
-                f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[char_scaled_{i}]"
-            )
-            filter_complex_parts.append(f"[char_scaled_{i}]format=rgba[char_rgba_{i}]")
-            filter_complex_parts.append(
-                f"{last_video_stream}[char_rgba_{i}]overlay=x={x_expr}:y={y_expr}[with_char_{i}]"
-            )
+            filter_complex_parts += [
+                f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[char_scaled_{i}]",
+                f"[char_scaled_{i}]format=rgba[char_rgba_{i}]",
+                f"{last_video_stream}[char_rgba_{i}]overlay=x={x_expr}:y={y_expr}[with_char_{i}]",
+            ]
             last_video_stream = f"[with_char_{i}]"
 
-        # Subtitles (drawtext)
-        drawtext_str = _format_drawtext_filter(drawtext_filter)
-        if drawtext_str:
+        # Subtitles overlay（PNG）— 下中央寄せ、表示は between(t,0,duration)
+        if subtitle_ffmpeg_index != -1:
+            # 透明保持
             filter_complex_parts.append(
-                f"{last_video_stream}drawtext={drawtext_str}[final_v]"
+                f"[{subtitle_ffmpeg_index}:v]format=rgba[subs_0]"
             )
-            last_video_stream = "[final_v]"
+            # overlay の式: 親 W/H、字幕 w/h
+            x_expr = "(W-w)/2"
+            y_expr = f"H-{bottom_margin}-h"
+            filter_complex_parts.append(
+                f"{last_video_stream}[subs_0]overlay="
+                f"x='{x_expr}':y='{y_expr}':enable='between(t,0,{duration})'[with_subs_0]"
+            )
+            last_video_stream = "[with_subs_0]"
 
-        # --- Audio ---
+        # --- Audio --------------------------------------------------------------
         if insert_config and insert_audio_index != -1:
             volume = float(insert_config.get("volume", 1.0))
-            filter_complex_parts.append(
-                f"[{insert_audio_index}:a]volume={volume}[insert_audio_vol]"
-            )
-            filter_complex_parts.append(
-                f"[1:a][insert_audio_vol]amix=inputs=2:duration=longest:dropout_transition=0[final_a]"
-            )
+            filter_complex_parts += [
+                f"[{insert_audio_index}:a]volume={volume}[insert_audio_vol]",
+                f"[1:a][insert_audio_vol]amix=inputs=2:duration=longest:dropout_transition=0[final_a]",
+            ]
             audio_map = "[final_a]"
         else:
             filter_complex_parts.append("[1:a]anull[final_a]")
             audio_map = "[final_a]"
 
-        # --- Assemble & Run ---
+        # --- Assemble & Run -----------------------------------------------------
         cmd.extend(["-filter_complex", ";".join(filter_complex_parts)])
         cmd.extend(["-map", last_video_stream, "-map", audio_map])
         cmd.extend(["-t", str(duration)])
-        cmd.extend(self.h264_encoder_options)  # QSV/CPU を自動選択済み
+        cmd.extend(self.h264_encoder_options)  # QSV/CPU は初期化時に選択済み
         cmd.extend(
             [
                 "-pix_fmt",
@@ -429,7 +464,7 @@ class VideoRenderer:
                 "-c:a",
                 "aac",
                 "-b:a",
-                "192k",
+                "192k",  # 必要なら 64k～96k に最適化可（24kHz mono なら十分）
                 "-r",
                 str(fps),
                 "-shortest",
@@ -440,7 +475,6 @@ class VideoRenderer:
         try:
             print(f"Executing FFmpeg command: {' '.join(cmd)}")
             process = subprocess.run(cmd, check=True, capture_output=True, text=True)
-            # ffmpeg の詳細は stderr に出ることが多い
             if process.stderr:
                 print(process.stderr)
         except subprocess.CalledProcessError as e:

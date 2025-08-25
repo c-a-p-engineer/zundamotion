@@ -23,11 +23,15 @@ class GenerationPipeline:
         jobs: str = "1",
         video_params: Optional[VideoParams] = None,
         audio_params: Optional[AudioParams] = None,
+        hw_encoder: str = "auto",
+        quality: str = "balanced",
     ):
         self.config = config
         self.no_cache = no_cache
         self.cache_refresh = cache_refresh
         self.jobs = jobs
+        self.hw_encoder = hw_encoder
+        self.quality = quality
         self.cache_manager = CacheManager(
             cache_dir=Path(self.config.get("system", {}).get("cache_dir", "cache")),
             no_cache=self.no_cache,
@@ -78,6 +82,8 @@ class GenerationPipeline:
                 self.cache_manager,
                 self.video_params,
                 self.audio_params,
+                self.hw_encoder,
+                self.quality,
             )
             final_video_path = finalize_phase.run(
                 scenes,
@@ -135,6 +141,8 @@ def run_generation(
     no_timeline: bool = False,
     subtitle_file_format: Optional[str] = None,
     no_subtitle_file: bool = False,
+    hw_encoder: str = "auto",
+    quality: str = "balanced",
 ):
     """
     High-level function to run the entire generation process.
@@ -171,5 +179,7 @@ def run_generation(
         jobs,
         video_params=VideoParams(),  # デフォルトのVideoParamsを渡す
         audio_params=AudioParams(),  # デフォルトのAudioParamsを渡す
+        hw_encoder=hw_encoder,
+        quality=quality,
     )
     pipeline.run(output_path)

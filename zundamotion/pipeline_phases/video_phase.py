@@ -1,5 +1,6 @@
 import hashlib
 import json
+import time  # Import time module
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -26,7 +27,7 @@ class VideoPhase:
         self.temp_dir = temp_dir
         self.cache_manager = cache_manager
         self.jobs = jobs
-        self.subtitle_gen = SubtitleGenerator(self.config)
+        self.subtitle_gen = SubtitleGenerator(self.config, self.cache_manager)
         self.video_renderer = VideoRenderer(
             self.config, self.temp_dir, self.cache_manager, self.jobs
         )
@@ -52,7 +53,6 @@ class VideoPhase:
             ),  # Add transition config to hash
         }
 
-    @time_log(logger)
     def run(
         self,
         scenes: List[Dict[str, Any]],
@@ -60,6 +60,9 @@ class VideoPhase:
         timeline: Timeline,
     ) -> List[Path]:
         """Phase 2: Render video clips for each scene."""
+        start_time = time.time()  # Start timing
+        logger.info("VideoPhase started.")
+
         all_clips: List[Path] = []
         bg_default = self.config.get("background", {}).get("default")
         total_scenes = len(scenes)
@@ -179,9 +182,21 @@ class VideoPhase:
                         logger.debug(
                             f"Rendering clip for line '{text[:30]}...' (Scene '{scene_id}', Line {idx})"
                         )
-                        drawtext_filter = self.subtitle_gen.get_drawtext_filter(
-                            text, duration, line_config
+
+                        # 字幕PNGを生成し、FFmpegの入力とフィルタースニペットを取得
+                        # 現在の入力ストリーム数を考慮してインデックスを決定
+                        # VideoRenderer.render_clip内で動的に入力インデックスを管理するため、ここでは仮のインデックスを渡す
+                        # 実際にはVideoRendererが管理する
+                        extra_subtitle_inputs, subtitle_filter_snippet = (
+                            self.subtitle_gen.build_subtitle_overlay(
+                                text,
+                                duration,
+                                line_config,
+                                "with_char",
+                                0,  # 0は仮の値、VideoRendererが調整
+                            )
                         )
+
                         audio_cache_key_data = {
                             "text": text,
                             "line_config": line_config,
@@ -193,7 +208,10 @@ class VideoPhase:
                                 audio_cache_key_data
                             ),
                             "duration": duration,
-                            "drawtext_filter": drawtext_filter,
+                            "subtitle_png_path": extra_subtitle_inputs[
+                                "-i"
+                            ],  # キャッシュキーにPNGパスを含める
+                            "subtitle_filter_snippet": subtitle_filter_snippet,  # キャッシュキーにフィルタースニペットを含める
                             "bg_image_path": bg_image,
                             "is_bg_video": is_bg_video,
                             "start_time": current_scene_time,
@@ -208,12 +226,13 @@ class VideoPhase:
                             file_name=line_id,
                             extension="mp4",
                             creator_func=lambda output_path: self.video_renderer.render_clip(
-                                audio_path,
-                                duration,
-                                drawtext_filter,
-                                background_config,
-                                line.get("characters", []),
-                                output_path.stem,
+                                audio_path=audio_path,
+                                duration=duration,
+                                background_config=background_config,
+                                characters_config=line.get("characters", []),
+                                output_filename=output_path.stem,
+                                extra_subtitle_inputs=extra_subtitle_inputs,
+                                subtitle_filter_snippet=subtitle_filter_snippet,
                                 insert_config=line_config.get("insert"),
                             )
                             or output_path,
@@ -247,4 +266,8 @@ class VideoPhase:
                         f"Cleaned up temporary scene background video -> {scene_bg_video_path.name}"
                     )
                 pbar_scenes.update(1)
+
+        end_time = time.time()  # End timing
+        duration = end_time - start_time
+        logger.info(f"VideoPhase completed in {duration:.2f} seconds.")
         return all_clips
