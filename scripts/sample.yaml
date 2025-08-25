@@ -18,6 +18,14 @@ defaults:
         font_color: "#E6E6FA" # Lavender
         stroke_color: "black"
 
+subtitle:
+  font_path: "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf" # IPAexGothic font path
+  size: 48
+  color: "white"
+  outline: "black"
+  wrap_mode: chars 
+  max_chars_per_line: 16 
+
 scenes:
   - id: subtitle_zundamon
     bg: "assets/bg/room.png"

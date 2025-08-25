@@ -232,7 +232,6 @@ class VideoPhase:
                                 characters_config=line.get("characters", []),
                                 output_filename=output_path.stem,
                                 extra_subtitle_inputs=extra_subtitle_inputs,
-                                subtitle_filter_snippet=subtitle_filter_snippet,
                                 insert_config=line_config.get("insert"),
                             )
                             or output_path,

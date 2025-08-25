@@ -230,6 +230,23 @@ def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
         return False
 
 
+def has_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
+    """overlay_cuda と scale_cuda が使えるかを確認"""
+    try:
+        out = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-filters"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        ).stdout
+        return ("overlay_cuda" in out) and (
+            "scale_cuda" in out or "hwupload_cuda" in out
+        )
+    except Exception:
+        return False
+
+
 def get_hardware_encoder_kind(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
     """
     利用可能なH.264/HEVCハードウェア「エンコーダ」を判定して返す。

@@ -239,7 +239,6 @@ class VideoRenderer:
         characters_config: List[Dict[str, Any]],
         output_filename: str,
         extra_subtitle_inputs: Optional[Dict[str, Any]] = None,
-        subtitle_filter_snippet: Optional[str] = None,  # ← 互換のため残すが未使用
         insert_config: Optional[Dict[str, Any]] = None,
     ) -> Optional[Path]:
         """
@@ -376,8 +375,10 @@ class VideoRenderer:
         # --- Filter Graph -------------------------------------------------------
         filter_complex_parts: List[str] = []
 
-        # BG scale
-        filter_complex_parts.append(f"[0:v]scale={width}:{height}[bg_scaled]")
+        # BG scale（フォーマット固定で後段overlayの交渉を安定化）
+        filter_complex_parts.append(
+            f"[0:v]scale={width}:{height},format=yuv420p[bg_scaled]"
+        )
         last_video_stream = "[bg_scaled]"
 
         # Insert overlay
@@ -427,11 +428,10 @@ class VideoRenderer:
 
         # Subtitles overlay（PNG）— 下中央寄せ、表示は between(t,0,duration)
         if subtitle_ffmpeg_index != -1:
-            # 透明保持
+            # 透明保持（RGBA）→ CPU overlay（alpha対応で安定）
             filter_complex_parts.append(
                 f"[{subtitle_ffmpeg_index}:v]format=rgba[subs_0]"
             )
-            # overlay の式: 親 W/H、字幕 w/h
             x_expr = "(W-w)/2"
             y_expr = f"H-{bottom_margin}-h"
             filter_complex_parts.append(
@@ -464,7 +464,7 @@ class VideoRenderer:
                 "-c:a",
                 "aac",
                 "-b:a",
-                "192k",  # 必要なら 64k～96k に最適化可（24kHz mono なら十分）
+                "192k",  # 24kHz mono を使う場合は 96k 程度が妥当
                 "-r",
                 str(fps),
                 "-shortest",

@@ -51,8 +51,17 @@ class SubtitlePNGRenderer:
 
         font = ImageFont.truetype(font_path, font_size)
 
-        # Wrap text based on pixel width
-        wrapped_text = self._wrap_text_by_pixel(text, font, max_width)
+        # Wrap text: choose by style (pixel width or fixed chars)
+        wrap_mode = (style.get("wrap_mode") or "").strip().lower()
+        max_chars = style.get("max_chars_per_line")
+        if wrap_mode == "chars" or (max_chars is not None and wrap_mode != "pixel"):
+            try:
+                max_chars_i = int(max_chars) if max_chars is not None else 0
+            except (TypeError, ValueError):
+                max_chars_i = 0
+            wrapped_text = self._wrap_text_by_chars(text, max_chars_i)
+        else:
+            wrapped_text = self._wrap_text_by_pixel(text, font, max_width)
         lines = wrapped_text.split("\n")
 
         # Calculate text block size
@@ -152,4 +161,22 @@ class SubtitlePNGRenderer:
                     current_line = word
             lines.append(current_line.strip())
 
+        return "\n".join(lines)
+
+    def _wrap_text_by_chars(self, text: str, max_chars: int) -> str:
+        """
+        Wrap text by a fixed number of characters per line.
+        """
+        if not max_chars or max_chars <= 0:
+            return text
+        lines = []
+        for paragraph in text.replace("\\n", "\n").split("\n"):
+            if not paragraph:
+                lines.append("")
+                continue
+            cur = paragraph
+            while len(cur) > max_chars:
+                lines.append(cur[:max_chars])
+                cur = cur[max_chars:]
+            lines.append(cur)
         return "\n".join(lines)
