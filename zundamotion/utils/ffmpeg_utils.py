@@ -1008,8 +1008,10 @@ def mix_audio_tracks(
         cmd.extend(["-filter_complex", ";".join(parts), "-map", "[aout]"])
         cmd.extend(
             [
-                "-acodec",
-                "pcm_s16le",  # WAVファイルにはPCMコーデックを使用
+                "-c:a",
+                "libmp3lame",  # MP3コーデックを使用
+                "-q:a",
+                "2",  # 可変ビットレート品質 (0-9, 2は高品質)
                 "-t",
                 str(total_duration),
                 output_path,
@@ -1069,36 +1071,98 @@ def normalize_media(
     logger.info(f"[Cache] Normalized miss: {input_path} -> generating...")
 
     def creator_func(output_path: Path) -> Path:
-        # メディアに音声ストリームがあるか確認
+        input_media_info = get_media_info(str(input_path))
         has_audio = has_audio_stream(str(input_path))
 
-        # -vf フィルタグラフの構築
-        # normalize_video のロジックを統合
-        video_filter = f"fps={video_params.fps},setpts=PTS-STARTPTS"
-        audio_filter = f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"
+        # コピーモードが利用可能かチェック
+        can_copy_video = False
+        can_copy_audio = False
 
-        hw_kind = get_hw_encoder_kind_for_video_params(ffmpeg_path)
-        video_opts = video_params.to_ffmpeg_opts(hw_kind)
-        audio_opts = audio_params.to_ffmpeg_opts()
+        input_v = input_media_info.get("video")
+        if input_v:
+            # 解像度、FPS、ピクセルフォーマット、コーデックが一致するか
+            if (
+                input_v.get("width") == video_params.width
+                and input_v.get("height") == video_params.height
+                and input_v.get("fps") == video_params.fps
+                and input_v.get("pix_fmt") == video_params.pix_fmt
+                and input_v.get("codec_name")
+                in ["h264", "hevc"]  # H.264/HEVCコーデックのみコピー対象
+            ):
+                can_copy_video = True
+                logger.debug(f"Video can be copied for {input_path}")
+            else:
+                logger.debug(
+                    f"Video parameters mismatch for {input_path}. Input: {input_v}, Target: {video_params.__dict__}"
+                )
+
+        input_a = input_media_info.get("audio")
+        if has_audio and input_a:
+            # サンプルレート、チャンネル数、コーデックが一致するか
+            if (
+                input_a.get("sample_rate") == audio_params.sample_rate
+                and input_a.get("channels") == audio_params.channels
+                and input_a.get("codec_name") == audio_params.codec
+            ):
+                can_copy_audio = True
+                logger.debug(f"Audio can be copied for {input_path}")
+            else:
+                logger.debug(
+                    f"Audio parameters mismatch for {input_path}. Input: {input_a}, Target: {audio_params.__dict__}"
+                )
 
         cmd = [ffmpeg_path, "-y"]
         cmd.extend(_threading_flags(ffmpeg_path))
-        cmd.extend(
-            [
-                "-i",
-                str(input_path),
-                "-vf",
-                video_filter,
-            ]
-        )
-        if has_audio:
-            cmd.extend(["-af", audio_filter])
-        else:
-            cmd.extend(["-an"])  # 音声がない場合は -an を指定
+        cmd.extend(["-i", str(input_path)])
 
-        cmd.extend(video_opts)
-        if has_audio:
-            cmd.extend(audio_opts)
+        if can_copy_video and can_copy_audio:
+            cmd.extend(["-c", "copy"])
+            logger.info(f"Using -c copy for both video and audio for {input_path}")
+        elif can_copy_video:
+            cmd.extend(["-c:v", "copy"])
+            cmd.extend(
+                ["-vf", f"fps={video_params.fps},setpts=PTS-STARTPTS"]
+            )  # 映像はコピーだが、FPS調整は必要
+            if has_audio:
+                cmd.extend(
+                    [
+                        "-af",
+                        f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS",
+                    ]
+                )
+                cmd.extend(audio_params.to_ffmpeg_opts())
+            else:
+                cmd.extend(["-an"])
+            logger.info(f"Using -c:v copy for video for {input_path}")
+        elif can_copy_audio:
+            cmd.extend(["-c:a", "copy"])
+            cmd.extend(
+                ["-af", f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"]
+            )  # 音声はコピーだが、サンプルレート調整は必要
+            cmd.extend(["-vf", f"fps={video_params.fps},setpts=PTS-STARTPTS"])
+            hw_kind = get_hw_encoder_kind_for_video_params(ffmpeg_path)
+            cmd.extend(video_params.to_ffmpeg_opts(hw_kind))
+            logger.info(f"Using -c:a copy for audio for {input_path}")
+        else:
+            # 再エンコードが必要な場合
+            video_filter = f"fps={video_params.fps},setpts=PTS-STARTPTS"
+            audio_filter = f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"
+
+            hw_kind = get_hw_encoder_kind_for_video_params(ffmpeg_path)
+            video_opts = video_params.to_ffmpeg_opts(hw_kind)
+            audio_opts = audio_params.to_ffmpeg_opts()
+
+            cmd.extend(["-vf", video_filter])
+            if has_audio:
+                cmd.extend(["-af", audio_filter])
+            else:
+                cmd.extend(["-an"])
+
+            cmd.extend(video_opts)
+            if has_audio:
+                cmd.extend(audio_opts)
+            logger.info(f"Re-encoding video and/or audio for {input_path}")
+
         cmd.extend([str(output_path)])
 
         try:
