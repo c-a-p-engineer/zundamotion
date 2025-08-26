@@ -11,7 +11,7 @@ if str(project_root) not in sys.path:
 
 from zundamotion.exceptions import ValidationError
 from zundamotion.pipeline import run_generation
-from zundamotion.utils.logger import logger, setup_logging
+from zundamotion.utils.logger import get_logger, setup_logging
 
 
 def main():
@@ -97,6 +97,7 @@ def main():
 
     # Setup logging based on --log-json argument
     setup_logging(log_json=args.log_json)
+    logger = get_logger()
 
     # Ensure output directory exists
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)

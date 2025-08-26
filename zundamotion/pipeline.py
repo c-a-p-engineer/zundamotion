@@ -6,9 +6,9 @@ from typing import Any, Dict, List, Optional
 from tqdm import tqdm
 
 from .cache import CacheManager
+from .components.pipeline_phases import AudioPhase, BGMPhase, FinalizePhase, VideoPhase
 from .components.script_loader import load_script_and_config
 from .exceptions import PipelineError
-from .pipeline_phases import AudioPhase, BGMPhase, FinalizePhase, VideoPhase
 from .timeline import Timeline
 from .utils.ffmpeg_utils import AudioParams, VideoParams
 from .utils.logger import logger, time_log

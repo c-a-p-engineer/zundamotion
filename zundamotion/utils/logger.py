@@ -63,7 +63,7 @@ def setup_logging(log_json: bool = False):
     # Remove all existing handlers to prevent duplicate logs
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
-    for logger_name in logging.root.manager.loggerDict:
+    for logger_name in list(logging.Logger.manager.loggerDict.keys()):
         logger = logging.getLogger(logger_name)
         for handler in logger.handlers[:]:
             logger.removeHandler(handler)
@@ -130,5 +130,14 @@ def time_log(logger_instance):
     return decorator
 
 
-# Global logger instance
-logger = setup_logging()
+def get_logger():
+    """
+    Returns the 'zundamotion' logger instance.
+    If logging has not been set up yet, it will set it up with default settings.
+    """
+    if not logging.getLogger("zundamotion").handlers:
+        setup_logging()
+    return logging.getLogger("zundamotion")
+
+
+logger = get_logger()
