@@ -2,18 +2,24 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
+from ..cache import CacheManager  # CacheManagerをインポート
 from ..utils.ffmpeg_utils import (
     AudioParams,
     create_silent_audio,
     get_audio_duration,
     mix_audio_tracks,
 )
+from ..utils.logger import logger  # loggerをインポート
 from .voicevox_client import generate_voice
 
 
 class AudioGenerator:
     def __init__(
-        self, config: Dict[str, Any], temp_dir: Path, audio_params: AudioParams
+        self,
+        config: Dict[str, Any],
+        temp_dir: Path,
+        audio_params: AudioParams,
+        cache_manager: CacheManager,  # CacheManagerインスタンスを受け取る
     ):
         self.config = config
         self.temp_dir = temp_dir
@@ -22,6 +28,7 @@ class AudioGenerator:
             "VOICEVOX_URL", self.voice_config.get("url", "http://127.0.0.1:50021")
         )
         self.audio_params = audio_params
+        self.cache_manager = cache_manager  # インスタンス変数として保持
 
     def generate_audio(
         self, text: str, line_config: Dict[str, Any], output_filename: str
@@ -37,7 +44,7 @@ class AudioGenerator:
         Returns:
             Path: The path to the generated wav file.
         """
-        speech_wav_path = self.temp_dir / f"{output_filename}_speech.wav"
+        speech_wav_path_base = self.temp_dir / f"{output_filename}_speech"
         speech_duration = 0.0  # Initialize speech_duration
 
         # Determine the required duration for the speech track based on SEs if text is empty
@@ -70,21 +77,43 @@ class AudioGenerator:
                     "Please ensure 'speaker_id' is defined in defaults or line_config."
                 )
 
-            print(
-                f"[Audio] Generating for '{text[:20]}...' with speaker_id={speaker}, speed={speed}, pitch={pitch} -> {speech_wav_path.name}"
-            )
-            generate_voice(
-                text=text,
-                speaker=speaker,
-                filepath=str(speech_wav_path),
-                speed=speed,
-                pitch=pitch,
-                voicevox_url=self.voicevox_url,
+            # VOICEVOX合成パラメータをキャッシュキーに含める
+            voice_key_data = {
+                "text": text,
+                "speaker": speaker,
+                "speed": speed,
+                "pitch": pitch,
+                "voicevox_url": self.voicevox_url,
+                "audio_params": self.audio_params.__dict__,  # AudioParamsもキャッシュキーに含める
+            }
+
+            def creator_func(output_path: Path) -> Path:
+                logger.info(
+                    f"[Audio] Generating for '{text[:20]}...' with speaker_id={speaker}, speed={speed}, pitch={pitch} -> {output_path.name}"
+                )
+                generate_voice(
+                    text=text,
+                    speaker=speaker,
+                    filepath=str(output_path),
+                    speed=speed,
+                    pitch=pitch,
+                    voicevox_url=self.voicevox_url,
+                )
+                return output_path
+
+            speech_wav_path = self.cache_manager.get_or_create(
+                key_data=voice_key_data,
+                file_name=f"{output_filename}_speech",
+                extension="wav",
+                creator_func=creator_func,
             )
             speech_duration = get_audio_duration(str(speech_wav_path))
         else:
             # If text is empty, create a silent WAV file with duration based on SEs
-            print(
+            speech_wav_path = speech_wav_path_base.with_suffix(
+                ".wav"
+            )  # キャッシュを使わないので、ここでパスを確定
+            logger.info(
                 f"[Audio] Empty text, creating silent WAV for {speech_wav_path.name} with duration {required_speech_duration_for_ses}s"
             )
             create_silent_audio(
@@ -121,22 +150,6 @@ class AudioGenerator:
             audio_tracks_to_mix.append((se_path, se_start_time, se_volume))
             se_duration = get_audio_duration(se_path)
             max_end_time = max(max_end_time, se_start_time + se_duration)
-
-        # The previous 'if speech_duration == 0 and sound_effects:' block is now handled
-        # by required_speech_duration_for_ses and max_end_time calculation.
-        # Removing the redundant block.
-        # if speech_duration == 0 and sound_effects:
-        #     if (
-        #         not audio_tracks_to_mix
-        #     ):  # Should not happen if sound_effects is not empty and speech_duration is 0
-        #         max_end_time = 0.0
-        #     else:
-        #         # Recalculate max_end_time considering only SEs if speech_duration is 0
-        #         # This line is redundant if max_end_time is already correctly calculated above
-        #         # but ensures the max is taken if only SEs are present.
-        #         max_end_time = max(
-        #             se_start_time + get_audio_duration(se_path) for se in sound_effects
-        #         )
 
         # Mix all audio tracks
         mixed_wav_path = self.temp_dir / f"{output_filename}_mixed.wav"

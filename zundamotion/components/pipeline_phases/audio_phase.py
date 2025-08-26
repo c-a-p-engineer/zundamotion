@@ -25,7 +25,9 @@ class AudioPhase:
         self.config = config
         self.temp_dir = temp_dir
         self.cache_manager = cache_manager
-        self.audio_gen = AudioGenerator(self.config, self.temp_dir, audio_params)
+        self.audio_gen = AudioGenerator(
+            self.config, self.temp_dir, audio_params, self.cache_manager
+        )  # cache_managerを渡す
         self.video_extensions = self.config.get("system", {}).get(
             "video_extensions",
             [".mp4", ".mov", ".webm", ".avi", ".mkv"],
