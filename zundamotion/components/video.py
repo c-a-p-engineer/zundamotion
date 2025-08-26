@@ -507,10 +507,25 @@ class VideoRenderer:
         cmd.extend(self._thread_flags())
 
         # 1) Background
-        bg_path = background_config.get("path")
-        if not bg_path:
+        bg_path_str = background_config.get("path")
+        if not bg_path_str:
             raise ValueError("Background path is missing.")
+        bg_path = Path(bg_path_str)
+
         if background_config.get("type") == "video":
+            try:
+                # 正規化（失敗時は as-is）
+                _ = get_media_info(str(bg_path))
+                bg_path = normalize_media(
+                    input_path=bg_path,
+                    video_params=self.video_params,
+                    audio_params=self.audio_params,
+                    cache_manager=self.cache_manager,
+                )
+            except Exception as e:
+                print(
+                    f"[Warning] Could not inspect/normalize BG video {bg_path.name}: {e}. Using as-is."
+                )
             cmd.extend(
                 [
                     "-ss",
@@ -560,7 +575,7 @@ class VideoRenderer:
         return output_path
 
     def render_looped_background_video(
-        self, bg_video_path: str, duration: float, output_filename: str
+        self, bg_video_path_str: str, duration: float, output_filename: str
     ) -> Path:
         """
         指定長でBG動画をループ書き出し。
@@ -574,12 +589,28 @@ class VideoRenderer:
 
         cmd: List[str] = [self.ffmpeg_path, "-y"]
         cmd.extend(self._thread_flags())
+
+        bg_video_path = Path(bg_video_path_str)
+        try:
+            # 正規化（失敗時は as-is）
+            _ = get_media_info(str(bg_video_path))
+            bg_video_path = normalize_media(
+                input_path=bg_video_path,
+                video_params=self.video_params,
+                audio_params=self.audio_params,
+                cache_manager=self.cache_manager,
+            )
+        except Exception as e:
+            print(
+                f"[Warning] Could not inspect/normalize looped BG video {bg_video_path.name}: {e}. Using as-is."
+            )
+
         cmd.extend(
             [
                 "-stream_loop",
                 "-1",
                 "-i",
-                bg_video_path,
+                str(bg_video_path),
                 "-t",
                 str(duration),
                 "-vf",

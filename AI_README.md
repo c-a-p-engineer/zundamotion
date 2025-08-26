@@ -109,6 +109,6 @@ python -m zundamotion.main scripts/sample.yaml
 - **キャッシュ管理**: `zundamotion/cache.py` (`CacheManager` クラス)
     - 概要: 生成された中間ファイルやキャッシュデータの管理を行います。
 - **ユーティリティ**: `zundamotion/utils/ffmpeg_utils.py`, `zundamotion/utils/logger.py`
-    - 概要: FFmpegコマンドの実行補助やロギング機能を提供します。
+    - 概要: FFmpegコマンドの実行補助やロギング機能を提供します。特に、`normalize_media` 関数は、入力ファイルのパス、サイズ、最終更新時刻、およびFFmpegのバージョンに基づいてメディアを正規化し、結果をキャッシュします。これにより、同一素材の再変換がスキップされ、処理速度が向上します。
 - **例外処理**: `zundamotion/exceptions.py`
     - 概要: カスタム例外の定義と管理を行います。

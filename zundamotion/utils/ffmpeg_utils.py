@@ -711,61 +711,6 @@ def generate_normalization_hash_data(
     }
 
 
-def normalize_video(
-    input_path: str,
-    output_path: str,
-    video_params: VideoParams,
-    audio_params: AudioParams,
-    ffmpeg_path: str = "ffmpeg",
-):
-    """
-    映像を標準フォーマットに正規化。タイムスタンプも補正。
-    - デコード＆フィルタ: CPU
-    - エンコード: HWエンコ（存在すれば）/ CPU
-    """
-    video_filter = f"fps={video_params.fps},setpts=PTS-STARTPTS"
-    audio_filter = f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"
-
-    hw_kind = get_hw_encoder_kind_for_video_params(ffmpeg_path)
-    video_opts = video_params.to_ffmpeg_opts(hw_kind)
-    audio_opts = audio_params.to_ffmpeg_opts()
-
-    cmd = [ffmpeg_path, "-y"]
-    cmd.extend(_threading_flags(ffmpeg_path))
-    cmd.extend(
-        [
-            "-i",
-            input_path,
-            "-vf",
-            video_filter,
-            "-af",
-            audio_filter,
-        ]
-    )
-    cmd.extend(video_opts)
-    cmd.extend(audio_opts)
-    cmd.extend([output_path])
-
-    try:
-        proc = _run_ffmpeg(cmd)
-        logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
-        logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
-        if Path(output_path).exists():
-            logger.info(
-                f"Successfully normalized {input_path} to {output_path} (file exists)."
-            )
-        else:
-            logger.error(
-                f"Failed to normalize {input_path} to {output_path} (file does NOT exist)."
-            )
-        return Path(output_path)
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error normalizing video {input_path}: {e}")
-        logger.error(f"FFmpeg stdout:\n{e.stdout}")
-        logger.error(f"FFmpeg stderr:\n{e.stderr}")
-        raise
-
-
 def create_silent_audio(
     output_path: str,
     duration: float,
@@ -1095,10 +1040,20 @@ def normalize_media(
     背景・挿入動画を指定されたパラメータに正規化し、キャッシュする。
     キャッシュがHITすれば、変換処理をスキップしてキャッシュパスを返す。
     """
+    # 入力ファイルのサイズと最終更新時刻を取得
+    file_stat = input_path.stat()
+    file_size = file_stat.st_size
+    file_mtime = file_stat.st_mtime
+
     key_data = {
         "input_path": str(input_path.resolve()),
+        "file_size": file_size,
+        "file_mtime": file_mtime,
         "video_params": video_params.__dict__,
         "audio_params": audio_params.__dict__,
+        "ffmpeg_version": get_ffmpeg_version(
+            ffmpeg_path
+        ),  # FFmpegのバージョンもハッシュに含める
     }
 
     cached_path = cache_manager.get_cache_path(key_data, "normalized", "mp4")
@@ -1118,70 +1073,44 @@ def normalize_media(
         has_audio = has_audio_stream(str(input_path))
 
         # -vf フィルタグラフの構築
-        vf_filters = []
-        if video_params.width and video_params.height:
-            vf_filters.append(f"scale={video_params.width}:{video_params.height}")
-        if video_params.fps:
-            vf_filters.append(f"fps={video_params.fps}")
-        if video_params.pix_fmt:
-            vf_filters.append(f"format={video_params.pix_fmt}")
+        # normalize_video のロジックを統合
+        video_filter = f"fps={video_params.fps},setpts=PTS-STARTPTS"
+        audio_filter = f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"
 
-        vf_filter_str = ",".join(vf_filters)
-
-        cmd = [
-            ffmpeg_path,
-            "-y",
-            "-i",
-            str(input_path),
-        ]
-        cmd.extend(_threading_flags(ffmpeg_path))
-
-        if vf_filter_str:
-            cmd.extend(["-vf", vf_filter_str])
-
-        # Video options
         hw_kind = get_hw_encoder_kind_for_video_params(ffmpeg_path)
-        if hw_kind == "nvenc":
-            encoder = "h264_nvenc"
-            preset = "p5"
-            opts = ["-preset", preset, "-cq", "20"]  # 高品質な中間ファイル
-            logger.info(
-                f"Using Encoder for normalization: '{encoder}', Preset: '{preset}'"
-            )
-            cmd.extend(["-c:v", encoder])
-            cmd.extend(opts)
-        else:
-            encoder = "libx264"
-            preset = "medium"
-            opts = ["-preset", preset, "-crf", "18"]  # 高品質な中間ファイル
-            logger.info(
-                f"Using Encoder for normalization: '{encoder}', Preset: '{preset}'"
-            )
-            cmd.extend(["-c:v", encoder])
-            cmd.extend(opts)
+        video_opts = video_params.to_ffmpeg_opts(hw_kind)
+        audio_opts = audio_params.to_ffmpeg_opts()
 
-        if video_params.pix_fmt:
-            cmd.extend(["-pix_fmt", video_params.pix_fmt])
-        if video_params.profile:
-            cmd.extend(["-profile:v", video_params.profile])
-
-        # Audio options
+        cmd = [ffmpeg_path, "-y"]
+        cmd.extend(_threading_flags(ffmpeg_path))
+        cmd.extend(
+            [
+                "-i",
+                str(input_path),
+                "-vf",
+                video_filter,
+            ]
+        )
         if has_audio:
-            cmd.extend(["-c:a", "aac"])
-            if audio_params.bitrate_kbps:
-                cmd.extend(["-b:a", f"{audio_params.bitrate_kbps}k"])
-            if audio_params.sample_rate:
-                cmd.extend(["-ar", str(audio_params.sample_rate)])
-            if audio_params.channels:
-                cmd.extend(["-ac", str(audio_params.channels)])
+            cmd.extend(["-af", audio_filter])
         else:
-            # 音声がない場合は -an を指定
-            cmd.extend(["-an"])
+            cmd.extend(["-an"])  # 音声がない場合は -an を指定
 
-        cmd.append(str(output_path))
+        cmd.extend(video_opts)
+        if has_audio:
+            cmd.extend(audio_opts)
+        cmd.extend([str(output_path)])
 
         try:
             _run_ffmpeg(cmd)
+            if Path(output_path).exists():
+                logger.info(
+                    f"Successfully normalized {input_path} to {output_path} (file exists)."
+                )
+            else:
+                logger.error(
+                    f"Failed to normalize {input_path} to {output_path} (file does NOT exist)."
+                )
             return output_path
         except subprocess.CalledProcessError as e:
             logger.error(f"Error normalizing media {input_path}: {e}")
