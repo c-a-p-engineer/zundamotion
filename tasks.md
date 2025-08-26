@@ -1,335 +1,262 @@
-# 📋 新タスクリスト（詳細版・統合版）
+# P0. 高速化（最優先）
 
-## P0（最優先：性能と安定性）
+## 03. 正規化キャッシュの強化（素材の再変換スキップ）
 
----
-
-### 03. NVENC 高速プリセット切替
-
-**詳細**
-現状 libx264（CPUエンコード）を使用。NVENC を使えば 1650 Max-Q でも 2〜3倍高速化が期待できる。
+**背景**
+同一背景/立ち絵/差分素材を複数シーンで使う時、毎回 scale/pix\_fmt 変換が走る。
 
 **ゴール**
 
-* `--quality speed|balanced|quality` でプリセット切替可能。
-* CPUエンコード比で 40〜60% 時間短縮。
+* 素材の正規化を**初回だけ**・**2回目以降はキャッシュ再利用**。
 
 **実装イメージ**
 
-```sh
--c:v h264_nvenc -preset p7 -cq 30  # speed
--c:v h264_nvenc -preset p5 -cq 23  # balanced
--c:v h264_nvenc -preset p4 -cq 20  # quality
-```
+* `utils/ffmpeg_utils.normalize_media(in, out, profile)`：
+
+  * ハッシュキー = 入力ファイルパス＋サイズ/mtime＋**プロファイル文字列（解像度/FPS/pix\_fmt/encoder/preset/cq/crf/ffmpeg-version）**
+  * `cache/normalized/{hash}.mp4` を保存 → 命中時はパスを返すだけ。
+* `VideoRenderer` の前処理で背景/立ち絵/動画クリップを**正規化してから**合成。
 
 ---
 
-### 04. CUDA hwaccel 利用
+## 04. 外側の並列レンダリング（ジョブ並列）
 
-**詳細**
-フィルタ処理で CPU⇔GPU 間を往復している。`-hwaccel cuda` を明示し、転送を最小化。
+**背景**
+1本の ffmpeg 内の並列化は限界がある。シーン毎の独立処理を同時に走らせた方が壁時計が縮む。
 
 **ゴール**
 
-* ログで `hwupload_cuda` / `hwdownload` が最小回数に。
-* CPU負荷が下がり、処理時間が 5〜15% 改善。
+* `--jobs N` で**シーン単位並列**。NVENC は1〜2本同時、CPUは `min(nproc/2, 4)` 目安。
 
 **実装イメージ**
 
-```sh
-ffmpeg -hwaccel cuda -hwaccel_output_format cuda ...
-```
+* `GenerationPipeline` or `VideoPhase` に `concurrent.futures` を導入：
 
-* GPU対応フィルタのみ CUDA 側で処理。
+  * ワーカー数は `N`。NVENC 検出時は `min(N, 2)` に丸め。
+  * 進捗：`tqdm` or 自前ログで全体進捗を集約表示。
+  * キャッシュ衝突回避：正規化キャッシュの出力名は**ハッシュのみ**で一意。
 
 ---
 
-### 05. ジョブ並列（--jobs N）
+## 05. FFmpeg 並列オプション最適化（filter\_threads, thread\_flags）
 
-**詳細**
-シーンを直列処理している。ProcessPoolExecutor を使って並列化し、NVENCセッション数やVRAM使用を監視。
+**背景**
+明示的に `-threads 1` 指定が残っている／filter並列が無効のケースがあると遅い。
 
 **ゴール**
 
-* `--jobs 2` で総処理時間が 1.2〜1.6倍 短縮。
-* セッション不足時はリトライして安全に完了。
+* フィルタ並列を有効化し、**平均速度 > 1.0×** を安定化。
 
 **実装イメージ**
 
-```python
-with ProcessPoolExecutor(max_workers=N) as ex:
-    ex.submit(run_ffmpeg, scene)
-```
+* 共通オプション：
+
+  * `-threads 0`（auto）
+  * `-filter_threads N -filter_complex_threads N`（N = `min(nproc, 8)` など）
+  * `-thread_type slice+frame`（対応ビルド/エンコーダのみ）
+* 既存の `-threads 1` があれば削除し、上記を `ffmpeg_utils._threading_flags()` で一元化。
 
 ---
 
-### 06. BGM統合処理
+## 06. NVENC スループット設定（速度寄りプリセット）
 
-**詳細**
-BGMを別フェーズで適用すると I/O が増える。可能なら Finalize に統合する。
+**背景**
+NVENC は preset で速度/品質が変動。速度を稼ぎたいときは一段軽い preset が効く。
 
 **ゴール**
 
-* 中間ファイル数が減り、全体時間が数％〜10％短縮。
+* 品質が許す範囲で **`-preset p4 → p3`** へ引き上げ（または `-tune hq` の解除）、速度を底上げ。
 
 **実装イメージ**
 
-```sh
--filter_complex "[0:a][1:a]amix=inputs=2:duration=first[outa]"
-```
+* `meta.speed_profile: fast|balanced|quality` を導入：
 
-* 単純ケースはワンパス化、複雑ケースは従来処理。
+  * fast: `-preset p3`
+  * balanced: `-preset p4`（既定）
+  * quality: `-preset p5` + `-b:v` 運用など
+* 実行ログに決定 preset を出力してベンチ比較可能に。
 
 ---
 
-### 07. ベンチ/メトリクス出力
+# P1. 安定化
 
-**詳細**
-最適化の効果が見えにくい。実行時間・FFmpegの speed/fps を記録し、退行検知する。
+## 07. 署名（signature）比較の厳格化と差分ログ
+
+**背景**
+copy-concat 成否は「本当に**完全一致**か」に依存。比較キーが甘いと、copy 失敗や音ズレの火種になる。
 
 **ゴール**
 
-* `perf/YYYYMMDD.csv` が生成される。
-* 前回比 +20% 以上で警告ログが出る。
+* 一致時のみ copy。**不一致キーをログに列挙**して即判断できる。
 
 **実装イメージ**
 
-```csv
-phase,start,end,duration,speed,fps
-AudioPhase,00:00,00:09,9.48,—
-```
+* `ffprobe -v error -show_streams -show_format -of json` を解析し、以下を比較：
+
+  * Video: `codec_name,width,height,pix_fmt,profile,level,r_frame_rate,avg_frame_rate,time_base`
+  * Audio: `codec_name,profile,sample_rate,channels,channel_layout,sample_fmt,time_base,bit_rate`
+  * Format: `format_name`（mp4）
+* `compare_media_params(a,b)` は差分キーと各値を返却 → Finalize で WARN ログ。
 
 ---
 
-## P1（中規模：負荷削減＆表現力強化）
+## 08. タイムスタンプ整形（time\_base/PTS 安定化）
 
----
-
-### 02. 立ち絵の事前スケール
-
-**詳細**
-毎フレーム `scale` をかけるのは無駄。事前に倍率別 PNG を生成してキャッシュする。
+**背景**
+CFRでも `time_base` や `avg_frame_rate` が微妙に揺れると copy で弾かれたり音ズレが出る。
 
 **ゴール**
 
-* `scale` フィルタが消え、総処理時間が数％〜10％改善。
+* すべてのクリップで **同一の time\_base / avg\_frame\_rate**。
 
 **実装イメージ**
 
-* 立ち絵ごとに `scale-0.8.png`, `scale-1.0.png` を用意。
-* クリップではそのまま `overlay`。
+* クリップ出力に以下を追加：
+
+  * `-vsync cfr -r 30`（既存）
+  * `-fflags +genpts -avoid_negative_ts make_zero`
+  * `-video_track_timescale 90000`（MP4 muxer）
+* `ffprobe` で time\_base/avg\_frame\_rate を signature に含めて検証。
 
 ---
 
-### 03. 静的レイヤーの事前合成＋静止レンダモード
+## 09. エンコーダ選択の実行時固定（混在禁止）
 
-**詳細**
-背景＋立ち絵など「動かない組み合わせ」を毎フレーム overlay するのは無駄。事前に合成PNGにして `-loop 1`。
+**背景**
+実行途中で NVENC/CPU が混在すると copy 失敗の原因。
 
 **ゴール**
 
-* 静止シーンの生成が I/O 中心になり、極端に軽量化。
+* プロセス開始時に NVENC 可否を判定し、**全クリップで同一エンコーダ**を強制。
 
 **実装イメージ**
 
-```sh
-convert bg.png char.png -composite static.png
-ffmpeg -loop 1 -i static.png -t 5 -c:v libx264 ...
-```
+* 起動時に `is_nvenc_available()` を1回だけ評価→`context.hw_encoder = 'nvenc'|'cpu'` に固定。
+* ログに「決定エンコーダ」を出力。
 
 ---
 
-### 04. トランジションの部分再エンコード
+## 10. 失敗時フォールバックと早期失敗のトグル
 
-**詳細**
-全体を再エンコードせず、トランジション部分だけ再エンコードして前後は copy。
+**背景**
+copy に通らず再エンコードになると時間がかかる／CI では失敗してほしいケースもある。
 
 **ゴール**
 
-* トランジションが多い作品でも総エンコード時間が線形増加しにくい。
+* デフォルトは安全フォールバック、CI では **`--final-copy-only`** で**不一致なら即エラー**。
 
 **実装イメージ**
 
-* `xfade` 区間のみ再エンコード。
-* `concat demuxer` で前後を copy 結合。
+* CLI 追加：`--final-copy-only`（bool）
+* Finalize 内：
+
+  * 一致 → copy
+  * 不一致 → `final-copy-only` が True なら `sys.exit(1)`、False なら従来 concat へ。
 
 ---
 
-### 05. トランジション結果キャッシュ
+## 11. ロギング / メトリクスの保存
 
-**詳細**
-同じA→B＋同じ設定のトランジションは毎回再計算する必要がない。
+**背景**
+回帰検知・チューニングに**数字**が必要。
 
 **ゴール**
 
-* 2回目以降はキャッシュを利用し再生成スキップ。
+* 各フェーズ時間、平均速度、copy 採用可否、署名差分を **JSON で保存**。
 
 **実装イメージ**
 
-* ハッシュ `(hash(A), hash(B), type, duration)` をキーに保存。
+* `reporting/generation_report.json`：
+
+  * クリップごとの処理時間/平均速度
+  * 正規化キャッシュヒット率
+  * Final mode（copy | transcode）
+  * 不一致キーの一覧
+* CI で閾値監視（速度/採用率が下がったら失敗）。
 
 ---
 
-### 06. 複数キャラ表示＆レイアウトプリセット
+# P2. 拡張機能
 
-**詳細**
-1キャラ固定だと表現が貧弱。相対位置で複数キャラを配置できるようにする。
+## 12. 字幕の固定文字数ラップ（ピクセル幅ラップと切替）
+
+**背景**
+日本語などスペースが少ない言語では**一定文字数**での改行が便利。
 
 **ゴール**
 
-* 9:16 / 1:1 でもレイアウト崩れなく2人以上を表示可能。
+* YAML で `wrap_mode: chars` + `max_chars_per_line: N` 指定時に **N文字ごと改行**。
 
 **実装イメージ**
 
-* `left/right/center` → `x,y` を算出して `overlay`。
+* `subtitle_png.py`：
+
+  * 追加 `def _wrap_text_by_chars(text, max_chars) -> str`
+  * `render()` で `wrap_mode` を見て `chars` なら上記を適用、未指定なら従来の `wrap_by_pixel`。
+  * さらに**禁則処理**（句読点のぶら下がり回避）オプションも設計しておく。
 
 ---
 
-### 07. キャラ入退場アニメ（slide/fade/zoom）
+## 13. 字幕 overlay の CUDA 化を opt-in
 
-**詳細**
-静止表示だけでは単調。シンプルな動きをプリセット化する。
+**背景**
+自動で `overlay_cuda` を使うとフィルタグラフが複雑になり、環境差でコケやすい。
 
 **ゴール**
 
-* `enter: {type: slide_in, dur: 0.4s, from: left}` のように指定可能。
-* 動きが破綻なく再生。
+* 既定は **CPU overlay + NVENC エンコード**（安定）。
+* `subtitle.use_cuda_overlay: true` の明示時だけ CUDA overlay を利用。
 
 **実装イメージ**
 
-* `slide` → `overlay=x='-w+t*speed'`
-* `fade` → `fade=in:0:30`
+* `subtitle.py`：
+
+  ```python
+  use_cuda = bool(style.get("use_cuda_overlay", False)) and is_nvenc_available() and has_cuda_filters()
+  ```
+* CUDA 経路は **全入力を `hwupload_cuda`** で GPU フレームに統一。失敗時は CPU 経路へフォールバック。
 
 ---
 
-### 08. シナリオ記法（二段構え）
+## 14. ラウドネス正規化（EBU R128）
 
-**詳細**
-初心者は簡易記法、上級者は詳細記法を使えるようにする。
+**背景**
+TTS + BGM の複合でクリップ間の音量ムラが出やすい。
 
 **ゴール**
 
-* どちらのYAMLでも等価な動画が生成される。
+* LUFS をターゲット（例 `-23`) に\*\*±1dB以内\*\*で統一。
 
 **実装イメージ**
 
-* `script_loader` で省略記法を詳細記法へ展開。
+* `loudnorm` を BGM 合成前に適用：
+
+  ```
+  -af "loudnorm=I=-23:TP=-2.0:LRA=11:print_format=json"
+  ```
+* メジャーメント値を `report.json` に保存して再現性確保。
 
 ---
 
-### 09. SE相対トリガー
+## 15. プロファイル化（meta.video\_profile / speed\_profile）
 
-**詳細**
-固定秒指定だとセリフ変更でズレる。行基準の相対指定を導入。
+**背景**
+案件・環境ごとに規格値や速度重視設定を切り替えたい。
 
 **ゴール**
 
-* 台詞が変わっても SE が正しい位置で鳴る。
+* YAML の `meta.video_profile` / `meta.speed_profile` で**一括切替**。
 
 **実装イメージ**
 
-```yaml
-se:
-  file: se.wav
-  at: line_end - 0.2s
-```
+* `video_profile`：`resolution, fps, pix_fmt, profile, level`
+* `speed_profile`：`fast|balanced|quality` → NVENC preset や `-b:v`/`-cq` を切替。
+* 実行時に決定プロファイルをログ出力してトレース可能に。
 
 ---
 
-### 10. 素材リゾルバ
+### 補足：実装順のおすすめ
 
-**詳細**
-実行開始後に「ファイルなし」で落ちるのを防ぐ。
-
-**ゴール**
-
-* 実行前に不足ファイルが警告される。
-* `--strict` で即エラー終了。
-
-**実装イメージ**
-
-* 実行前に `Path.exists()` チェック。
-* 結果をまとめて警告出力。
-
----
-
-## P2（拡張・利便性向上）
-
----
-
-### 01. プロファイル切替（Speed/Balanced/Quality）
-
-**詳細**
-開発デバッグ用と本番出力用で求める速度・品質が違う。
-
-**ゴール**
-
-* `--profile speed` で低画質高速、`--profile quality` で高品質が選べる。
-
-**実装イメージ**
-
-* `profiles.yaml` を定義して fps/preset/crf を切り替え。
-
----
-
-### 02. ワンパス filter\_complex ビルダー
-
-**詳細**
-フェーズごとに書き出すのではなく、可能な場合は一本の `filter_complex` で処理。
-
-**ゴール**
-
-* 中間ファイル数が減少。
-* 1分サンプルで Finalize 所要が 1/2〜1/3。
-
-**実装イメージ**
-
-* `xfade/overlay/trim` を自動生成して filter\_complex にまとめる。
-
----
-
-### 03. 表示UI/エディタ連携
-
-**詳細**
-YAML記述が煩雑なので、GUI補助やプレビューUIを追加する。
-
-**ゴール**
-
-* CLIに不慣れな人でも操作可能。
-
-**実装イメージ**
-
-* Streamlit/Gradio でプレビューUI。
-* YAML編集 → 即時プレビュー。
-
----
-
-### 04. メトリクスの可視化ダッシュボード
-
-**詳細**
-CSV出力されたベンチ結果をグラフ化して履歴管理。
-
-**ゴール**
-
-* 性能改善/退行を一目で確認できる。
-
-**実装イメージ**
-
-* Pythonで matplotlib / seaborn で自動プロット。
-* `perf/summary.png` を生成。
-
----
-
-### 05. 多言語TTS/字幕対応
-
-**詳細**
-英語や他言語でも自然に読めるよう辞書や音声設定を整備。
-
-**ゴール**
-
-* YAMLで `lang: en` 指定 → 英語字幕＋英語音声。
-
-**実装イメージ**
-
-* TTS設定に辞書ロード追加。
-* drawtext/PNGレンダでフォント切替。
+1. **01→02→03→04→05**（P0高速化の柱）
+2. **07→08→09→10→11**（安定化メッシュ）
+3. **12→13→14→15**（拡張でUX/品質UP）

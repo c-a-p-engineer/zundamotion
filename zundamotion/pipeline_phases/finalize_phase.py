@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from zundamotion.cache import CacheManager
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
+from zundamotion.utils.ffmpeg_utils import get_media_info  # 追加
 from zundamotion.utils.ffmpeg_utils import (
     AudioParams,
     VideoParams,
@@ -32,6 +33,7 @@ class FinalizePhase:
         audio_params: AudioParams,
         hw_encoder: str = "auto",
         quality: str = "balanced",
+        final_copy_only: bool = False,  # 追加
     ):
         self.config = config
         self.temp_dir = temp_dir
@@ -40,6 +42,7 @@ class FinalizePhase:
         self.audio_params = audio_params
         self.hw_encoder = hw_encoder
         self.quality = quality
+        self.final_copy_only = final_copy_only  # 追加
 
     @time_log(logger)
     def run(
@@ -72,11 +75,33 @@ class FinalizePhase:
                 logger.warning(
                     f"FinalizePhase: Failed to concat with -c copy: {e}. Falling back to re-encode concat."
                 )
+                if self.final_copy_only:
+                    raise PipelineError(
+                        "FinalizePhase: --final-copy-only is enabled, but -c copy concat failed."
+                    )
                 self._reencode_concat(scene_video_paths, output_video_path)
         else:
-            logger.warning(
-                "FinalizePhase: Video parameters mismatch. Falling back to re-encode concat."
-            )
+            # パラメータ不一致時の詳細ログ
+            logger.warning("FinalizePhase: Video parameters mismatch.")
+            base_info = None
+            if input_video_str_paths:
+                base_info = get_media_info(input_video_str_paths[0])
+                logger.warning(
+                    f"  Base video parameters ({input_video_str_paths[0]}): {json.dumps(base_info, indent=2)}"
+                )
+
+            for i, path in enumerate(input_video_str_paths[1:], start=1):
+                current_info = get_media_info(path)
+                logger.warning(
+                    f"  Mismatch detected with {path}: {json.dumps(current_info, indent=2)}"
+                )
+                # ここで詳細な差分を比較してログに出力することも可能だが、まずは全体をログに出す
+
+            if self.final_copy_only:
+                raise PipelineError(
+                    "FinalizePhase: --final-copy-only is enabled, but video parameters mismatch."
+                )
+            logger.warning("FinalizePhase: Falling back to re-encode concat.")
             self._reencode_concat(scene_video_paths, output_video_path)
 
         final_video_duration = get_media_duration(str(output_video_path))

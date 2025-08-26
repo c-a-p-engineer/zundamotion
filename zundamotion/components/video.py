@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..cache import CacheManager
+from ..utils.ffmpeg_utils import concat_videos_copy  # 追加
 from ..utils.ffmpeg_utils import (
     AudioParams,
     VideoParams,
@@ -24,6 +25,9 @@ class VideoRenderer:
         temp_dir: Path,
         cache_manager: CacheManager,
         jobs: str = "0",
+        hw_kind: Optional[str] = None,  # 新しい引数
+        video_params: Optional[VideoParams] = None,  # 新しい引数
+        audio_params: Optional[AudioParams] = None,  # 新しい引数
     ):
         self.config = config
         self.temp_dir = temp_dir
@@ -33,26 +37,17 @@ class VideoRenderer:
         self.jobs = jobs
         self.ffmpeg_path = "ffmpeg"  # PATH 前提
 
-        # エンコード関連（初期化時に決定）
-        self.using_qsv: bool = False
-        self.h264_encoder_options: List[str] = []
-        self.hevc_encoder_options: List[str] = []
-        self._pix_fmt: str = "yuv420p"  # QSV 使用時は nv12 に切替
+        self.hw_kind = hw_kind
+        self.video_params = video_params or VideoParams()
+        self.audio_params = audio_params or AudioParams()
 
-        # 正規化用のデフォルトパラメータ
-        self.default_video_params = VideoParams(
-            width=self.video_config.get("width", 1920),
-            height=self.video_config.get("height", 1080),
-            fps=self.video_config.get("fps", 30),
-            pix_fmt=self.video_config.get("pix_fmt", "yuv420p"),
-        )
-        self.default_audio_params = AudioParams(
-            sample_rate=self.video_config.get("audio_sample_rate", 48000),
-            channels=self.video_config.get("audio_channels", 2),
-            bitrate_kbps=self.video_config.get("audio_bitrate_kbps", 192),
-        )
+        # _initialize_ffmpeg_settings は削除されるため、関連する属性も削除
+        # self.using_qsv: bool = False
+        # self.h264_encoder_options: List[str] = []
+        # self.hevc_encoder_options: List[str] = []
+        # self._pix_fmt: str = "yuv420p"
 
-        self._initialize_ffmpeg_settings()
+        # self._initialize_ffmpeg_settings() # 削除
 
     # --------------------------
     # 内部ユーティリティ
@@ -85,151 +80,153 @@ class VideoRenderer:
             str(nproc),
         ]
 
-    def _qsv_device_available(self) -> bool:
-        # 典型的なレンダーデバイス（Docker なら /dev/dri をマウントしている必要あり）
-        return os.path.exists("/dev/dri/renderD128") or os.path.exists("/dev/dri/card0")
+    # _qsv_device_available と _probe_qsv_encode は _initialize_ffmpeg_settings でのみ使用されていたため削除
+    # def _qsv_device_available(self) -> bool:
+    #     # 典型的なレンダーデバイス（Docker なら /dev/dri をマウントしている必要あり）
+    #     return os.path.exists("/dev/dri/renderD128") or os.path.exists("/dev/dri/card0")
 
-    def _probe_qsv_encode(self) -> bool:
-        """
-        QSV エンコードが実際に初期化できるかを極小ジョブで検証。
-        失敗する場合は MFX session エラー（-9 など）になる。
-        """
-        cmd = [
-            self.ffmpeg_path,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=size=64x64:rate=30:duration=0.1:color=black",
-            "-frames:v",
-            "1",
-            "-c:v",
-            "h264_qsv",
-            "-f",
-            "null",
-            "-",
-        ]
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
-            return True
-        except subprocess.CalledProcessError as e:
-            # デバッグ用に一行だけ残す
-            msg = (
-                (e.stderr or "").strip().splitlines()[-1]
-                if (e.stderr or "")
-                else "qsv open failed"
-            )
-            print(f"[Encoder] QSV probe failed: {msg}")
-            return False
+    # def _probe_qsv_encode(self) -> bool:
+    #     """
+    #     QSV エンコードが実際に初期化できるかを極小ジョブで検証。
+    #     失敗する場合は MFX session エラー（-9 など）になる。
+    #     """
+    #     cmd = [
+    #         self.ffmpeg_path,
+    #         "-hide_banner",
+    #         "-loglevel",
+    #         "error",
+    #         "-f",
+    #         "lavfi",
+    #         "-i",
+    #         "color=size=64x64:rate=30:duration=0.1:color=black",
+    #         "-frames:v",
+    #         "1",
+    #         "-c:v",
+    #         "h264_qsv",
+    #         "-f",
+    #         "null",
+    #         "-",
+    #     ]
+    #     try:
+    #         subprocess.run(cmd, check=True, capture_output=True, text=True)
+    #         return True
+    #     except subprocess.CalledProcessError as e:
+    #         # デバッグ用に一行だけ残す
+    #         msg = (
+    #             (e.stderr or "").strip().splitlines()[-1]
+    #             if (e.stderr or "")
+    #             else "qsv open failed"
+    #         )
+    #         print(f"[Encoder] QSV probe failed: {msg}")
+    #         return False
 
-    def _initialize_ffmpeg_settings(self):
-        """
-        シンプル版: ハードウェア自動選択のみ
-        優先度: NVENC > QSV > CPU
-        品質指定: config["encoder"]["quality"] or config["video"]["quality"] or "balanced"
-            - "speed"    -> NVENC: preset p7, cq=30/31
-            - "balanced" -> NVENC: preset p5, cq=23/24
-            - "quality"  -> NVENC: preset p4, cq=20/21
-        QSV/CPU は固定設定（必要なら後で拡張）
-        """
-        # 既定リセット
-        self.using_nvenc = False
-        self.using_qsv = False
-        self._pix_fmt = "yuv420p"
+    # _initialize_ffmpeg_settings メソッドは削除
+    # def _initialize_ffmpeg_settings(self):
+    #     """
+    #     シンプル版: ハードウェア自動選択のみ
+    #     優先度: NVENC > QSV > CPU
+    #     品質指定: config["encoder"]["quality"] or config["video"]["quality"] or "balanced"
+    #         - "speed"    -> NVENC: preset p7, cq=30/31
+    #         - "balanced" -> NVENC: preset p5, cq=23/24
+    #         - "quality"  -> NVENC: preset p4, cq=20/21
+    #     QSV/CPU は固定設定（必要なら後で拡張）
+    #     """
+    #     # 既定リセット
+    #     self.using_nvenc = False
+    #     self.using_qsv = False
+    #     self._pix_fmt = "yuv420p"
 
-        # ---- 1) NVENC 可否 ----
-        nvenc_ok = False
-        try:
-            nvenc_ok = is_nvenc_available(self.ffmpeg_path)
-        except Exception as e:
-            print(f"[Encoder] NVENC check error: {e}")
+    #     # ---- 1) NVENC 可否 ----
+    #     nvenc_ok = False
+    #     try:
+    #         nvenc_ok = is_nvenc_available(self.ffmpeg_path)
+    #     except Exception as e:
+    #         print(f"[Encoder] NVENC check error: {e}")
 
-        # ---- 2) QSV 可否（NVENC不可のときだけ試す）----
-        qsv_ok = False
-        if not nvenc_ok and self._qsv_device_available():
-            qsv_ok = self._probe_qsv_encode()
+    #     # ---- 2) QSV 可否（NVENC不可のときだけ試す）----
+    #     qsv_ok = False
+    #     if not nvenc_ok and self._qsv_device_available():
+    #         qsv_ok = self._probe_qsv_encode()
 
-        # ---- 3) 採用とオプション設定 ----
-        if nvenc_ok:
-            # 品質プロファイル（configのみ）
-            quality = (
-                self.config.get("encoder", {}).get("quality")
-                or self.config.get("video", {}).get("quality")
-                or "balanced"
-            ).lower()
+    #     # ---- 3) 採用とオプション設定 ----
+    #     if nvenc_ok:
+    #         # 品質プロファイル（configのみ）
+    #         quality = (
+    #             self.config.get("encoder", {}).get("quality")
+    #             or self.config.get("video", {}).get("quality")
+    #             or "balanced"
+    #         ).lower()
 
-            if quality == "speed":
-                preset, cq_h264, cq_hevc = "p7", "30", "31"
-            elif quality == "quality":
-                preset, cq_h264, cq_hevc = "p4", "20", "21"
-            else:  # balanced
-                preset, cq_h264, cq_hevc = "p5", "23", "24"
+    #         if quality == "speed":
+    #             preset, cq_h264, cq_hevc = "p7", "30", "31"
+    #         elif quality == "quality":
+    #             preset, cq_h264, cq_hevc = "p4", "20", "21"
+    #         else:  # balanced
+    #             preset, cq_h264, cq_hevc = "p5", "23", "24"
 
-            self.using_nvenc = True
-            self.h264_encoder_options = [
-                "-c:v",
-                "h264_nvenc",
-                "-preset",
-                preset,
-                "-cq",
-                cq_h264,
-            ]
-            self.hevc_encoder_options = [
-                "-c:v",
-                "hevc_nvenc",
-                "-preset",
-                preset,
-                "-cq",
-                cq_hevc,
-            ]
-            # NVENC は yuv420p でOK（10bit/HDRは別途）
-            self._pix_fmt = "yuv420p"
-            print(f"[Encoder] Using NVENC (h264_nvenc), preset={preset}, cq={cq_h264}")
+    #         self.using_nvenc = True
+    #         self.h264_encoder_options = [
+    #             "-c:v",
+    #             "h264_nvenc",
+    #             "-preset",
+    #             preset,
+    #             "-cq",
+    #             cq_h264,
+    #         ]
+    #         self.hevc_encoder_options = [
+    #             "-c:v",
+    #             "hevc_nvenc",
+    #             "-preset",
+    #             preset,
+    #             "-cq",
+    #             cq_hevc,
+    #         ]
+    #         # NVENC は yuv420p でOK（10bit/HDRは別途）
+    #         self._pix_fmt = "yuv420p"
+    #         print(f"[Encoder] Using NVENC (h264_nvenc), preset={preset}, cq={cq_h264}")
 
-        elif qsv_ok:
-            self.using_qsv = True
-            self.h264_encoder_options = [
-                "-c:v",
-                "h264_qsv",
-                "-preset",
-                "veryfast",
-                "-global_quality",
-                "23",
-            ]
-            self.hevc_encoder_options = [
-                "-c:v",
-                "hevc_qsv",
-                "-preset",
-                "veryfast",
-                "-global_quality",
-                "28",
-            ]
-            # QSV は nv12 が安定
-            self._pix_fmt = "nv12"
-            print("[Encoder] Using QSV (Intel Quick Sync) for video encoding.")
+    #     elif qsv_ok:
+    #         self.using_qsv = True
+    #         self.h264_encoder_options = [
+    #             "-c:v",
+    #             "h264_qsv",
+    #             "-preset",
+    #             "veryfast",
+    #             "-global_quality",
+    #             "23",
+    #         ]
+    #         self.hevc_encoder_options = [
+    #             "-c:v",
+    #             "hevc_qsv",
+    #             "-preset",
+    #             "veryfast",
+    #             "-global_quality",
+    #             "28",
+    #         ]
+    #         # QSV は nv12 が安定
+    #         self._pix_fmt = "nv12"
+    #         print("[Encoder] Using QSV (Intel Quick Sync) for video encoding.")
 
-        else:
-            # CPU フォールバック
-            self.h264_encoder_options = [
-                "-c:v",
-                "libx264",
-                "-preset",
-                "fast",
-                "-crf",
-                "23",
-            ]
-            self.hevc_encoder_options = [
-                "-c:v",
-                "libx265",
-                "-preset",
-                "fast",
-                "-crf",
-                "28",
-            ]
-            self._pix_fmt = "yuv420p"
-            print("[Encoder] Using CPU (libx264/libx265) for video encoding.")
+    #     else:
+    #         # CPU フォールバック
+    #         self.h264_encoder_options = [
+    #             "-c:v",
+    #             "libx264",
+    #             "-preset",
+    #             "fast",
+    #             "-crf",
+    #             "23",
+    #         ]
+    #         self.hevc_encoder_options = [
+    #             "-c:v",
+    #             "libx265",
+    #             "-preset",
+    #             "fast",
+    #             "-crf",
+    #             "28",
+    #         ]
+    #         self._pix_fmt = "yuv420p"
+    #         print("[Encoder] Using CPU (libx264/libx265) for video encoding.")
 
     def render_clip(
         self,
@@ -248,9 +245,9 @@ class VideoRenderer:
         - subtitle_filter_snippet は無視（誤式混入防止）
         """
         output_path = self.temp_dir / f"{output_filename}.mp4"
-        width = self.video_config.get("width", 1280)
-        height = self.video_config.get("height", 720)
-        fps = self.video_config.get("fps", 30)
+        width = self.video_params.width
+        height = self.video_params.height
+        fps = self.video_params.fps
 
         # 下マージン（px）
         subtitle_cfg = self.config.get("subtitle", {})
@@ -276,8 +273,8 @@ class VideoRenderer:
                 _ = get_media_info(str(bg_path))
                 bg_path = normalize_media(
                     input_path=bg_path,
-                    video_params=self.default_video_params,
-                    audio_params=self.default_audio_params,
+                    video_params=self.video_params,
+                    audio_params=self.audio_params,
                     cache_manager=self.cache_manager,
                 )
             except Exception as e:
@@ -332,8 +329,8 @@ class VideoRenderer:
                     _ = get_media_info(str(insert_path))
                     insert_path = normalize_media(
                         input_path=insert_path,
-                        video_params=self.default_video_params,
-                        audio_params=self.default_audio_params,
+                        video_params=self.video_params,
+                        audio_params=self.audio_params,
                         cache_manager=self.cache_manager,
                     )
                 except Exception as e:
@@ -375,11 +372,15 @@ class VideoRenderer:
         # --- Filter Graph -------------------------------------------------------
         filter_complex_parts: List[str] = []
 
-        # BG scale（フォーマット固定で後段overlayの交渉を安定化）
+        # BG scale
         filter_complex_parts.append(
-            f"[0:v]scale={width}:{height},format=yuv420p[bg_scaled]"
+            f"[0:v]scale={width}:{height}:flags=lanczos,fps={fps}[bg]"
         )
-        last_video_stream = "[bg_scaled]"
+        current_video_stream = "[bg]"
+
+        # Overlay elements
+        overlay_streams: List[str] = []
+        overlay_filters: List[str] = []
 
         # Insert overlay
         if insert_config and insert_ffmpeg_index != -1:
@@ -395,12 +396,11 @@ class VideoRenderer:
                 str(pos.get("x", "0")),
                 str(pos.get("y", "0")),
             )
-            filter_complex_parts += [
-                f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[insert_scaled]",
-                f"[insert_scaled]format=rgba[insert_rgba]",
-                f"{last_video_stream}[insert_rgba]overlay=x={x_expr}:y={y_expr}[with_insert]",
-            ]
-            last_video_stream = "[with_insert]"
+            filter_complex_parts.append(
+                f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[insert_scaled]"
+            )
+            overlay_streams.append("[insert_scaled]")
+            overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
 
         # Characters overlay
         for i, char_config in enumerate(characters_config):
@@ -419,26 +419,38 @@ class VideoRenderer:
                 str(pos.get("x", "0")),
                 str(pos.get("y", "0")),
             )
-            filter_complex_parts += [
-                f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[char_scaled_{i}]",
-                f"[char_scaled_{i}]format=rgba[char_rgba_{i}]",
-                f"{last_video_stream}[char_rgba_{i}]overlay=x={x_expr}:y={y_expr}[with_char_{i}]",
-            ]
-            last_video_stream = f"[with_char_{i}]"
+            filter_complex_parts.append(
+                f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[char_scaled_{i}]"
+            )
+            overlay_streams.append(f"[char_scaled_{i}]")
+            overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
 
         # Subtitles overlay（PNG）— 下中央寄せ、表示は between(t,0,duration)
         if subtitle_ffmpeg_index != -1:
-            # 透明保持（RGBA）→ CPU overlay（alpha対応で安定）
-            filter_complex_parts.append(
-                f"[{subtitle_ffmpeg_index}:v]format=rgba[subs_0]"
-            )
             x_expr = "(W-w)/2"
             y_expr = f"H-{bottom_margin}-h"
-            filter_complex_parts.append(
-                f"{last_video_stream}[subs_0]overlay="
-                f"x='{x_expr}':y='{y_expr}':enable='between(t,0,{duration})'[with_subs_0]"
+            overlay_streams.append(f"[{subtitle_ffmpeg_index}:v]")
+            overlay_filters.append(
+                f"overlay=x='{x_expr}':y='{y_expr}':enable='between(t,0,{duration})'"
             )
-            last_video_stream = "[with_subs_0]"
+
+        # Combine all overlays into a single chain
+        if overlay_streams:
+            # Start with the background stream
+            overlay_chain = current_video_stream
+            for i, stream in enumerate(overlay_streams):
+                overlay_chain += f"{stream}{overlay_filters[i]}"
+                if i < len(overlay_streams) - 1:
+                    overlay_chain += f"[tmp_overlay_{i}];[tmp_overlay_{i}]"
+                else:
+                    overlay_chain += "[final_v_overlays]"
+            filter_complex_parts.append(overlay_chain)
+            current_video_stream = "[final_v_overlays]"
+        else:
+            current_video_stream = "[bg]"  # No overlays, just use the background
+
+        # Final format conversion
+        filter_complex_parts.append(f"{current_video_stream}format=yuv420p[final_v]")
 
         # --- Audio --------------------------------------------------------------
         if insert_config and insert_audio_index != -1:
@@ -454,23 +466,12 @@ class VideoRenderer:
 
         # --- Assemble & Run -----------------------------------------------------
         cmd.extend(["-filter_complex", ";".join(filter_complex_parts)])
-        cmd.extend(["-map", last_video_stream, "-map", audio_map])
+        cmd.extend(["-map", "[final_v]", "-map", audio_map])
         cmd.extend(["-t", str(duration)])
-        cmd.extend(self.h264_encoder_options)  # QSV/CPU は初期化時に選択済み
-        cmd.extend(
-            [
-                "-pix_fmt",
-                self._pix_fmt,
-                "-c:a",
-                "aac",
-                "-b:a",
-                "192k",  # 24kHz mono を使う場合は 96k 程度が妥当
-                "-r",
-                str(fps),
-                "-shortest",
-                str(output_path),
-            ]
-        )
+        cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))  # 変更
+        cmd.extend(self.audio_params.to_ffmpeg_opts())  # 変更
+        cmd.extend(["-movflags", "+faststart"])  # 追加
+        cmd.extend(["-shortest", str(output_path)])
 
         try:
             print(f"Executing FFmpeg command: {' '.join(cmd)}")
@@ -496,9 +497,9 @@ class VideoRenderer:
         line_config: Dict[str, Any],
     ) -> Optional[Path]:
         output_path = self.temp_dir / f"{output_filename}.mp4"
-        width = self.video_config.get("width", 1280)
-        height = self.video_config.get("height", 720)
-        fps = self.video_config.get("fps", 30)
+        width = self.video_params.width
+        height = self.video_params.height
+        fps = self.video_params.fps
 
         print(f"[Video] Rendering wait clip -> {output_path.name}")
 
@@ -523,31 +524,24 @@ class VideoRenderer:
 
         # 2) Silent audio
         cmd.extend(
-            ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                f"anullsrc=channel_layout=stereo:sample_rate={self.audio_params.sample_rate}",
+            ]
         )
 
         # Filters
-        filter_complex = (
-            f"[0:v]scale={width}:{height},trim=duration={duration}[final_v]"
-        )
+        filter_complex = f"[0:v]scale={width}:{height},trim=duration={duration},format=yuv420p[final_v]"
 
         cmd.extend(["-filter_complex", filter_complex])
         cmd.extend(["-map", "[final_v]", "-map", "1:a"])
         cmd.extend(["-t", str(duration)])
-        cmd.extend(self.h264_encoder_options)
-        cmd.extend(
-            [
-                "-pix_fmt",
-                self._pix_fmt,
-                "-c:a",
-                "aac",
-                "-b:a",
-                "192k",
-                "-r",
-                str(fps),
-                str(output_path),
-            ]
-        )
+        cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
+        cmd.extend(self.audio_params.to_ffmpeg_opts())
+        cmd.extend(["-movflags", "+faststart"])
+        cmd.extend(["-shortest", str(output_path)])
 
         try:
             print(f"Executing FFmpeg command: {' '.join(cmd)}")
@@ -572,9 +566,9 @@ class VideoRenderer:
         指定長でBG動画をループ書き出し。
         """
         output_path = self.temp_dir / f"{output_filename}.mp4"
-        width = self.video_config.get("width", 1280)
-        height = self.video_config.get("height", 720)
-        fps = self.video_config.get("fps", 30)
+        width = self.video_params.width
+        height = self.video_params.height
+        fps = self.video_params.fps
 
         print(f"[Video] Rendering looped background video -> {output_path.name}")
 
@@ -589,20 +583,13 @@ class VideoRenderer:
                 "-t",
                 str(duration),
                 "-vf",
-                f"scale={width}:{height}",
+                f"scale={width}:{height},format=yuv420p",
             ]
         )
-        cmd.extend(self.h264_encoder_options)
-        cmd.extend(
-            [
-                "-pix_fmt",
-                self._pix_fmt,
-                "-r",
-                str(fps),
-                "-an",
-                str(output_path),
-            ]
-        )
+        cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
+        cmd.extend(["-an"])  # 音声は不要
+        cmd.extend(["-movflags", "+faststart"])
+        cmd.extend([str(output_path)])
 
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)
@@ -618,7 +605,7 @@ class VideoRenderer:
 
     def concat_clips(self, clip_paths: List[Path], output_path: str) -> None:
         """
-        複数のクリップを concat フィルタで連結。
+        複数のクリップを -c copy で連結。
         すべての入力に音声/映像が存在し、同一パラメータである前提（本パイプラインの生成物は満たす）。
         """
         if not clip_paths:
@@ -626,45 +613,10 @@ class VideoRenderer:
             return
 
         print(
-            f"[Concat] Concatenating {len(clip_paths)} clips -> {output_path} using concat filter."
+            f"[Concat] Concatenating {len(clip_paths)} clips -> {output_path} using -c copy."
         )
-
-        cmd: List[str] = [self.ffmpeg_path, "-y"]
-        cmd.extend(self._thread_flags())
-
-        for p in clip_paths:
-            cmd.extend(["-i", str(p.resolve())])
-
-        # 映像/音声ともに0番ストリームを連結
-        filter_inputs = "".join([f"[{i}:v:0][{i}:a:0]" for i in range(len(clip_paths))])
-        filter_complex = (
-            f"{filter_inputs}concat=n={len(clip_paths)}:v=1:a=1[outv][outa]"
-        )
-
-        cmd.extend(
-            ["-filter_complex", filter_complex, "-map", "[outv]", "-map", "[outa]"]
-        )
-        cmd.extend(self.h264_encoder_options)
-        cmd.extend(
-            [
-                "-pix_fmt",
-                self._pix_fmt,
-                "-c:a",
-                "aac",
-                "-b:a",
-                "192k",
-                str(output_path),
-            ]
-        )
-
         try:
-            print(f"Executing FFmpeg command: {' '.join(cmd)}")
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
-        except subprocess.CalledProcessError as e:
-            print(f"Error during ffmpeg processing for {output_path}:")
-            print(f"STDOUT: {e.stdout}")
-            print(f"STDERR: {e.stderr}")
-            raise
+            concat_videos_copy([str(p.resolve()) for p in clip_paths], output_path)
         except Exception as e:
-            print(f"An unexpected error occurred: {e}")
+            print(f"Error during -c copy concat for {output_path}: {e}")
             raise

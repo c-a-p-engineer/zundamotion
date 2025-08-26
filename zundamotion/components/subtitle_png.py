@@ -48,6 +48,8 @@ class SubtitlePNGRenderer:
         box_color = style.get("box_color", "black@0.5")
         padding = style.get("box_padding", 10)
         max_width = style.get("max_pixel_width", 1800)  # Max width for wrapping
+        stroke_width = style.get("stroke_width", 0)
+        stroke_color = style.get("stroke_color", "black")
 
         font = ImageFont.truetype(font_path, font_size)
 
@@ -117,7 +119,14 @@ class SubtitlePNGRenderer:
                 line_w, _ = font.getsize(line)
 
             x_pos = (img_w - line_w) / 2
-            draw.text((x_pos, current_y), line, font=font, fill=font_color)
+            draw.text(
+                (x_pos, current_y),
+                line,
+                font=font,
+                fill=font_color,
+                stroke_width=stroke_width,
+                stroke_fill=stroke_color,
+            )
             current_y += line_heights[i]
 
         img.save(png_path)

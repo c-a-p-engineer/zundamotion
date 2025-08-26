@@ -11,6 +11,7 @@ from zundamotion.components.subtitle import SubtitleGenerator
 from zundamotion.components.video import VideoRenderer
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
+from zundamotion.utils.ffmpeg_utils import get_hw_encoder_kind_for_video_params  # 追加
 from zundamotion.utils.ffmpeg_utils import AudioParams, VideoParams, normalize_media
 from zundamotion.utils.logger import logger, time_log
 
@@ -28,8 +29,37 @@ class VideoPhase:
         self.cache_manager = cache_manager
         self.jobs = jobs
         self.subtitle_gen = SubtitleGenerator(self.config, self.cache_manager)
+
+        # 要件に基づいた VideoParams と AudioParams を作成
+        self.hw_kind = get_hw_encoder_kind_for_video_params()
+        self.video_params = VideoParams(
+            width=self.config.get("video", {}).get("width", 1920),
+            height=self.config.get("video", {}).get("height", 1080),
+            fps=self.config.get("video", {}).get("fps", 30),
+            pix_fmt=self.config.get("video", {}).get("pix_fmt", "yuv420p"),
+            profile=self.config.get("video", {}).get("profile", "high"),
+            level=self.config.get("video", {}).get("level", "4.2"),
+            preset=self.config.get("video", {}).get(
+                "preset", "p4" if self.hw_kind == "nvenc" else "veryfast"
+            ),
+            cq=self.config.get("video", {}).get("cq", 23),
+            crf=self.config.get("video", {}).get("crf", 23),
+        )
+        self.audio_params = AudioParams(
+            sample_rate=self.config.get("video", {}).get("audio_sample_rate", 48000),
+            channels=self.config.get("video", {}).get("audio_channels", 2),
+            codec=self.config.get("video", {}).get("audio_codec", "aac"),
+            bitrate_kbps=self.config.get("video", {}).get("audio_bitrate_kbps", 192),
+        )
+
         self.video_renderer = VideoRenderer(
-            self.config, self.temp_dir, self.cache_manager, self.jobs
+            self.config,
+            self.temp_dir,
+            self.cache_manager,
+            self.jobs,
+            hw_kind=self.hw_kind,  # 追加
+            video_params=self.video_params,  # 追加
+            audio_params=self.audio_params,  # 追加
         )
         self.video_extensions = self.config.get("system", {}).get(
             "video_extensions",
@@ -51,6 +81,9 @@ class VideoPhase:
             "transition_config": scene.get(
                 "transition"
             ),  # Add transition config to hash
+            "hw_kind": self.hw_kind,  # 追加
+            "video_params": self.video_params.__dict__,  # 追加
+            "audio_params": self.audio_params.__dict__,  # 追加
         }
 
     def run(
@@ -98,28 +131,12 @@ class VideoPhase:
 
                 scene_bg_video_path: Optional[Path] = None
                 if is_bg_video:
-                    # 正規化用のパラメータを取得
-                    video_params = VideoParams(
-                        width=self.config.get("video", {}).get("width", 1920),
-                        height=self.config.get("video", {}).get("height", 1080),
-                        fps=self.config.get("video", {}).get("fps", 30),
-                        pix_fmt=self.config.get("video", {}).get("pix_fmt", "yuv420p"),
-                    )
-                    audio_params = AudioParams(
-                        sample_rate=self.config.get("video", {}).get(
-                            "audio_sample_rate", 48000
-                        ),
-                        channels=self.config.get("video", {}).get("audio_channels", 2),
-                        bitrate_kbps=self.config.get("video", {}).get(
-                            "audio_bitrate_kbps", 192
-                        ),
-                    )
-
+                    # 正規化用のパラメータを取得 (self.video_params と self.audio_params を使用)
                     # 背景動画を正規化
                     normalized_bg_path = normalize_media(
                         input_path=Path(bg_image),
-                        video_params=video_params,
-                        audio_params=audio_params,
+                        video_params=self.video_params,  # 変更
+                        audio_params=self.audio_params,  # 変更
                         cache_manager=self.cache_manager,
                     )
 
@@ -161,6 +178,9 @@ class VideoPhase:
                             "start_time": current_scene_time,
                             "video_config": self.config.get("video", {}),
                             "line_config": line_config,
+                            "hw_kind": self.hw_kind,  # 追加
+                            "video_params": self.video_params.__dict__,  # 追加
+                            "audio_params": self.audio_params.__dict__,  # 追加
                         }
                         clip_path = self.cache_manager.get_or_create(
                             key_data=wait_cache_data,
@@ -219,6 +239,9 @@ class VideoPhase:
                             "subtitle_config": self.config.get("subtitle", {}),
                             "bgm_config": self.config.get("bgm", {}),
                             "insert_config": line_config.get("insert"),
+                            "hw_kind": self.hw_kind,  # 追加
+                            "video_params": self.video_params.__dict__,  # 追加
+                            "audio_params": self.audio_params.__dict__,  # 追加
                         }
 
                         clip_path = self.cache_manager.get_or_create(

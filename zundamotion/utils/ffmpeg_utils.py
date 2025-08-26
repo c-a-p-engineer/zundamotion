@@ -32,7 +32,11 @@ class VideoParams:
     height: int = 1080
     fps: int = 30
     pix_fmt: str = "yuv420p"
-    profile: str = "main"  # H.264/HEVC プロファイル (例: 'main', 'high')
+    profile: str = "high"  # H.264/HEVC プロファイル (例: 'main', 'high')
+    level: str = "4.2"  # H.264/HEVC レベル (例: '4.2')
+    preset: str = (
+        "medium"  # エンコーダプリセット (例: 'p4' for NVENC, 'veryfast' for libx264)
+    )
     bitrate_kbps: Optional[int] = (
         None  # ビットレート (kbps)。指定しない場合は CRF/CQ を使用
     )
@@ -45,12 +49,18 @@ class VideoParams:
 
     def to_ffmpeg_opts(self, hw_kind: Optional[str] = None) -> List[str]:
         opts: List[str] = []
+        opts.extend(["-vsync", "cfr"])  # FPS固定
         opts.extend(["-r", str(self.fps)])
         opts.extend(["-s", f"{self.width}x{self.height}"])
         opts.extend(["-pix_fmt", self.pix_fmt])
+        opts.extend(["-profile:v", self.profile])
+        opts.extend(["-level:v", self.level])
 
         if hw_kind == "nvenc":
-            opts.extend(["-profile:v", self.profile])
+            opts.extend(["-c:v", "h264_nvenc"])
+            opts.extend(
+                ["-preset", self.preset if self.preset != "medium" else "p4"]
+            )  # NVENCのデフォルトプリセットはp4
             if self.cq is not None:
                 opts.extend(["-cq", str(self.cq)])
             elif self.bitrate_kbps is not None:
@@ -58,13 +68,23 @@ class VideoParams:
             else:
                 opts.extend(["-cq", "23"])  # デフォルト
         elif hw_kind == "qsv":
+            opts.extend(["-c:v", "h264_qsv"])
             if self.global_quality is not None:
                 opts.extend(["-global_quality", str(self.global_quality)])
             elif self.bitrate_kbps is not None:
                 opts.extend(["-b:v", f"{self.bitrate_kbps}k"])
             else:
                 opts.extend(["-global_quality", "23"])  # デフォルト
-        elif hw_kind == "vaapi" or hw_kind == "amf":
+        elif hw_kind == "vaapi":
+            opts.extend(["-c:v", "h264_vaapi"])
+            if self.qp is not None:
+                opts.extend(["-qp", str(self.qp)])
+            elif self.bitrate_kbps is not None:
+                opts.extend(["-b:v", f"{self.bitrate_kbps}k"])
+            else:
+                opts.extend(["-qp", "23"])  # デフォルト
+        elif hw_kind == "amf":
+            opts.extend(["-c:v", "h264_amf"])
             if self.qp is not None:
                 opts.extend(["-qp", str(self.qp)])
             elif self.bitrate_kbps is not None:
@@ -72,11 +92,16 @@ class VideoParams:
             else:
                 opts.extend(["-qp", "23"])  # デフォルト
         elif hw_kind == "videotoolbox":
+            opts.extend(["-c:v", "h264_videotoolbox"])
             if self.bitrate_kbps is not None:
                 opts.extend(["-b:v", f"{self.bitrate_kbps}k"])
             else:
                 opts.extend(["-b:v", "5M"])  # デフォルト
         else:  # CPU
+            opts.extend(["-c:v", "libx264"])
+            opts.extend(
+                ["-preset", self.preset if self.preset != "p4" else "veryfast"]
+            )  # libx264のデフォルトプリセットはveryfast
             if self.crf is not None:
                 opts.extend(["-crf", str(self.crf)])
             elif self.bitrate_kbps is not None:
@@ -96,9 +121,9 @@ class AudioParams:
 
     def to_ffmpeg_opts(self) -> List[str]:
         opts: List[str] = []
+        opts.extend(["-c:a", self.codec])
         opts.extend(["-ar", str(self.sample_rate)])
         opts.extend(["-ac", str(self.channels)])
-        opts.extend(["-c:a", self.codec])
         opts.extend(["-b:a", f"{self.bitrate_kbps}k"])
         return opts
 
