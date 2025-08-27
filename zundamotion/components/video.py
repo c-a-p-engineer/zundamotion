@@ -228,7 +228,7 @@ class VideoRenderer:
     #         self._pix_fmt = "yuv420p"
     #         print("[Encoder] Using CPU (libx264/libx265) for video encoding.")
 
-    def render_clip(
+    async def render_clip(  # async を追加
         self,
         audio_path: Path,
         duration: float,
@@ -271,7 +271,7 @@ class VideoRenderer:
             try:
                 # 正規化（失敗時は as-is）
                 _ = get_media_info(str(bg_path))
-                bg_path = normalize_media(
+                bg_path = await normalize_media(  # await を追加
                     input_path=bg_path,
                     video_params=self.video_params,
                     audio_params=self.audio_params,
@@ -327,7 +327,7 @@ class VideoRenderer:
             if is_video:
                 try:
                     _ = get_media_info(str(insert_path))
-                    insert_path = normalize_media(
+                    insert_path = await normalize_media(  # await を追加
                         input_path=insert_path,
                         video_params=self.video_params,
                         audio_params=self.audio_params,
@@ -489,7 +489,7 @@ class VideoRenderer:
 
         return output_path
 
-    def render_wait_clip(
+    async def render_wait_clip(
         self,
         duration: float,
         background_config: Dict[str, Any],
@@ -516,7 +516,7 @@ class VideoRenderer:
             try:
                 # 正規化（失敗時は as-is）
                 _ = get_media_info(str(bg_path))
-                bg_path = normalize_media(
+                bg_path = await normalize_media(  # await を追加
                     input_path=bg_path,
                     video_params=self.video_params,
                     audio_params=self.audio_params,
@@ -574,7 +574,7 @@ class VideoRenderer:
 
         return output_path
 
-    def render_looped_background_video(
+    async def render_looped_background_video(
         self, bg_video_path_str: str, duration: float, output_filename: str
     ) -> Path:
         """
@@ -594,7 +594,7 @@ class VideoRenderer:
         try:
             # 正規化（失敗時は as-is）
             _ = get_media_info(str(bg_video_path))
-            bg_video_path = normalize_media(
+            bg_video_path = await normalize_media(  # await を追加
                 input_path=bg_video_path,
                 video_params=self.video_params,
                 audio_params=self.audio_params,
@@ -634,7 +634,7 @@ class VideoRenderer:
 
         return output_path
 
-    def concat_clips(self, clip_paths: List[Path], output_path: str) -> None:
+    async def concat_clips(self, clip_paths: List[Path], output_path: str) -> None:
         """
         複数のクリップを -c copy で連結。
         すべての入力に音声/映像が存在し、同一パラメータである前提（本パイプラインの生成物は満たす）。

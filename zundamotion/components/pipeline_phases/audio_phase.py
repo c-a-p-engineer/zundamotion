@@ -37,7 +37,7 @@ class AudioPhase:
         )  # Initialize list to store (speaker_id, text)
 
     @time_log(logger)
-    def run(
+    async def run(
         self, scenes: List[Dict[str, Any]], timeline: Timeline
     ) -> Tuple[
         Dict[str, Dict[str, Any]], List[Tuple[int, str]]
@@ -85,9 +85,11 @@ class AudioPhase:
                     )
 
                     # Generate audio and get speaker info
-                    audio_path, speaker_id, generated_text = (
-                        self.audio_gen.generate_audio(text, line, line_id)
-                    )
+                    (
+                        audio_path,
+                        speaker_id,
+                        generated_text,
+                    ) = await self.audio_gen.generate_audio(text, line, line_id)
 
                     if not audio_path:
                         raise PipelineError(

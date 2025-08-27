@@ -11,7 +11,7 @@ class SubtitleGenerator:
         self.subtitle_config = config.get("subtitle", {})
         self.png_renderer = SubtitlePNGRenderer(cache_manager)
 
-    def build_subtitle_overlay(
+    async def build_subtitle_overlay(
         self,
         text: str,
         duration: float,
@@ -29,7 +29,7 @@ class SubtitleGenerator:
         if "subtitle" in line_config and isinstance(line_config["subtitle"], dict):
             style.update(line_config["subtitle"])
 
-        png_path, dims = self.png_renderer.render(text, style)
+        png_path, dims = await self.png_renderer.render(text, style)
 
         # 位置式（あなたの置換ロジックはそのまま活かす）
         y_expr = style.get("y", "H-100").replace("H", "main_h").replace("W", "main_w")

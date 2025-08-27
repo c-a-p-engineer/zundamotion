@@ -86,7 +86,8 @@ class VideoPhase:
             "audio_params": self.audio_params.__dict__,  # 追加
         }
 
-    def run(
+    @time_log(logger)
+    async def run(
         self,
         scenes: List[Dict[str, Any]],
         line_data_map: Dict[str, Dict[str, Any]],
@@ -133,7 +134,7 @@ class VideoPhase:
                 if is_bg_video:
                     # 正規化用のパラメータを取得 (self.video_params と self.audio_params を使用)
                     # 背景動画を正規化
-                    normalized_bg_path = normalize_media(
+                    normalized_bg_path = await normalize_media(
                         input_path=Path(bg_image),
                         video_params=self.video_params,  # 変更
                         audio_params=self.audio_params,  # 変更
@@ -141,16 +142,21 @@ class VideoPhase:
                     )
 
                     scene_bg_video_filename = f"scene_bg_{scene_id}"
-                    scene_bg_video_path = (
-                        self.video_renderer.render_looped_background_video(
-                            str(normalized_bg_path),
+                    scene_bg_video_path: Optional[Path] = (
+                        await self.video_renderer.render_looped_background_video(
+                            str(normalized_bg_path),  # Pathオブジェクトを文字列に変換
                             scene_duration,
                             scene_bg_video_filename,
                         )
                     )
-                    logger.debug(
-                        f"Generated looped scene background video -> {scene_bg_video_path.name}"
-                    )
+                    if scene_bg_video_path:
+                        logger.debug(
+                            f"Generated looped scene background video -> {scene_bg_video_path.name}"
+                        )
+                    else:
+                        logger.warning(
+                            f"Failed to generate looped background video for scene {scene_id}"
+                        )
 
                 scene_line_clips: List[Path] = []
                 current_scene_time = 0.0
@@ -162,7 +168,9 @@ class VideoPhase:
 
                     background_config = {
                         "type": "video" if is_bg_video else "image",
-                        "path": str(scene_bg_video_path) if is_bg_video else bg_image,
+                        "path": (
+                            str(scene_bg_video_path) if is_bg_video else bg_image
+                        ),  # Pathオブジェクトを文字列に変換
                         "start_time": current_scene_time,
                     }
 
@@ -182,17 +190,20 @@ class VideoPhase:
                             "video_params": self.video_params.__dict__,  # 追加
                             "audio_params": self.audio_params.__dict__,  # 追加
                         }
-                        clip_path = self.cache_manager.get_or_create(
-                            key_data=wait_cache_data,
-                            file_name=line_id,
-                            extension="mp4",
-                            creator_func=lambda output_path: self.video_renderer.render_wait_clip(
+
+                        async def wait_creator_func(output_path: Path) -> Path:
+                            return await self.video_renderer.render_wait_clip(
                                 duration,
                                 background_config,
                                 output_path.stem,
                                 line_config,
                             )
-                            or output_path,
+
+                        clip_path = await self.cache_manager.get_or_create(
+                            key_data=wait_cache_data,
+                            file_name=line_id,
+                            extension="mp4",
+                            creator_func=wait_creator_func,
                         )
                         if clip_path:
                             scene_line_clips.append(clip_path)
@@ -207,14 +218,15 @@ class VideoPhase:
                         # 現在の入力ストリーム数を考慮してインデックスを決定
                         # VideoRenderer.render_clip内で動的に入力インデックスを管理するため、ここでは仮のインデックスを渡す
                         # 実際にはVideoRendererが管理する
-                        extra_subtitle_inputs, subtitle_filter_snippet = (
-                            self.subtitle_gen.build_subtitle_overlay(
-                                text,
-                                duration,
-                                line_config,
-                                "with_char",
-                                0,  # 0は仮の値、VideoRendererが調整
-                            )
+                        (
+                            extra_subtitle_inputs,
+                            subtitle_filter_snippet,
+                        ) = await self.subtitle_gen.build_subtitle_overlay(
+                            text,
+                            duration,
+                            line_config,
+                            "with_char",
+                            0,  # 0は仮の値、VideoRendererが調整
                         )
 
                         audio_cache_key_data = {
@@ -244,12 +256,11 @@ class VideoPhase:
                             "audio_params": self.audio_params.__dict__,  # 追加
                         }
 
-                        clip_path = self.cache_manager.get_or_create(
-                            key_data=video_cache_data,
-                            file_name=line_id,
-                            extension="mp4",
-                            creator_func=lambda output_path: self.video_renderer.render_clip(
-                                audio_path=audio_path,
+                        async def clip_creator_func(
+                            output_path: Path,
+                        ) -> Path:  # 戻り値の型を Path に変更
+                            clip_path = await self.video_renderer.render_clip(
+                                audio_path=audio_path,  # Pathオブジェクトのまま渡す
                                 duration=duration,
                                 background_config=background_config,
                                 characters_config=line.get("characters", []),
@@ -257,7 +268,17 @@ class VideoPhase:
                                 extra_subtitle_inputs=extra_subtitle_inputs,
                                 insert_config=line_config.get("insert"),
                             )
-                            or output_path,
+                            if clip_path is None:
+                                raise PipelineError(
+                                    f"Clip rendering failed for line: {line_id}"
+                                )
+                            return clip_path
+
+                        clip_path = await self.cache_manager.get_or_create(
+                            key_data=video_cache_data,
+                            file_name=line_id,
+                            extension="mp4",
+                            creator_func=clip_creator_func,
                         )
                         if clip_path:
                             scene_line_clips.append(clip_path)
@@ -270,7 +291,7 @@ class VideoPhase:
 
                 if scene_line_clips:
                     scene_output_path = self.temp_dir / f"scene_output_{scene_id}.mp4"
-                    self.video_renderer.concat_clips(
+                    await self.video_renderer.concat_clips(
                         scene_line_clips, str(scene_output_path)
                     )
                     logger.info(f"Concatenated scene clips -> {scene_output_path.name}")

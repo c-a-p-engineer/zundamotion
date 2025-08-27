@@ -3,7 +3,7 @@ import json
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional  # Awaitableを追加
 
 from .exceptions import CacheError
 from .utils.logger import logger
@@ -173,14 +173,14 @@ class CacheManager:
         cache_key = self._generate_hash(key_data)
         return self.cache_dir / f"{file_name}_{cache_key}.{extension}"
 
-    def get_or_create(
+    async def get_or_create(
         self,
         key_data: Dict[str, Any],
         file_name: str,
         extension: str,
         creator_func: Callable[
-            [Path], Path
-        ],  # creator_func は出力パスを受け取り、生成されたファイルのパスを返す
+            [Path], Awaitable[Path]
+        ],  # creator_func は出力パスを受け取り、生成されたファイルのパスを返す (非同期対応のためAwaitable[Path])
     ) -> Path:
         cache_key = self._generate_hash(key_data)
         cached_path = self.cache_dir / f"{file_name}_{cache_key}.{extension}"
@@ -196,7 +196,7 @@ class CacheManager:
             logger.info(
                 f"Cache disabled. Generating temporary file: {temp_output_path.name}"
             )
-            return creator_func(temp_output_path)
+            return await creator_func(temp_output_path)
 
         if self.cache_refresh and cached_path.exists():
             logger.info(
@@ -215,7 +215,7 @@ class CacheManager:
         )
         try:
             # creator_func にキャッシュパスを直接渡し、そこにファイルを生成させる
-            generated_path = creator_func(cached_path)
+            generated_path = await creator_func(cached_path)
             if generated_path != cached_path:
                 # creator_func が別のパスに生成した場合、キャッシュパスにコピー
                 shutil.copy(generated_path, cached_path)

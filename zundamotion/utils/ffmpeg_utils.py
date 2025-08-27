@@ -711,7 +711,7 @@ def generate_normalization_hash_data(
     }
 
 
-def create_silent_audio(
+async def create_silent_audio(
     output_path: str,
     duration: float,
     audio_params: AudioParams,
@@ -744,7 +744,7 @@ def create_silent_audio(
         raise
 
 
-def add_bgm_to_video(
+async def add_bgm_to_video(
     video_path: str,
     bgm_path: str,
     output_path: str,
@@ -830,7 +830,7 @@ def add_bgm_to_video(
         raise
 
 
-def apply_transition(
+async def apply_transition(
     input_video1_path: str,
     input_video2_path: str,
     output_path: str,
@@ -1031,7 +1031,7 @@ def mix_audio_tracks(
         raise
 
 
-def normalize_media(
+async def normalize_media(
     input_path: Path,
     video_params: VideoParams,
     audio_params: AudioParams,
@@ -1070,7 +1070,7 @@ def normalize_media(
 
     logger.info(f"[Cache] Normalized miss: {input_path} -> generating...")
 
-    def creator_func(output_path: Path) -> Path:
+    async def creator_func(output_path: Path) -> Path:
         input_media_info = get_media_info(str(input_path))
         has_audio = has_audio_stream(str(input_path))
 
@@ -1182,7 +1182,7 @@ def normalize_media(
             logger.error(f"FFmpeg stderr:\n{e.stderr}")
             raise
 
-    return cache_manager.get_or_create(
+    return await cache_manager.get_or_create(
         key_data=key_data,
         file_name="normalized",
         extension="mp4",

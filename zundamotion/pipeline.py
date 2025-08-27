@@ -42,7 +42,7 @@ class GenerationPipeline:
         self.audio_params = audio_params if audio_params else AudioParams()
 
     @time_log(logger)
-    def run(self, output_path: str):
+    async def run(self, output_path: str):
         """
         Executes the full video generation pipeline.
 
@@ -63,7 +63,9 @@ class GenerationPipeline:
             audio_phase = AudioPhase(
                 self.config, temp_dir, self.cache_manager, self.audio_params
             )
-            line_data_map, used_voicevox_info = audio_phase.run(scenes, self.timeline)
+            line_data_map, used_voicevox_info = await audio_phase.run(
+                scenes, self.timeline
+            )
 
             video_phase = VideoPhase(
                 self.config,
@@ -71,10 +73,12 @@ class GenerationPipeline:
                 self.cache_manager,
                 self.jobs,
             )
-            all_clips = video_phase.run(scenes, line_data_map, self.timeline)
+            all_clips = await video_phase.run(scenes, line_data_map, self.timeline)
 
             bgm_phase = BGMPhase(self.config, temp_dir)
-            final_clips_for_concat = bgm_phase.run(scenes, all_clips)
+            final_clips_for_concat = await bgm_phase.run(
+                scenes, all_clips
+            )  # await を追加
 
             finalize_phase = FinalizePhase(
                 self.config,
@@ -85,7 +89,7 @@ class GenerationPipeline:
                 self.hw_encoder,
                 self.quality,
             )
-            final_video_path = finalize_phase.run(
+            final_video_path = await finalize_phase.run(  # await を追加
                 scenes,
                 self.timeline,
                 line_data_map,
@@ -131,7 +135,7 @@ class GenerationPipeline:
             logger.info("--- Video Generation Pipeline Completed ---")
 
 
-def run_generation(
+async def run_generation(
     script_path: str,
     output_path: str,
     no_cache: bool = False,
@@ -182,4 +186,4 @@ def run_generation(
         hw_encoder=hw_encoder,
         quality=quality,
     )
-    pipeline.run(output_path)
+    await pipeline.run(output_path)

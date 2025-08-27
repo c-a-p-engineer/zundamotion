@@ -23,7 +23,7 @@ class SubtitlePNGRenderer:
         )  # Pathオブジェクトを使用
         self.subtitle_cache_dir.mkdir(exist_ok=True)  # ディレクトリ作成
 
-    def render(
+    async def render(
         self, text: str, style: Dict[str, Any]
     ) -> Tuple[Path, Dict[str, int]]:  # 戻り値の型ヒントをPathに変更
         """
@@ -43,7 +43,7 @@ class SubtitlePNGRenderer:
             "style": style,
         }
 
-        def creator_func(output_path: Path) -> Path:
+        async def creator_func(output_path: Path) -> Path:
             logger.info(
                 f"SubtitleEngine=image (cache miss), generating to {output_path.name}"
             )
@@ -140,7 +140,7 @@ class SubtitlePNGRenderer:
             return output_path
 
         # CacheManagerのget_or_createを使用
-        png_path = self.cache_manager.get_or_create(
+        png_path = await self.cache_manager.get_or_create(
             key_data=key_data,
             file_name="subtitle",
             extension="png",

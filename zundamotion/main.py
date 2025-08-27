@@ -9,12 +9,14 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+import asyncio  # Add this import
+
 from zundamotion.exceptions import ValidationError
 from zundamotion.pipeline import run_generation
 from zundamotion.utils.logger import get_logger, setup_logging
 
 
-def main():
+async def main():  # Make main function async
     """Main function to run the command line interface."""
     parser = argparse.ArgumentParser(
         description="Generate a video from a YAML script using VOICEVOX and FFmpeg."
@@ -104,7 +106,7 @@ def main():
 
     try:
         logger.info("Video generation started.")
-        run_generation(
+        await run_generation(  # Await the async run_generation function
             args.script_path,
             args.output,
             args.no_cache,
@@ -131,4 +133,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())  # Run the async main function

@@ -30,7 +30,7 @@ class AudioGenerator:
         self.audio_params = audio_params
         self.cache_manager = cache_manager  # インスタンス変数として保持
 
-    def generate_audio(
+    async def generate_audio(
         self, text: str, line_config: Dict[str, Any], output_filename: str
     ) -> tuple[Path, int, str]:  # Returns (audio_path, speaker_id, text)
         """
@@ -87,11 +87,11 @@ class AudioGenerator:
                 "audio_params": self.audio_params.__dict__,  # AudioParamsもキャッシュキーに含める
             }
 
-            def creator_func(output_path: Path) -> Path:
+            async def creator_func(output_path: Path) -> Path:
                 logger.info(
                     f"[Audio] Generating for '{text[:20]}...' with speaker_id={speaker}, speed={speed}, pitch={pitch} -> {output_path.name}"
                 )
-                generate_voice(
+                await generate_voice(
                     text=text,
                     speaker=speaker,
                     filepath=str(output_path),
@@ -101,7 +101,7 @@ class AudioGenerator:
                 )
                 return output_path
 
-            speech_wav_path = self.cache_manager.get_or_create(
+            speech_wav_path = await self.cache_manager.get_or_create(
                 key_data=voice_key_data,
                 file_name=f"{output_filename}_speech",
                 extension="wav",
@@ -116,7 +116,7 @@ class AudioGenerator:
             logger.info(
                 f"[Audio] Empty text, creating silent WAV for {speech_wav_path.name} with duration {required_speech_duration_for_ses}s"
             )
-            create_silent_audio(
+            await create_silent_audio(
                 str(speech_wav_path),
                 required_speech_duration_for_ses,
                 self.audio_params,

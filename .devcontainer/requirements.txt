@@ -4,3 +4,5 @@ pydub==0.25.1
 tqdm==4.67.1
 pysubs2==1.8.0
 Pillow==11.3.0
+httpx==0.28.1
+tenacity==9.1.2

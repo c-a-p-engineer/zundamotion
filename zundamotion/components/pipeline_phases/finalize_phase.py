@@ -45,7 +45,7 @@ class FinalizePhase:
         self.final_copy_only = final_copy_only  # 追加
 
     @time_log(logger)
-    def run(
+    async def run(  # async を追加
         self,
         scenes: List[Dict[str, Any]],
         timeline: Timeline,
@@ -67,7 +67,9 @@ class FinalizePhase:
                 "FinalizePhase: All video clips have identical parameters. Attempting -c copy concat."
             )
             try:
-                concat_videos_copy(input_video_str_paths, str(output_video_path))
+                await concat_videos_copy(
+                    input_video_str_paths, str(output_video_path)
+                )  # await を追加
                 logger.info(
                     f"FinalizePhase: Successfully concatenated videos using -c copy to {output_video_path}"
                 )
@@ -79,7 +81,9 @@ class FinalizePhase:
                     raise PipelineError(
                         "FinalizePhase: --final-copy-only is enabled, but -c copy concat failed."
                     )
-                self._reencode_concat(scene_video_paths, output_video_path)
+                await self._reencode_concat(
+                    scene_video_paths, output_video_path
+                )  # await を追加
         else:
             # パラメータ不一致時の詳細ログ
             logger.warning("FinalizePhase: Video parameters mismatch.")
@@ -102,7 +106,9 @@ class FinalizePhase:
                     "FinalizePhase: --final-copy-only is enabled, but video parameters mismatch."
                 )
             logger.warning("FinalizePhase: Falling back to re-encode concat.")
-            self._reencode_concat(scene_video_paths, output_video_path)
+            await self._reencode_concat(
+                scene_video_paths, output_video_path
+            )  # await を追加
 
         final_video_duration = get_media_duration(str(output_video_path))
         logger.info(
@@ -111,7 +117,9 @@ class FinalizePhase:
 
         return output_video_path
 
-    def _reencode_concat(self, scene_video_paths: List[Path], output_video_path: Path):
+    async def _reencode_concat(
+        self, scene_video_paths: List[Path], output_video_path: Path
+    ):  # async を追加
         """
         従来の再エンコード方式で動画を結合する。
         """

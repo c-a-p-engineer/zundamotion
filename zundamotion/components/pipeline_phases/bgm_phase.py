@@ -8,6 +8,7 @@ from zundamotion.utils.ffmpeg_utils import (
     AudioParams,
     add_bgm_to_video,
     get_audio_duration,
+    get_media_duration,
 )
 from zundamotion.utils.logger import logger, time_log
 
@@ -18,7 +19,7 @@ class BGMPhase:
         self.temp_dir = temp_dir
 
     @time_log(logger)
-    def run(
+    async def run(  # async を追加
         self,
         scenes: List[Dict[str, Any]],
         all_clips: List[Path],
@@ -52,7 +53,7 @@ class BGMPhase:
                         codec=audio_config.get("codec", "aac"),
                         bitrate_kbps=audio_config.get("bitrate_kbps", 192),
                     )
-                    add_bgm_to_video(
+                    await add_bgm_to_video(  # await を追加
                         video_path=str(scene_clip_path),
                         bgm_path=bgm_path,
                         output_path=str(scene_output_with_bgm_path),
@@ -72,7 +73,7 @@ class BGMPhase:
                             "fade_out_duration",
                             self.config.get("bgm", {}).get("fade_out_duration", 0.0),
                         ),
-                        video_duration=get_audio_duration(str(scene_clip_path)),
+                        video_duration=get_media_duration(str(scene_clip_path)),
                     )
                     final_clips_for_concat.append(scene_output_with_bgm_path)
                 else:
