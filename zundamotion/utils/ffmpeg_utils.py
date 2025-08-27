@@ -49,7 +49,7 @@ class VideoParams:
 
     def to_ffmpeg_opts(self, hw_kind: Optional[str] = None) -> List[str]:
         opts: List[str] = []
-        opts.extend(["-vsync", "cfr"])  # FPS固定
+        opts.extend(["-fps_mode", "cfr"])  # FPS固定
         opts.extend(["-r", str(self.fps)])
         opts.extend(["-s", f"{self.width}x{self.height}"])
         opts.extend(["-pix_fmt", self.pix_fmt])
@@ -58,9 +58,7 @@ class VideoParams:
 
         if hw_kind == "nvenc":
             opts.extend(["-c:v", "h264_nvenc"])
-            opts.extend(
-                ["-preset", self.preset if self.preset != "medium" else "p4"]
-            )  # NVENCのデフォルトプリセットはp4
+            opts.extend(["-preset", self.preset])
             if self.cq is not None:
                 opts.extend(["-cq", str(self.cq)])
             elif self.bitrate_kbps is not None:
@@ -99,9 +97,7 @@ class VideoParams:
                 opts.extend(["-b:v", "5M"])  # デフォルト
         else:  # CPU
             opts.extend(["-c:v", "libx264"])
-            opts.extend(
-                ["-preset", self.preset if self.preset != "p4" else "veryfast"]
-            )  # libx264のデフォルトプリセットはveryfast
+            opts.extend(["-preset", self.preset])
             if self.crf is not None:
                 opts.extend(["-crf", str(self.crf)])
             elif self.bitrate_kbps is not None:
@@ -116,15 +112,33 @@ class VideoParams:
 class AudioParams:
     sample_rate: int = 48000
     channels: int = 2
-    codec: str = "aac"
+    codec: str = "libmp3lame"  # デフォルトを libmp3lame に変更
     bitrate_kbps: int = 192
 
     def to_ffmpeg_opts(self) -> List[str]:
         opts: List[str] = []
-        opts.extend(["-c:a", self.codec])
+        actual_codec = self.codec
+        # libmp3lame が利用可能かチェックし、利用できない場合は警告
+        available_audio_encoders = _list_audio_encoders()
+        logger.debug(f"Available audio encoders: {available_audio_encoders}")
+        if "libmp3lame" not in available_audio_encoders:
+            logger.warning("libmp3lame encoder not found. Falling back to pcm_s16le.")
+            actual_codec = "pcm_s16le"  # pcm_s16le にフォールバック
+            # pcm_s16le はビットレート指定が不要なため、削除
+            # opts.extend(["-b:a", f"{self.bitrate_kbps}k"])
+        else:
+            opts.extend(
+                ["-b:a", f"{self.bitrate_kbps}k"]
+            )  # libmp3lame の場合のみビットレート指定
+
+        opts.extend(["-c:a", actual_codec])
         opts.extend(["-ar", str(self.sample_rate)])
         opts.extend(["-ac", str(self.channels)])
-        opts.extend(["-b:a", f"{self.bitrate_kbps}k"])
+
+        # libmp3lame の品質オプションを追加
+        if actual_codec == "libmp3lame":
+            opts.extend(["-q:a", "2"])  # 可変ビットレート品質 (0-9, 2は高品質)
+
         return opts
 
 
@@ -193,6 +207,23 @@ def _list_encoders(ffmpeg_path: str = "ffmpeg") -> str:
         return result.stdout.lower()
     except Exception as e:
         logger.error(f"Error listing FFmpeg encoders: {e}")
+        return ""
+
+
+def _list_audio_encoders(ffmpeg_path: str = "ffmpeg") -> str:
+    """`ffmpeg -encoders` の標準出力から音声エンコーダのみを抽出し、小文字化して返す。失敗時は空文字。"""
+    try:
+        result = _run_ffmpeg([ffmpeg_path, "-encoders"])
+        audio_encoders = []
+        for line in result.stdout.splitlines():
+            # 例: "A....D aac                  AAC (Advanced Audio Coding)"
+            # または "A....D libmp3lame           libmp3lame MP3 (MPEG audio layer 3) (codec mp3)"
+            match = re.search(r"A\.{4}D\s+(\S+)\s+.*audio encoder", line)
+            if match:
+                audio_encoders.append(match.group(1).lower())
+        return " ".join(audio_encoders)
+    except Exception as e:
+        logger.error(f"Error listing FFmpeg audio encoders: {e}")
         return ""
 
 
@@ -387,6 +418,24 @@ def get_hw_encoder_kind_for_video_params(ffmpeg_path: str = "ffmpeg") -> Optiona
             "Hardware encoding disabled by DISABLE_HWENC=1. Falling back to CPU."
         )
     else:
+        # フォールバックの具体的な理由をログに記録
+        if not is_nvenc_available(ffmpeg_path):
+            logger.info("NVENC is not available. Checking other hardware encoders...")
+            # 他のハードウェアエンコーダーのチェック結果を詳細にログに記録
+            encoders = _list_encoders(ffmpeg_path)
+            if not (" h264_qsv " in f" {encoders} " or " hevc_qsv " in f" {encoders} "):
+                logger.info("QSV encoder not found.")
+            if not (
+                " h264_vaapi " in f" {encoders} " or " hevc_vaapi " in f" {encoders} "
+            ):
+                logger.info("VAAPI encoder not found.")
+            if not (
+                " h264_videotoolbox " in f" {encoders} "
+                or " hevc_videotoolbox " in f" {encoders} "
+            ):
+                logger.info("VideoToolbox encoder not found.")
+            if not (" h264_amf " in f" {encoders} " or " hevc_amf " in f" {encoders} "):
+                logger.info("AMF encoder not found.")
         logger.info("No hardware encoder found. Falling back to CPU (libx264/libx265).")
     return hw_kind
 
@@ -1120,9 +1169,6 @@ async def normalize_media(
             logger.info(f"Using -c copy for both video and audio for {input_path}")
         elif can_copy_video:
             cmd.extend(["-c:v", "copy"])
-            cmd.extend(
-                ["-vf", f"fps={video_params.fps},setpts=PTS-STARTPTS"]
-            )  # 映像はコピーだが、FPS調整は必要
             if has_audio:
                 cmd.extend(
                     [

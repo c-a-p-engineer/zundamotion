@@ -1,7 +1,9 @@
 import json
 import logging
+import os
 import sys
 import time
+from datetime import datetime
 from functools import wraps
 from typing import Optional
 
@@ -53,23 +55,31 @@ class ProgressLogger:
         self.logger.info(f"{self.description}: Completed.")
 
 
-def setup_logging(log_json: bool = False):
+def setup_logging(log_json: bool = False, debug_mode: bool = False):
     """
     Sets up the logging configuration.
 
     Args:
         log_json (bool): If True, logs will be output in JSON format.
+        debug_mode (bool): If True, sets the log level to DEBUG.
     """
-    # Remove all existing handlers to prevent duplicate logs
+    logger = logging.getLogger("zundamotion")
+    if logger.handlers:
+        # Logger is already set up, return it
+        return logger
+
+    # Remove all existing handlers to prevent duplicate logs (important for re-runs in some environments)
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
     for logger_name in list(logging.Logger.manager.loggerDict.keys()):
-        logger = logging.getLogger(logger_name)
-        for handler in logger.handlers[:]:
-            logger.removeHandler(handler)
+        temp_logger = logging.getLogger(logger_name)
+        for handler in temp_logger.handlers[:]:
+            temp_logger.removeHandler(handler)
 
-    logger = logging.getLogger("zundamotion")
-    logger.setLevel(logging.INFO)  # Default level
+    if debug_mode:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)  # Default level
 
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
@@ -82,13 +92,29 @@ def setup_logging(log_json: bool = False):
         console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
+    # File handler
+    log_dir = "./logs"
+    os.makedirs(log_dir, exist_ok=True)
+    log_filename = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3] + ".log"
+    file_handler = logging.FileHandler(
+        os.path.join(log_dir, log_filename), encoding="utf-8"
+    )
+    if log_json:
+        file_handler.setFormatter(JsonFormatter())
+    else:
+        file_formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        file_handler.setFormatter(file_formatter)
+    logger.addHandler(file_handler)
+
     # Suppress other loggers if not in debug mode
-    if logger.level > logging.DEBUG:
+    if not debug_mode:  # debug_mode が False の場合のみ抑制
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-    # Set root logger to INFO to catch everything by default
-    logging.root.setLevel(logging.INFO)
+    # Set root logger to the same level as zundamotion logger
+    logging.root.setLevel(logger.level)
 
     # Ensure the 'progress' logger also uses the main handler
     progress_logger = logging.getLogger("progress")

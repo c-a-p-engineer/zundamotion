@@ -40,7 +40,7 @@ class VideoPhase:
             profile=self.config.get("video", {}).get("profile", "high"),
             level=self.config.get("video", {}).get("level", "4.2"),
             preset=self.config.get("video", {}).get(
-                "preset", "p4" if self.hw_kind == "nvenc" else "veryfast"
+                "preset", "p5" if self.hw_kind == "nvenc" else "veryfast"
             ),
             cq=self.config.get("video", {}).get("cq", 23),
             crf=self.config.get("video", {}).get("crf", 23),
@@ -48,7 +48,7 @@ class VideoPhase:
         self.audio_params = AudioParams(
             sample_rate=self.config.get("video", {}).get("audio_sample_rate", 48000),
             channels=self.config.get("video", {}).get("audio_channels", 2),
-            codec=self.config.get("video", {}).get("audio_codec", "aac"),
+            codec=self.config.get("video", {}).get("audio_codec", "libmp3lame"),
             bitrate_kbps=self.config.get("video", {}).get("audio_bitrate_kbps", 192),
         )
 
@@ -191,13 +191,20 @@ class VideoPhase:
                             "audio_params": self.audio_params.__dict__,  # 追加
                         }
 
-                        async def wait_creator_func(output_path: Path) -> Path:
-                            return await self.video_renderer.render_wait_clip(
+                        async def wait_creator_func(
+                            output_path: Path,
+                        ) -> Path:
+                            clip_path = await self.video_renderer.render_wait_clip(
                                 duration,
                                 background_config,
                                 output_path.stem,
                                 line_config,
                             )
+                            if clip_path is None:
+                                raise PipelineError(
+                                    f"Wait clip rendering failed for line: {line_id}"
+                                )
+                            return clip_path
 
                         clip_path = await self.cache_manager.get_or_create(
                             key_data=wait_cache_data,
@@ -258,7 +265,7 @@ class VideoPhase:
 
                         async def clip_creator_func(
                             output_path: Path,
-                        ) -> Path:  # 戻り値の型を Path に変更
+                        ) -> Path:
                             clip_path = await self.video_renderer.render_clip(
                                 audio_path=audio_path,  # Pathオブジェクトのまま渡す
                                 duration=duration,

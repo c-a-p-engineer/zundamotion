@@ -1,5 +1,6 @@
 import argparse
 import sys
+import time  # Add this import
 import traceback
 from pathlib import Path
 
@@ -9,7 +10,7 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-import asyncio  # Add this import
+import asyncio
 
 from zundamotion.exceptions import ValidationError
 from zundamotion.pipeline import run_generation
@@ -104,9 +105,11 @@ async def main():  # Make main function async
     # Ensure output directory exists
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
 
+    start_time = time.time()  # Record start time
+
     try:
         logger.info("Video generation started.")
-        await run_generation(  # Await the async run_generation function
+        await run_generation(
             args.script_path,
             args.output,
             args.no_cache,
@@ -120,15 +123,24 @@ async def main():  # Make main function async
             args.quality,
         )
         logger.info("Video generation completed successfully.")
+        end_time = time.time()  # Record end time
+        elapsed_time = end_time - start_time
+        logger.info(f"Total execution time: {elapsed_time:.2f} seconds.")
     except ValidationError as e:
+        end_time = time.time()  # Record end time even on error
+        elapsed_time = end_time - start_time
         logger.error(f"Validation Error: {e.message}")
         if e.line_number is not None:
             logger.error(f"  Line: {e.line_number}")
         if e.column_number is not None:
             logger.error(f"  Column: {e.column_number}")
+        logger.error(f"Total execution time before error: {elapsed_time:.2f} seconds.")
         sys.exit(1)
     except Exception as e:
+        end_time = time.time()  # Record end time even on error
+        elapsed_time = end_time - start_time
         logger.exception(f"An unexpected error occurred during generation: {e}")
+        logger.error(f"Total execution time before error: {elapsed_time:.2f} seconds.")
         sys.exit(1)
 
 
