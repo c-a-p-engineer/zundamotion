@@ -62,17 +62,16 @@ class FinalizePhase:
         output_video_path = self.temp_dir / "final_output.mp4"
         input_video_str_paths = [str(p.resolve()) for p in scene_video_paths]
 
-        if compare_media_params(input_video_str_paths):
+        if await compare_media_params(input_video_str_paths):
             logger.info(
                 "FinalizePhase: All video clips have identical parameters. Attempting -c copy concat."
             )
             try:
-                await concat_videos_copy(
-                    input_video_str_paths, str(output_video_path)
-                )  # await を追加
+                await concat_videos_copy(input_video_str_paths, str(output_video_path))
                 logger.info(
                     f"FinalizePhase: Successfully concatenated videos using -c copy to {output_video_path}"
                 )
+                return output_video_path  # 成功時に即座にリターン
             except Exception as e:
                 logger.warning(
                     f"FinalizePhase: Failed to concat with -c copy: {e}. Falling back to re-encode concat."
@@ -81,21 +80,19 @@ class FinalizePhase:
                     raise PipelineError(
                         "FinalizePhase: --final-copy-only is enabled, but -c copy concat failed."
                     )
-                await self._reencode_concat(
-                    scene_video_paths, output_video_path
-                )  # await を追加
+                await self._reencode_concat(scene_video_paths, output_video_path)
         else:
             # パラメータ不一致時の詳細ログ
             logger.warning("FinalizePhase: Video parameters mismatch.")
             base_info = None
             if input_video_str_paths:
-                base_info = get_media_info(input_video_str_paths[0])
+                base_info = await get_media_info(input_video_str_paths[0])
                 logger.warning(
                     f"  Base video parameters ({input_video_str_paths[0]}): {json.dumps(base_info, indent=2)}"
                 )
 
             for i, path in enumerate(input_video_str_paths[1:], start=1):
-                current_info = get_media_info(path)
+                current_info = await get_media_info(path)
                 logger.warning(
                     f"  Mismatch detected with {path}: {json.dumps(current_info, indent=2)}"
                 )
@@ -106,11 +103,9 @@ class FinalizePhase:
                     "FinalizePhase: --final-copy-only is enabled, but video parameters mismatch."
                 )
             logger.warning("FinalizePhase: Falling back to re-encode concat.")
-            await self._reencode_concat(
-                scene_video_paths, output_video_path
-            )  # await を追加
+            await self._reencode_concat(scene_video_paths, output_video_path)
 
-        final_video_duration = get_media_duration(str(output_video_path))
+        final_video_duration = await get_media_duration(str(output_video_path))
         logger.info(
             f"FinalizePhase: Final video '{output_video_path.name}' actual duration: {final_video_duration:.2f}s"
         )
@@ -127,7 +122,7 @@ class FinalizePhase:
             "FinalizePhase: Performing re-encode concat using -filter_complex concat."
         )
 
-        encoder, video_opts = get_encoder_options(self.hw_encoder, self.quality)
+        encoder, video_opts = await get_encoder_options(self.hw_encoder, self.quality)
         audio_opts = self.audio_params.to_ffmpeg_opts()
         threading_flags = _threading_flags()
 
@@ -176,5 +171,4 @@ class FinalizePhase:
             logger.error(f"FFmpeg stdout:\n{e.stdout}")
             logger.error(f"FFmpeg stderr:\n{e.stderr}")
             raise PipelineError(f"Failed to finalize video with re-encoding: {e}")
-
         return output_video_path

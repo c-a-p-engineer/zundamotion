@@ -23,48 +23,66 @@ class VideoPhase:
         temp_dir: Path,
         cache_manager: CacheManager,
         jobs: str,
+        hw_kind: Optional[str],
+        video_params: VideoParams,
+        audio_params: AudioParams,
     ):
         self.config = config
         self.temp_dir = temp_dir
         self.cache_manager = cache_manager
         self.jobs = jobs
         self.subtitle_gen = SubtitleGenerator(self.config, self.cache_manager)
+        self.hw_kind = hw_kind
+        self.video_params = video_params
+        self.audio_params = audio_params
 
-        # 要件に基づいた VideoParams と AudioParams を作成
-        self.hw_kind = get_hw_encoder_kind_for_video_params()
-        self.video_params = VideoParams(
-            width=self.config.get("video", {}).get("width", 1920),
-            height=self.config.get("video", {}).get("height", 1080),
-            fps=self.config.get("video", {}).get("fps", 30),
-            pix_fmt=self.config.get("video", {}).get("pix_fmt", "yuv420p"),
-            profile=self.config.get("video", {}).get("profile", "high"),
-            level=self.config.get("video", {}).get("level", "4.2"),
-            preset=self.config.get("video", {}).get(
-                "preset", "p5" if self.hw_kind == "nvenc" else "veryfast"
-            ),
-            cq=self.config.get("video", {}).get("cq", 23),
-            crf=self.config.get("video", {}).get("crf", 23),
-        )
-        self.audio_params = AudioParams(
-            sample_rate=self.config.get("video", {}).get("audio_sample_rate", 48000),
-            channels=self.config.get("video", {}).get("audio_channels", 2),
-            codec=self.config.get("video", {}).get("audio_codec", "libmp3lame"),
-            bitrate_kbps=self.config.get("video", {}).get("audio_bitrate_kbps", 192),
-        )
-
-        self.video_renderer = VideoRenderer(
-            self.config,
-            self.temp_dir,
-            self.cache_manager,
-            self.jobs,
-            hw_kind=self.hw_kind,  # 追加
-            video_params=self.video_params,  # 追加
-            audio_params=self.audio_params,  # 追加
-        )
         self.video_extensions = self.config.get("system", {}).get(
             "video_extensions",
             [".mp4", ".mov", ".webm", ".avi", ".mkv"],
         )
+
+    @classmethod
+    async def create(
+        cls,
+        config: Dict[str, Any],
+        temp_dir: Path,
+        cache_manager: CacheManager,
+        jobs: str,
+    ):
+        hw_kind = await get_hw_encoder_kind_for_video_params()
+        video_params = VideoParams(
+            width=config.get("video", {}).get("width", 1920),
+            height=config.get("video", {}).get("height", 1080),
+            fps=config.get("video", {}).get("fps", 30),
+            pix_fmt=config.get("video", {}).get("pix_fmt", "yuv420p"),
+            profile=config.get("video", {}).get("profile", "high"),
+            level=config.get("video", {}).get("level", "4.2"),
+            preset=config.get("video", {}).get(
+                "preset", "p5" if hw_kind == "nvenc" else "veryfast"
+            ),
+            cq=config.get("video", {}).get("cq", 23),
+            crf=config.get("video", {}).get("crf", 23),
+        )
+        audio_params = AudioParams(
+            sample_rate=config.get("video", {}).get("audio_sample_rate", 48000),
+            channels=config.get("video", {}).get("audio_channels", 2),
+            codec=config.get("video", {}).get("audio_codec", "libmp3lame"),
+            bitrate_kbps=config.get("video", {}).get("audio_bitrate_kbps", 192),
+        )
+        video_renderer = await VideoRenderer.create(
+            config,
+            temp_dir,
+            cache_manager,
+            jobs,
+            hw_kind=hw_kind,
+            video_params=video_params,
+            audio_params=audio_params,
+        )
+        instance = cls(
+            config, temp_dir, cache_manager, jobs, hw_kind, video_params, audio_params
+        )
+        instance.video_renderer = video_renderer
+        return instance
 
     def _generate_scene_hash(self, scene: Dict[str, Any]) -> Dict[str, Any]:
         """Generates a dictionary for scene hash based on its content and relevant config."""

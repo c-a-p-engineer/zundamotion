@@ -11,6 +11,7 @@ FFmpeg 7 対応のユーティリティ群（全文置き換え用）
 - 動画長取得の専用関数（`get_media_duration`）を追加（従来の `get_audio_duration` を動画に誤用しない）
 """
 
+import asyncio  # 追加
 import json
 import os
 import re
@@ -117,27 +118,13 @@ class AudioParams:
 
     def to_ffmpeg_opts(self) -> List[str]:
         opts: List[str] = []
-        actual_codec = self.codec
-        # libmp3lame が利用可能かチェックし、利用できない場合は警告
-        available_audio_encoders = _list_audio_encoders()
-        logger.debug(f"Available audio encoders: {available_audio_encoders}")
-        if "libmp3lame" not in available_audio_encoders:
-            logger.warning("libmp3lame encoder not found. Falling back to pcm_s16le.")
-            actual_codec = "pcm_s16le"  # pcm_s16le にフォールバック
-            # pcm_s16le はビットレート指定が不要なため、削除
-            # opts.extend(["-b:a", f"{self.bitrate_kbps}k"])
-        else:
-            opts.extend(
-                ["-b:a", f"{self.bitrate_kbps}k"]
-            )  # libmp3lame の場合のみビットレート指定
-
-        opts.extend(["-c:a", actual_codec])
+        # libmp3lame が確実に有効化されている前提で、直接指定
+        opts.extend(["-c:a", "libmp3lame"])
+        opts.extend(["-b:a", f"{self.bitrate_kbps}k"])
         opts.extend(["-ar", str(self.sample_rate)])
         opts.extend(["-ac", str(self.channels)])
-
-        # libmp3lame の品質オプションを追加
-        if actual_codec == "libmp3lame":
-            opts.extend(["-q:a", "2"])  # 可変ビットレート品質 (0-9, 2は高品質)
+        # libmp3lame の品質オプションを追加 (ユーザー指定のビットレートを優先するため、-q:a は削除)
+        # opts.extend(["-q:a", "2"]) # 可変ビットレート品質 (0-9, 2は高品質)
 
         return opts
 
@@ -158,32 +145,51 @@ def get_nproc_value() -> str:
         return "1"
 
 
-def _run_ffmpeg(args: List[str]) -> subprocess.CompletedProcess:
-    """ffmpeg/ffprobeを呼び出して CompletedProcess を返す（例外は上位で処理）。"""
+async def _run_ffmpeg_async(args: List[str]) -> subprocess.CompletedProcess:
+    """ffmpeg/ffprobeを非同期で呼び出して CompletedProcess を返す（例外は上位で処理）。"""
     try:
-        # FFmpeg/ffprobeのコマンドをデバッグログに出力
         logger.debug(f"Running FFmpeg command: {' '.join(args)}")
-        proc = subprocess.run(args, capture_output=True, text=True, check=True)
-        # 成功した場合も、標準エラーに何か情報があればデバッグログに出力
-        if proc.stderr:
-            logger.debug(f"FFmpeg stderr (on success):\n{proc.stderr}")
-        return proc
-    except subprocess.CalledProcessError as e:
-        # 失敗した場合は、コマンド、標準出力、標準エラーをエラーログに詳細に出力
-        logger.error(f"FFmpeg command failed with exit code {e.returncode}")
-        logger.error(f"Command: {' '.join(map(str, e.args))}")
-        if e.stdout:
-            logger.error(f"FFmpeg stdout:\n{e.stdout}")
-        if e.stderr:
-            logger.error(f"FFmpeg stderr:\n{e.stderr}")
-        # 元の例外を再送出
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        stdout_str = stdout.decode(errors="ignore")
+        stderr_str = stderr.decode(errors="ignore")
+
+        if process.returncode != 0:
+            logger.error(f"FFmpeg command failed with exit code {process.returncode}")
+            logger.error(f"Command: {' '.join(map(str, args))}")
+            if stdout_str:
+                logger.error(f"FFmpeg stdout:\n{stdout_str}")
+            if stderr_str:
+                logger.error(f"FFmpeg stderr:\n{stderr_str}")
+            raise subprocess.CalledProcessError(
+                process.returncode, args, stdout=stdout_str, stderr=stderr_str
+            )
+
+        if stderr_str:
+            logger.debug(f"FFmpeg stderr (on success):\n{stderr_str}")
+
+        return subprocess.CompletedProcess(
+            args, process.returncode, stdout_str, stderr_str
+        )
+
+    except FileNotFoundError:
+        logger.error(
+            f"FFmpeg or FFprobe command not found. Please ensure it's installed and in your PATH."
+        )
+        raise
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while running FFmpeg command: {e}")
         raise
 
 
-def get_ffmpeg_version(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
+async def get_ffmpeg_version(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
     """FFmpeg のバージョン文字列（例: '7.0.2'）を返す。失敗時 None。"""
     try:
-        result = _run_ffmpeg([ffmpeg_path, "-version"])
+        result = await _run_ffmpeg_async([ffmpeg_path, "-version"])
         m = re.search(r"ffmpeg version (\S+)", result.stdout)
         return m.group(1) if m else None
     except Exception as e:
@@ -191,8 +197,8 @@ def get_ffmpeg_version(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
         return None
 
 
-def _ffmpeg_major_version(ffmpeg_path: str = "ffmpeg") -> Optional[int]:
-    v = get_ffmpeg_version(ffmpeg_path)
+async def _ffmpeg_major_version(ffmpeg_path: str = "ffmpeg") -> Optional[int]:
+    v = await get_ffmpeg_version(ffmpeg_path)
     if not v:
         return None
     # 例: '7.0.2-...'
@@ -200,20 +206,20 @@ def _ffmpeg_major_version(ffmpeg_path: str = "ffmpeg") -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
-def _list_encoders(ffmpeg_path: str = "ffmpeg") -> str:
+async def _list_encoders(ffmpeg_path: str = "ffmpeg") -> str:
     """`ffmpeg -encoders` の標準出力（小文字化）を返す。失敗時は空文字。"""
     try:
-        result = _run_ffmpeg([ffmpeg_path, "-encoders"])
+        result = await _run_ffmpeg_async([ffmpeg_path, "-encoders"])
         return result.stdout.lower()
     except Exception as e:
         logger.error(f"Error listing FFmpeg encoders: {e}")
         return ""
 
 
-def _list_audio_encoders(ffmpeg_path: str = "ffmpeg") -> str:
+async def _list_audio_encoders(ffmpeg_path: str = "ffmpeg") -> str:
     """`ffmpeg -encoders` の標準出力から音声エンコーダのみを抽出し、小文字化して返す。失敗時は空文字。"""
     try:
-        result = _run_ffmpeg([ffmpeg_path, "-encoders"])
+        result = await _run_ffmpeg_async([ffmpeg_path, "-encoders"])
         audio_encoders = []
         for line in result.stdout.splitlines():
             # 例: "A....D aac                  AAC (Advanced Audio Coding)"
@@ -230,21 +236,28 @@ def _list_audio_encoders(ffmpeg_path: str = "ffmpeg") -> str:
 # =========================================================
 # ハードウェア検出（FFmpeg 7 向け）
 # =========================================================
-@lru_cache(maxsize=None)
-def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
+_nvenc_availability_cache: Dict[str, bool] = {}
+
+
+async def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
     """
     h264_nvencエンコーダが利用可能かスモークテストで確認する。
     0.1秒のテストエンコードを実行し、成功すればTrueを返す。
     結果はキャッシュされる。
     """
+    if ffmpeg_path in _nvenc_availability_cache:
+        return _nvenc_availability_cache[ffmpeg_path]
+
     # First, check if 'h264_nvenc' is listed in encoders (fast fail)
     try:
-        encoders = _list_encoders(ffmpeg_path)
+        encoders = await _list_encoders(ffmpeg_path)
         if "h264_nvenc" not in encoders:
             logger.info("h264_nvenc not found in `ffmpeg -encoders` list.")
+            _nvenc_availability_cache[ffmpeg_path] = False
             return False
     except Exception as e:
         logger.error(f"Error listing FFmpeg encoders: {e}")
+        _nvenc_availability_cache[ffmpeg_path] = False
         return False
 
     # Perform a smoke test
@@ -266,36 +279,34 @@ def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
     ]
     try:
         # Use a timeout to prevent hanging
-        subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=10)
+        await _run_ffmpeg_async(cmd)  # subprocess.run を _run_ffmpeg_async に変更
         logger.info("h264_nvenc smoke test successful. NVENC is available.")
+        _nvenc_availability_cache[ffmpeg_path] = True
         return True
     except subprocess.CalledProcessError as e:
         logger.warning(
             "h264_nvenc smoke test failed. NVENC is not available or not configured correctly. Falling back to CPU."
         )
         logger.debug(f"FFmpeg stderr for smoke test:\n{e.stderr}")
-        return False
-    except subprocess.TimeoutExpired:
-        logger.error("h264_nvenc smoke test timed out. Assuming it's not available.")
+        _nvenc_availability_cache[ffmpeg_path] = False
         return False
     except FileNotFoundError:
         logger.error(f"ffmpeg command not found at '{ffmpeg_path}'.")
+        _nvenc_availability_cache[ffmpeg_path] = False
         return False
     except Exception as e:
         logger.error(f"An unexpected error occurred during NVENC smoke test: {e}")
+        _nvenc_availability_cache[ffmpeg_path] = False
         return False
 
 
-def has_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
+async def has_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
     """overlay_cuda と scale_cuda が使えるかを確認"""
     try:
-        out = subprocess.run(
-            [ffmpeg_path, "-hide_banner", "-filters"],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=10,
-        ).stdout
+        result = await _run_ffmpeg_async(  # subprocess.run を _run_ffmpeg_async に変更
+            [ffmpeg_path, "-hide_banner", "-filters"]
+        )
+        out = result.stdout
         return ("overlay_cuda" in out) and (
             "scale_cuda" in out or "hwupload_cuda" in out
         )
@@ -303,17 +314,17 @@ def has_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
         return False
 
 
-def get_hardware_encoder_kind(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
+async def get_hardware_encoder_kind(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
     """
     利用可能なH.264/HEVCハードウェア「エンコーダ」を判定して返す。
     優先順位: nvenc -> qsv -> vaapi -> videotoolbox -> amf
     戻り値: 'nvenc' | 'qsv' | 'vaapi' | 'videotoolbox' | 'amf' | None
     """
     # まずNVENC (スモークテストで確認)
-    if is_nvenc_available(ffmpeg_path):
+    if await is_nvenc_available(ffmpeg_path):
         return "nvenc"
 
-    encs = _list_encoders(ffmpeg_path)
+    encs = await _list_encoders(ffmpeg_path)
 
     # 次にQSV
     if " h264_qsv " in f" {encs} " or " hevc_qsv " in f" {encs} ":
@@ -337,7 +348,7 @@ def get_hardware_encoder_kind(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
 # =========================================================
 # エンコーダオプション（FFmpeg 7 向け）
 # =========================================================
-def get_encoder_options(
+async def get_encoder_options(
     hw_encoder: str, quality: str, ffmpeg_path: str = "ffmpeg"
 ) -> Tuple[str, List[str]]:
     """
@@ -346,7 +357,7 @@ def get_encoder_options(
     :return: (エンコーダ名, ffmpegオプションのリスト)
     """
     use_nvenc = False
-    nvenc_available = is_nvenc_available(ffmpeg_path)
+    nvenc_available = await is_nvenc_available(ffmpeg_path)
 
     if hw_encoder == "auto":
         use_nvenc = nvenc_available
@@ -388,7 +399,9 @@ def get_encoder_options(
     return encoder, opts
 
 
-def get_hw_encoder_kind_for_video_params(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
+async def get_hw_encoder_kind_for_video_params(
+    ffmpeg_path: str = "ffmpeg",
+) -> Optional[str]:
     """
     VideoParams.to_ffmpeg_opts で使用するためのハードウェアエンコーダの種類を判定して返す。
     環境変数による強制設定も考慮する。
@@ -405,12 +418,12 @@ def get_hw_encoder_kind_for_video_params(ffmpeg_path: str = "ffmpeg") -> Optiona
         )
     )
 
-    hw_kind = (
-        None
-        if hw_force_off
-        else (hw_kind_env or get_hardware_encoder_kind(ffmpeg_path))
-    )
-
+    if hw_force_off:
+        hw_kind = None
+    elif hw_kind_env:
+        hw_kind = hw_kind_env
+    else:
+        hw_kind = await get_hardware_encoder_kind(ffmpeg_path)
     if hw_kind:
         logger.info(f"Using {hw_kind.upper()} for video encoding.")
     elif hw_force_off:
@@ -419,10 +432,10 @@ def get_hw_encoder_kind_for_video_params(ffmpeg_path: str = "ffmpeg") -> Optiona
         )
     else:
         # フォールバックの具体的な理由をログに記録
-        if not is_nvenc_available(ffmpeg_path):
+        if not await is_nvenc_available(ffmpeg_path):
             logger.info("NVENC is not available. Checking other hardware encoders...")
             # 他のハードウェアエンコーダーのチェック結果を詳細にログに記録
-            encoders = _list_encoders(ffmpeg_path)
+            encoders = await _list_encoders(ffmpeg_path)
             if not (" h264_qsv " in f" {encoders} " or " hevc_qsv " in f" {encoders} "):
                 logger.info("QSV encoder not found.")
             if not (
@@ -459,7 +472,7 @@ def _threading_flags(ffmpeg_path: str = "ffmpeg") -> List[str]:
 # =========================================================
 # ffprobe 系
 # =========================================================
-def get_audio_duration(file_path: str) -> float:
+async def get_audio_duration(file_path: str) -> float:
     """音声ファイルの長さ（秒, 小数2桁丸め）。"""
     try:
         cmd = [
@@ -472,7 +485,7 @@ def get_audio_duration(file_path: str) -> float:
             "json",
             file_path,
         ]
-        result = _run_ffmpeg(cmd)
+        result = await _run_ffmpeg_async(cmd)
         probe = json.loads(result.stdout)
         duration = float(probe["format"]["duration"])
         return round(duration, 2)
@@ -484,7 +497,7 @@ def get_audio_duration(file_path: str) -> float:
         raise
 
 
-def get_media_duration(file_path: str) -> float:
+async def get_media_duration(file_path: str) -> float:
     """音声/動画問わず、コンテナから長さ（秒）を取得。"""
     try:
         cmd = [
@@ -497,7 +510,7 @@ def get_media_duration(file_path: str) -> float:
             "json",
             file_path,
         ]
-        result = _run_ffmpeg(cmd)
+        result = await _run_ffmpeg_async(cmd)
         probe = json.loads(result.stdout)
         duration = float(probe["format"]["duration"])
         return round(duration, 2)
@@ -509,9 +522,7 @@ def get_media_duration(file_path: str) -> float:
         raise
 
 
-from typing import Any, Dict, List, Optional, Tuple, TypedDict
-
-# ... (既存のインポートは省略)
+# from typing import Any, Dict, List, Optional, Tuple, TypedDict # 既にインポート済み
 
 
 class VideoInfo(TypedDict, total=False):
@@ -538,7 +549,7 @@ class MediaInfo(TypedDict, total=False):
 # ... (既存の関数は省略)
 
 
-def get_media_info(file_path: str) -> MediaInfo:
+async def get_media_info(file_path: str) -> MediaInfo:
     """ffprobe 経由で動画/音声の主要なメタ情報を返す。"""
     try:
         cmd = [
@@ -550,7 +561,7 @@ def get_media_info(file_path: str) -> MediaInfo:
             "json",
             file_path,
         ]
-        result = _run_ffmpeg(cmd)
+        result = await _run_ffmpeg_async(cmd)
         info = json.loads(result.stdout)
 
         media_info: MediaInfo = {"video": None, "audio": None}
@@ -590,7 +601,7 @@ def get_media_info(file_path: str) -> MediaInfo:
         raise
 
 
-def compare_media_params(file_paths: List[str]) -> bool:
+async def compare_media_params(file_paths: List[str]) -> bool:
     """
     複数の動画ファイルの主要なパラメータ（コーデック、解像度、フレームレート、ピクセルフォーマット、
     サンプルレート、チャンネル数、チャンネルレイアウト）が全て一致するかどうかを判定する。
@@ -601,7 +612,7 @@ def compare_media_params(file_paths: List[str]) -> bool:
     base_info_val: Optional[MediaInfo] = None
     for i, path in enumerate(file_paths):
         try:
-            info = get_media_info(path)
+            info = await get_media_info(path)
             if i == 0:
                 base_info_val = info
             else:
@@ -665,7 +676,7 @@ def compare_media_params(file_paths: List[str]) -> bool:
     return True
 
 
-def concat_videos_copy(
+async def concat_videos_copy(
     input_paths: List[str], output_path: str, ffmpeg_path: str = "ffmpeg"
 ):
     """
@@ -696,7 +707,7 @@ def concat_videos_copy(
     ]
 
     try:
-        proc = _run_ffmpeg(cmd)
+        proc = await _run_ffmpeg_async(cmd)  # await を追加
         logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
         logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
         logger.info(
@@ -712,7 +723,7 @@ def concat_videos_copy(
             os.remove(list_file_path)
 
 
-def has_audio_stream(file_path: str) -> bool:
+async def has_audio_stream(file_path: str) -> bool:
     """動画に音声ストリームがあるか。"""
     try:
         cmd = [
@@ -727,7 +738,7 @@ def has_audio_stream(file_path: str) -> bool:
             "json",
             file_path,
         ]
-        result = _run_ffmpeg(cmd)
+        result = await _run_ffmpeg_async(cmd)
         probe = json.loads(result.stdout)
         return len(probe.get("streams", [])) > 0
     except subprocess.CalledProcessError as e:
@@ -784,7 +795,7 @@ async def create_silent_audio(
     cmd.extend(audio_params.to_ffmpeg_opts())
     cmd.extend([output_path])
     try:
-        _run_ffmpeg(cmd)
+        await _run_ffmpeg_async(cmd)
         logger.debug(f"Created silent audio: {output_path} ({duration}s)")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error creating silent audio file {output_path}: {e}")
@@ -811,16 +822,16 @@ async def add_bgm_to_video(
     - 映像はコピー（`-c:v copy`）で再エンコード回避
     """
     if video_duration is None:
-        video_duration = get_media_duration(video_path)
+        video_duration = await get_media_duration(video_path)
 
-    bgm_duration = get_audio_duration(bgm_path)
+    bgm_duration = await get_audio_duration(bgm_path)
     _ = min(video_duration, bgm_start_time + bgm_duration)  # 有効長（使い道があれば）
 
     cmd = [ffmpeg_path, "-y"]
     cmd.extend(_threading_flags(ffmpeg_path))
     cmd.extend(["-i", video_path, "-i", bgm_path, "-filter_complex"])
 
-    video_has_audio = has_audio_stream(video_path)
+    video_has_audio = await has_audio_stream(video_path)
 
     # BGM用フィルタ
     af = [f"volume={bgm_volume}"]
@@ -868,7 +879,7 @@ async def add_bgm_to_video(
         cmd.extend(["-shortest", output_path])
 
     try:
-        proc = _run_ffmpeg(cmd)
+        proc = await _run_ffmpeg_async(cmd)
         logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
         logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
         logger.info(f"Successfully added BGM to {video_path} -> {output_path}")
@@ -895,10 +906,10 @@ async def apply_transition(
     - デコード＆フィルタ: CPU
     - エンコード: HW（存在すれば）/ CPU
     """
-    has_a1 = has_audio_stream(input_video1_path)
-    has_a2 = has_audio_stream(input_video2_path)
+    has_a1 = await has_audio_stream(input_video1_path)
+    has_a2 = await has_audio_stream(input_video2_path)
 
-    hw_kind = get_hw_encoder_kind_for_video_params(ffmpeg_path)
+    hw_kind = await get_hw_encoder_kind_for_video_params(ffmpeg_path)
     video_opts = video_params.to_ffmpeg_opts(hw_kind)
     audio_opts = audio_params.to_ffmpeg_opts()
 
@@ -945,7 +956,7 @@ async def apply_transition(
     cmd.extend([output_path])
 
     try:
-        proc = _run_ffmpeg(cmd)
+        proc = await _run_ffmpeg_async(cmd)
         logger.debug("FFmpeg stdout:\n%s", proc.stdout)
         logger.debug("FFmpeg stderr:\n%s", proc.stderr)
         logger.info(
@@ -1028,10 +1039,11 @@ def calculate_overlay_position(
     return x_expr, y_expr
 
 
-def mix_audio_tracks(
+async def mix_audio_tracks(
     audio_tracks: List[Tuple[str, float, float]],
     output_path: str,
     total_duration: float,
+    audio_params: AudioParams,  # audio_params を追加
     ffmpeg_path: str = "ffmpeg",
 ):
     """
@@ -1059,8 +1071,12 @@ def mix_audio_tracks(
             [
                 "-c:a",
                 "libmp3lame",  # MP3コーデックを使用
-                "-q:a",
-                "2",  # 可変ビットレート品質 (0-9, 2は高品質)
+                "-b:a",
+                f"{audio_params.bitrate_kbps}k",  # AudioParams のビットレートを使用
+                "-ar",
+                str(audio_params.sample_rate),
+                "-ac",
+                str(audio_params.channels),
                 "-t",
                 str(total_duration),
                 output_path,
@@ -1068,7 +1084,7 @@ def mix_audio_tracks(
         )
 
         logger.debug(f"FFmpeg command: {' '.join(cmd)}")
-        proc = _run_ffmpeg(cmd)
+        proc = await _run_ffmpeg_async(cmd)
         logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
         logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
         logger.info(f"Successfully mixed audio tracks to {output_path}")
@@ -1102,7 +1118,7 @@ async def normalize_media(
         "file_mtime": file_mtime,
         "video_params": video_params.__dict__,
         "audio_params": audio_params.__dict__,
-        "ffmpeg_version": get_ffmpeg_version(
+        "ffmpeg_version": await get_ffmpeg_version(
             ffmpeg_path
         ),  # FFmpegのバージョンもハッシュに含める
     }
@@ -1120,8 +1136,8 @@ async def normalize_media(
     logger.info(f"[Cache] Normalized miss: {input_path} -> generating...")
 
     async def creator_func(output_path: Path) -> Path:
-        input_media_info = get_media_info(str(input_path))
-        has_audio = has_audio_stream(str(input_path))
+        input_media_info = await get_media_info(str(input_path))
+        has_audio = await has_audio_stream(str(input_path))
 
         # コピーモードが利用可能かチェック
         can_copy_video = False
@@ -1186,7 +1202,7 @@ async def normalize_media(
                 ["-af", f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"]
             )  # 音声はコピーだが、サンプルレート調整は必要
             cmd.extend(["-vf", f"fps={video_params.fps},setpts=PTS-STARTPTS"])
-            hw_kind = get_hw_encoder_kind_for_video_params(ffmpeg_path)
+            hw_kind = await get_hw_encoder_kind_for_video_params(ffmpeg_path)
             cmd.extend(video_params.to_ffmpeg_opts(hw_kind))
             logger.info(f"Using -c:a copy for audio for {input_path}")
         else:
@@ -1194,7 +1210,7 @@ async def normalize_media(
             video_filter = f"fps={video_params.fps},setpts=PTS-STARTPTS"
             audio_filter = f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"
 
-            hw_kind = get_hw_encoder_kind_for_video_params(ffmpeg_path)
+            hw_kind = await get_hw_encoder_kind_for_video_params(ffmpeg_path)
             video_opts = video_params.to_ffmpeg_opts(hw_kind)
             audio_opts = audio_params.to_ffmpeg_opts()
 
@@ -1212,7 +1228,7 @@ async def normalize_media(
         cmd.extend([str(output_path)])
 
         try:
-            _run_ffmpeg(cmd)
+            await _run_ffmpeg_async(cmd)
             if Path(output_path).exists():
                 logger.info(
                     f"Successfully normalized {input_path} to {output_path} (file exists)."

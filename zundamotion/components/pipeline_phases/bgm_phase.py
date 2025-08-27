@@ -73,7 +73,7 @@ class BGMPhase:
                             "fade_out_duration",
                             self.config.get("bgm", {}).get("fade_out_duration", 0.0),
                         ),
-                        video_duration=get_media_duration(str(scene_clip_path)),
+                        video_duration=await get_media_duration(str(scene_clip_path)),
                     )
                     final_clips_for_concat.append(scene_output_with_bgm_path)
                 else:

@@ -1,5 +1,5 @@
 # =========================================================
-# CUDA + FFmpeg(prebuilt NVENC) + Python3.13（Ubuntu 22.04）
+# CUDA + FFmpeg (NVENC + libmp3lame) + Python3.13（Ubuntu 22.04）
 # =========================================================
 FROM nvidia/cuda:13.0.0-devel-ubuntu22.04
 
@@ -10,14 +10,14 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y \
     curl unzip git xz-utils ca-certificates \
- && apt-get clean
+ && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------
 # 日本語フォント（IPAゴシック）
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y \
     fonts-ipafont-gothic \
- && apt-get clean
+ && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------
 # Python 3.13
@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
     python3.13 python3.13-venv python3.13-dev \
- && apt-get clean
+ && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------
 # venv / pip
@@ -39,6 +39,7 @@ RUN python3.13 -m ensurepip --upgrade \
  && /opt/pyenv/bin/pip install --no-cache-dir --upgrade pip
 
 ENV PATH="/opt/pyenv/bin:${PATH}"
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
 # ---------------------------------------------------------
 # Python パッケージ
@@ -48,13 +49,15 @@ RUN pip install --upgrade pip \
  && pip install --no-cache-dir -r requirements.txt
 
 # ---------------------------------------------------------
-# FFmpeg（NVENC対応）: 事前ビルドを展開してパスを通す（最速）
-#   ※ 実行時は Driver 570+ & NVIDIA Container Toolkit 必須
-#   ※ バージョン固定したい場合は build-arg で上書き可
-#      例) --build-arg FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/2025-08-20/ffmpeg-n8.0-linux64-gpl-shared-8.0.tar.xz
+# FFmpeg（NVENC + libmp3lame 対応）: BtbNの事前ビルドで高速導入
+#   ※ Driver 525+ & NVIDIA Container Toolkit 必須
 # ---------------------------------------------------------
-# FFmpeg（NVENC対応）: 事前ビルドを展開してパスを通す
 ARG FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl-shared.tar.xz"
+
+# 依存は最小限（mp3lameライブラリを保険で導入）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libmp3lame0 \
+  && rm -rf /var/lib/apt/lists/*
 
 RUN curl -L -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" \
  && mkdir -p /opt/ffmpeg \
@@ -63,14 +66,16 @@ RUN curl -L -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" \
  && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
  && rm -f /tmp/ffmpeg.tar.xz
 
-# 共有ライブラリの検索パスを通す
+# 共有ライブラリの検索パス
 ENV LD_LIBRARY_PATH="/opt/ffmpeg/lib:${LD_LIBRARY_PATH}"
 RUN echo "/opt/ffmpeg/lib" > /etc/ld.so.conf.d/ffmpeg.conf && ldconfig
 
-# NVENC の存在確認
-RUN ffmpeg -hide_banner -encoders | grep -E 'h264_nvenc|hevc_nvenc'
-# --- ここまで置換 -------------------------------
-
+# NVENC と libmp3lame の存在確認
+RUN set -eux; \
+  ffmpeg -hide_banner -encoders | grep -E 'h264_nvenc|hevc_nvenc' >/dev/null; \
+  ffmpeg -hide_banner -encoders | grep -i 'libmp3lame' >/dev/null; \
+  ffmpeg -hide_banner -encoders | grep -E 'h264_nvenc|hevc_nvenc'; \
+  ffmpeg -hide_banner -encoders | grep -i 'libmp3lame'
 
 # ---------------------------------------------------------
 # ワークスペース

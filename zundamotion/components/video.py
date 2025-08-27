@@ -28,6 +28,7 @@ class VideoRenderer:
         hw_kind: Optional[str] = None,
         video_params: Optional[VideoParams] = None,
         audio_params: Optional[AudioParams] = None,
+        has_cuda_filters: bool = False,
     ):
         self.config = config
         self.temp_dir = temp_dir
@@ -40,13 +41,37 @@ class VideoRenderer:
         self.hw_kind = hw_kind
         self.video_params = video_params or VideoParams()
         self.audio_params = audio_params or AudioParams()
+        self.has_cuda_filters = has_cuda_filters
 
-        # CUDA フィルタ可用性
-        self.has_cuda_filters = has_cuda_filters(self.ffmpeg_path)
         if self.has_cuda_filters:
             print("[Encoder] CUDA filters (scale_cuda, overlay_cuda) are available.")
         else:
             print("[Encoder] CUDA filters are not available. Using CPU filters.")
+
+    @classmethod
+    async def create(
+        cls,
+        config: Dict[str, Any],
+        temp_dir: Path,
+        cache_manager: CacheManager,
+        jobs: str = "0",
+        hw_kind: Optional[str] = None,
+        video_params: Optional[VideoParams] = None,
+        audio_params: Optional[AudioParams] = None,
+    ):
+        has_cuda_filters_val = await has_cuda_filters(
+            config.get("ffmpeg_path", "ffmpeg")
+        )
+        return cls(
+            config,
+            temp_dir,
+            cache_manager,
+            jobs,
+            hw_kind,
+            video_params,
+            audio_params,
+            has_cuda_filters_val,
+        )
 
     # --------------------------
     # 内部ユーティリティ
@@ -626,7 +651,9 @@ class VideoRenderer:
             f"[Concat] Concatenating {len(clip_paths)} clips -> {output_path} using -c copy."
         )
         try:
-            concat_videos_copy([str(p.resolve()) for p in clip_paths], output_path)
+            await concat_videos_copy(
+                [str(p.resolve()) for p in clip_paths], output_path
+            )
         except Exception as e:
             print(f"[Error] -c copy concat failed for {output_path}: {e}")
             raise

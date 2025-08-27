@@ -54,7 +54,7 @@ class AudioGenerator:
             for se in sound_effects:
                 se_path = se["path"]
                 se_start_time = se.get("start_time", 0.0)
-                se_duration = get_audio_duration(se_path)
+                se_duration = await get_audio_duration(se_path)
                 required_speech_duration_for_ses = max(
                     required_speech_duration_for_ses, se_start_time + se_duration
                 )
@@ -107,7 +107,7 @@ class AudioGenerator:
                 extension="wav",
                 creator_func=creator_func,
             )
-            speech_duration = get_audio_duration(str(speech_wav_path))
+            speech_duration = await get_audio_duration(str(speech_wav_path))
         else:
             # If text is empty, create a silent WAV file with duration based on SEs
             speech_wav_path = speech_wav_path_base.with_suffix(
@@ -148,13 +148,16 @@ class AudioGenerator:
             se_start_time = se.get("start_time", 0.0)
             se_volume = se.get("volume", 0.0)  # Corrected default volume
             audio_tracks_to_mix.append((se_path, se_start_time, se_volume))
-            se_duration = get_audio_duration(se_path)
+            se_duration = await get_audio_duration(se_path)
             max_end_time = max(max_end_time, se_start_time + se_duration)
 
         # Mix all audio tracks
         mixed_wav_path = self.temp_dir / f"{output_filename}_mixed.wav"
-        mix_audio_tracks(
-            audio_tracks_to_mix, str(mixed_wav_path), total_duration=max_end_time
+        await mix_audio_tracks(
+            audio_tracks_to_mix,
+            str(mixed_wav_path),
+            total_duration=max_end_time,
+            audio_params=self.audio_params,
         )
 
         return mixed_wav_path, speaker, text

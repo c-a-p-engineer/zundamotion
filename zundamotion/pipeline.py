@@ -67,7 +67,7 @@ class GenerationPipeline:
                 scenes, self.timeline
             )
 
-            video_phase = VideoPhase(
+            video_phase = await VideoPhase.create(
                 self.config,
                 temp_dir,
                 self.cache_manager,
