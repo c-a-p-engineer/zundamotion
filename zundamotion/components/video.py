@@ -456,7 +456,8 @@ class VideoRenderer:
             )
 
         # --- Audio --------------------------------------------------------------
-        has_speech_audio = has_audio_stream(str(audio_path))
+        # has_audio_stream is async; ensure we await it to get a boolean
+        has_speech_audio = await has_audio_stream(str(audio_path))
 
         if insert_config and insert_audio_index != -1:
             volume = float(insert_config.get("volume", 1.0))

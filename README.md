@@ -246,8 +246,9 @@ lines:
 
 ## 🗣 VOICEVOX エンジン
 
-DevContainer起動時にDocker ComposeによってVOICEVOXエンジンが自動的に起動し、`voicevox:50021`で利用可能になります。
-**重要**: ローカル環境からアクセスする場合は`localhost:50021`ではなく、必ず`voicevox:50021`を指定してください。
+DevContainer起動時にDocker ComposeによってVOICEVOXエンジンが自動的に起動し、コンテナ内からは `voicevox:50021` で利用可能です。
+ローカル環境（コンテナ外）からアクセスする場合は、通常 `http://127.0.0.1:50021` を使用してください。
+必要に応じて環境変数 `VOICEVOX_URL` で接続先を上書きできます（例: DevContainer内では `http://voicevox:50021`）。
 
 ---
 
