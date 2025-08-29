@@ -4,11 +4,13 @@
 
 ## P0（必須・最優先）
 
-### 01. VideoRendererの非同期バグ修正（has_audio_streamのawait漏れ）
+### 01. time_logデコレータの非同期対応（誤った0.00秒計測の是正）
 
-* 背景: `zundamotion/components/video.py` の `render_clip` 内で `has_audio_stream()`（async）がawaitされておらず、常に真として扱われる可能性がある。
-* ゴール: `await has_audio_stream(...)` として正しく判定し、無音生成/ミックス分岐を正しく行う。
-* 確認方法: 挿入動画のみ・音声なしのケースで無音生成への分岐が正しく働く（実装済み）。
+- 背景: `@time_log` が `async def` を同期関数として包んでおり、即座にコルーチンを返すため開始/終了ログが実処理前後に対応せず、`Duration: 0.00 seconds` となる。
+- 影響: `GenerationPipeline.run`、`AudioPhase.run`、`VideoPhase.run`、`BGMPhase.run`、`FinalizePhase.run` の時間計測とログの整合性が崩れる。
+- 対応: デコレータでコルーチン関数を検出し、`async def wrapper` にして `await func(*)` を実行。計測に `time.monotonic()` を使用。
+- 確認: `logs/20250829_112339_645.log:4-9, 41-45` のような 0.00 秒表記が実時間（例: `VideoPhase completed in 184.98 seconds.` と一致）に是正される。
+
 
 ### 02. 正規化キャッシュの自己再正規化防止
 
@@ -34,6 +36,14 @@
 * ゴール: プロセス内で1回だけテストし、結果をキャッシュ利用。
 * 実装イメージ: モジュールスコープキャッシュ（既に `_nvenc_availability_cache` あり）を徹底活用、重複起動箇所がないか確認。
 * 確認方法: ログでスモークテストが最初の1回のみ表示。
+
+### 05. 正規化でのNVENC失敗時フォールバック（libx264再試行）
+
+- 背景: 正規化処理で `h264_nvenc` を選択し失敗（exit code 234）しているが、自動フォールバックがなく ERROR で途切れる箇所がある。
+- 兆候: `logs/20250829_112339_645.log:66-68` にて `assets/bg/countdown.mp4` 正規化時に `-c:v h264_nvenc` で失敗。
+- 対応: `CacheManager.get_or_create_normalized_video` 実行中に FFmpeg 失敗を捕捉し、`h264_nvenc` → `libx264` へ自動置換したコマンドで1回だけ再試行。警告ログも付与。
+- 代替/将来: 旧経路（`build_normalize_cmd_async`）を撤廃し、`normalize_media`（HW検出とオプション統一済み）へ移行。
+- 確認: 同一素材でエラーが出ず、正規化完了ログが出る。
 
 ## P1（重要・中期）
 
@@ -78,6 +88,25 @@
 * ゴール: `--final-copy-only`（仮）で `-c copy` 失敗時は即エラー終了。
 
 ### 12. 字幕フォントのフェイルセーフ
+
+### 13. Insertメディア正規化経路の統一（重複ロジック解消）
+
+- 背景: Insertメディアの正規化で `CacheManager.get_or_create_normalized_video`（旧実装）を使用、他方で背景等は `normalize_media` を使用しており二重実装になっている。
+- 影響: エンコーダ選択/プリセット/音声オプションの不一致やNVENC失敗時の挙動差。
+- 対応: `components/video.py` 内の insert 正規化呼び出しを `normalize_media` に置き換え、HW検出とエンコード方針を統一。
+- 確認: 正規化コマンドの一貫性（ログ）と失敗時のフォールバック挙動が統一される。
+
+### 14. VideoPhaseの並列度制御と実測短縮
+
+- 背景: `VideoPhase` 全体で約 185 秒を要している（`logs/...:84`）。クリップ生成が直列に近く、I/OとCPUの待ちが目立つ可能性。
+- 対応: 字幕PNG生成とFFmpegクリップ合成の並列実行を上限付きで導入（例: `asyncio.Semaphore` で同時N本まで）。メトリクスを取り、p95短縮を確認。
+- 確認: クリップあたり平均時間・p95が改善し、全体時間が短縮。
+
+### 15. `--no-cache` 時の一時出力先を `temp_dir` へ集約
+
+- 背景: `Cache disabled. Generating temporary file: temp_...` が `cache/` 配下に出力され混乱を招く。
+- 対応: `no_cache=True` の場合は一時ファイルを `temp_dir`（パイプラインのワーキング一時ディレクトリ）配下に生成。ログにも出力先の種別を明示。
+- 確認: キャッシュと一時のディレクトリ/ログ表現が明確に分かれる。
 
 * 背景: 指定フォントが存在しない環境で失敗する可能性。
 * ゴール: `SubtitlePNGRenderer` でフォントパスが無効な場合のフォールバック（システム標準）を追加。
