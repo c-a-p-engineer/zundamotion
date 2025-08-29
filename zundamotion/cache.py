@@ -420,6 +420,33 @@ class CacheManager:
         force_refresh: bool = False,
         no_cache: bool = False,
     ) -> Path:
+        # 既に当プロセスで正規化済みの一時キャッシュ（temp_normalized_*.mp4）の再正規化を避ける
+        # - メタ情報が存在し、かつ target_spec が一致する場合は即返す
+        try:
+            if (
+                input_path.is_file()
+                and input_path.parent.resolve() == self.cache_dir.resolve()
+                and input_path.name.startswith("temp_normalized_")
+                and input_path.suffix.lower() == ".mp4"
+            ):
+                meta_candidate = input_path.with_name(
+                    input_path.stem + ".meta.json"
+                )
+                if meta_candidate.exists():
+                    with open(meta_candidate, "r", encoding="utf-8") as f:
+                        meta_obj = json.load(f)
+                    cached_spec = meta_obj.get("target_spec")
+                    # no_cache であっても自己再正規化は避ける（ループ防止）
+                    if cached_spec == target_spec and not force_refresh:
+                        logger.info(
+                            f"[Cache] Normalized reuse: {input_path} (already matches target spec)"
+                        )
+                        return input_path
+        except Exception as e:
+            logger.debug(
+                f"Skip pre-check for already-normalized input due to error: {e}"
+            )
+
         h = self._hash_for_normalized(input_path, target_spec)
         p = self._paths_for_hash(h)
         out_mp4, meta_json, lock_file = p["out"], p["meta"], p["lock"]

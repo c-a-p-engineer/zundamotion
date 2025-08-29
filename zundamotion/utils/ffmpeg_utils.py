@@ -1220,6 +1220,45 @@ async def normalize_media(
     背景・挿入動画を指定されたパラメータに正規化し、キャッシュする。
     キャッシュがHITすれば、変換処理をスキップしてキャッシュパスを返す。
     """
+    # 既に当プロジェクトの正規化キャッシュ（temp_normalized_*.mp4）が入力の場合、自己再正規化を避ける
+    try:
+        if (
+            input_path.is_file()
+            and hasattr(cache_manager, "cache_dir")
+            and input_path.parent.resolve() == cache_manager.cache_dir.resolve()
+            and input_path.name.startswith("temp_normalized_")
+            and input_path.suffix.lower() == ".mp4"
+        ):
+            # VideoParams/AudioParams から target_spec へ変換し、メタの target_spec と比較
+            target_spec = {
+                "video": {
+                    "width": int(video_params.width),
+                    "height": int(video_params.height),
+                    "fps": int(video_params.fps),
+                    "pix_fmt": video_params.pix_fmt,
+                    "codec": "h264",  # normalize 側は h264 を基本に正規化
+                },
+                "audio": {
+                    "sr": int(audio_params.sample_rate),
+                    "ch": int(audio_params.channels),
+                    "codec": audio_params.codec,
+                },
+            }
+
+            meta_candidate = input_path.with_name(input_path.stem + ".meta.json")
+            if meta_candidate.exists():
+                with open(meta_candidate, "r", encoding="utf-8") as f:
+                    meta_obj = json.load(f)
+                cached_spec = meta_obj.get("target_spec")
+                if cached_spec == target_spec:
+                    logger.info(
+                        f"[Cache] Skipping re-normalization for cached normalized file: {input_path}"
+                    )
+                    return input_path
+    except Exception as e:
+        logger.debug(
+            f"Skip pre-check for already-normalized input due to error: {e}"
+        )
     # 入力ファイルのサイズと最終更新時刻を取得
     file_stat = input_path.stat()
     file_size = file_stat.st_size
