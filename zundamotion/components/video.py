@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..cache import CacheManager
+from ..exceptions import PipelineError  # 追加
+from ..utils.ffmpeg_utils import _run_ffmpeg_async  # 追加
 from ..utils.ffmpeg_utils import (
     AudioParams,
     VideoParams,
@@ -155,26 +157,52 @@ class VideoRenderer:
         if background_config.get("type") == "video":
             try:
                 # 正規化（失敗時は as-is）
-                _ = get_media_info(str(bg_path))
-                bg_path = await normalize_media(
-                    input_path=bg_path,
-                    video_params=self.video_params,
-                    audio_params=self.audio_params,
-                    cache_manager=self.cache_manager,
+                try:
+                    key_data = {
+                        "input_path": str(bg_path.resolve()),
+                        "video_params": self.video_params.__dict__,
+                        "audio_params": self.audio_params.__dict__,
+                    }
+
+                    async def _normalize_bg_creator(temp_output_path: Path) -> Path:
+                        return await normalize_media(
+                            input_path=bg_path,
+                            video_params=self.video_params,
+                            audio_params=self.audio_params,
+                            cache_manager=self.cache_manager,
+                            ffmpeg_path=self.ffmpeg_path,
+                        )
+
+                    # cache_manager.get_or_create は Path を返すことを期待
+                    bg_path_result = await self.cache_manager.get_or_create(
+                        key_data=key_data,
+                        file_name="normalized_bg",
+                        extension="mp4",
+                        creator_func=_normalize_bg_creator,
+                    )
+                    if bg_path_result is None:
+                        raise PipelineError(
+                            f"Failed to normalize background video: {bg_path}"
+                        )
+                    bg_path = bg_path_result
+                except Exception as e:
+                    print(
+                        f"[Warning] Could not inspect/normalize BG video {bg_path.name}: {e}. Using as-is."
+                    )
+                cmd.extend(
+                    [
+                        "-ss",
+                        str(background_config.get("start_time", 0.0)),
+                        "-i",
+                        str(bg_path),
+                    ]
                 )
-            except Exception as e:
+            except Exception as e:  # 外側の try に対応する except を追加
                 print(
-                    f"[Warning] Could not inspect/normalize BG video {bg_path.name}: {e}. Using as-is."
+                    f"[Warning] Failed to process background video: {e}. Falling back to image loop."
                 )
-            cmd.extend(
-                [
-                    "-ss",
-                    str(background_config.get("start_time", 0.0)),
-                    "-i",
-                    str(bg_path),
-                ]
-            )
-        else:
+                cmd.extend(["-loop", "1", "-i", str(bg_path)])
+        else:  # if background_config.get("type") == "video": の else
             cmd.extend(["-loop", "1", "-i", str(bg_path)])
         input_layers.append({"type": "video", "index": len(input_layers)})
 
@@ -214,12 +242,27 @@ class VideoRenderer:
             ]
             if not insert_is_image:
                 try:
-                    _ = get_media_info(str(insert_path))
-                    insert_path = await normalize_media(
-                        input_path=insert_path,
-                        video_params=self.video_params,
-                        audio_params=self.audio_params,
-                        cache_manager=self.cache_manager,
+                    insert_path = (
+                        await self.cache_manager.get_or_create_normalized_video(
+                            input_path=insert_path,
+                            target_spec={
+                                "video": {
+                                    "width": self.video_params.width,
+                                    "height": self.video_params.height,
+                                    "fps": self.video_params.fps,
+                                    "pix_fmt": self.video_params.pix_fmt,
+                                    "codec": "h264",  # または適切なコーデック
+                                },
+                                "audio": {
+                                    "sr": self.audio_params.sample_rate,
+                                    "ch": self.audio_params.channels,
+                                    "codec": self.audio_params.codec,
+                                },
+                            },
+                            prefer_copy=True,
+                            force_refresh=self.cache_manager.cache_refresh,
+                            no_cache=self.cache_manager.no_cache,
+                        )
                     )
                 except Exception as e:
                     print(
@@ -230,7 +273,7 @@ class VideoRenderer:
                 cmd.extend(["-loop", "1", "-i", str(insert_path.resolve())])
             insert_ffmpeg_index = len(input_layers)
             input_layers.append({"type": "video", "index": insert_ffmpeg_index})
-            if not insert_is_image and has_audio_stream(str(insert_path)):
+            if not insert_is_image and await has_audio_stream(str(insert_path)):
                 insert_audio_index = insert_ffmpeg_index
 
         # 4) Characters (optional)
@@ -450,7 +493,7 @@ class VideoRenderer:
 
         try:
             print(f"Executing FFmpeg command:\n{' '.join(cmd)}")
-            process = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            process = await _run_ffmpeg_async(cmd)
             if process.stderr:
                 # warning ログも拾っておく
                 print(process.stderr.strip())
@@ -502,25 +545,47 @@ class VideoRenderer:
         if background_config.get("type") == "video":
             try:
                 # 正規化（失敗時は as-is）
-                _ = get_media_info(str(bg_path))
-                bg_path = await normalize_media(
-                    input_path=bg_path,
-                    video_params=self.video_params,
-                    audio_params=self.audio_params,
-                    cache_manager=self.cache_manager,
+                try:
+                    key_data = {
+                        "input_path": str(bg_path.resolve()),
+                        "video_params": self.video_params.__dict__,
+                        "audio_params": self.audio_params.__dict__,
+                    }
+
+                    async def _normalize_bg_creator_wait(
+                        temp_output_path: Path,
+                    ) -> Path:
+                        return await normalize_media(
+                            input_path=bg_path,
+                            video_params=self.video_params,
+                            audio_params=self.audio_params,
+                            cache_manager=self.cache_manager,
+                            ffmpeg_path=self.ffmpeg_path,
+                        )
+
+                    bg_path = await self.cache_manager.get_or_create(
+                        key_data=key_data,
+                        file_name="normalized_bg",
+                        extension="mp4",
+                        creator_func=_normalize_bg_creator_wait,
+                    )
+                except Exception as e:
+                    print(
+                        f"[Warning] Could not inspect/normalize BG video {bg_path.name}: {e}. Using as-is."
+                    )
+                cmd.extend(
+                    [
+                        "-ss",
+                        str(background_config.get("start_time", 0.0)),
+                        "-i",
+                        str(bg_path),
+                    ]
                 )
             except Exception as e:
                 print(
-                    f"[Warning] Could not inspect/normalize BG video {bg_path.name}: {e}. Using as-is."
+                    f"[Warning] Failed to process background video: {e}. Falling back to image loop."
                 )
-            cmd.extend(
-                [
-                    "-ss",
-                    str(background_config.get("start_time", 0.0)),
-                    "-i",
-                    str(bg_path),
-                ]
-            )
+                cmd.extend(["-loop", "1", "-i", str(bg_path)])
         else:
             cmd.extend(["-loop", "1", "-i", str(bg_path)])
 
@@ -547,11 +612,13 @@ class VideoRenderer:
 
         try:
             print(f"Executing FFmpeg command:\n{' '.join(cmd)}")
-            process = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            process = await _run_ffmpeg_async(cmd)
             if process.stderr:
                 print(process.stderr.strip())
         except subprocess.CalledProcessError as e:
-            print(f"[Error] ffmpeg failed for {output_filename}")
+            print(
+                f"[Error] ffmpeg failed for looped background video {output_filename}"
+            )
             print("---- FFmpeg STDERR ----")
             print((e.stderr or "").strip())
             print("---- FFmpeg STDOUT ----")
@@ -589,14 +656,28 @@ class VideoRenderer:
         cmd.extend(self._thread_flags())
 
         bg_video_path = Path(bg_video_path_str)
+        # 正規化（失敗時は as-is）
         try:
-            # 正規化（失敗時は as-is）
-            _ = get_media_info(str(bg_video_path))
-            bg_video_path = await normalize_media(
-                input_path=bg_video_path,
-                video_params=self.video_params,
-                audio_params=self.audio_params,
-                cache_manager=self.cache_manager,
+            key_data = {
+                "input_path": str(bg_video_path.resolve()),
+                "video_params": self.video_params.__dict__,
+                "audio_params": self.audio_params.__dict__,
+            }
+
+            async def _normalize_bg_creator_looped(temp_output_path: Path) -> Path:
+                return await normalize_media(
+                    input_path=bg_video_path,
+                    video_params=self.video_params,
+                    audio_params=self.audio_params,
+                    cache_manager=self.cache_manager,
+                    ffmpeg_path=self.ffmpeg_path,
+                )
+
+            bg_video_path = await self.cache_manager.get_or_create(
+                key_data=key_data,
+                file_name="normalized_looped_bg",
+                extension="mp4",
+                creator_func=_normalize_bg_creator_looped,
             )
         except Exception as e:
             print(
@@ -622,7 +703,9 @@ class VideoRenderer:
 
         try:
             print(f"Executing FFmpeg command:\n{' '.join(cmd)}")
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            process = await _run_ffmpeg_async(cmd)
+            if process.stderr:
+                print(process.stderr.strip())
         except subprocess.CalledProcessError as e:
             print(
                 f"[Error] ffmpeg failed for looped background video {output_filename}"
@@ -631,6 +714,9 @@ class VideoRenderer:
             print((e.stderr or "").strip())
             print("---- FFmpeg STDOUT ----")
             print((e.stdout or "").strip())
+            raise
+        except Exception as e:
+            print(f"[Error] Unexpected exception during ffmpeg: {e}")
             raise
 
         return output_path

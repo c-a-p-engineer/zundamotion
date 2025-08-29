@@ -14,7 +14,7 @@ import asyncio
 
 from zundamotion.exceptions import ValidationError
 from zundamotion.pipeline import run_generation
-from zundamotion.utils.logger import get_logger, setup_logging
+from zundamotion.utils.logger import KVLogger, get_logger, setup_logging
 
 
 async def main():  # Make main function async
@@ -82,6 +82,11 @@ async def main():  # Make main function async
         help="If set, outputs logs in machine-readable JSON format.",
     )
     parser.add_argument(
+        "--log-kv",
+        action="store_true",
+        help="If set, outputs logs in human-readable Key-Value pair format.",
+    )
+    parser.add_argument(
         "--hw-encoder",
         type=str,
         default="auto",
@@ -98,9 +103,10 @@ async def main():  # Make main function async
 
     args = parser.parse_args()
 
-    # Setup logging based on --log-json argument
-    setup_logging(log_json=args.log_json)
-    logger = get_logger()
+    # Setup logging based on --log-json or --log-kv argument
+    # If both are set, --log-kv takes precedence for console output
+    setup_logging(log_json=args.log_json, log_kv=args.log_kv)
+    logger: KVLogger = get_logger()  # Explicitly type hint logger as KVLogger
 
     # Ensure output directory exists
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
@@ -108,7 +114,9 @@ async def main():  # Make main function async
     start_time = time.time()  # Record start time
 
     try:
-        logger.info("Video generation started.")
+        logger.kv_info(
+            "Video generation started.", kv_pairs={"Event": "GenerationStart"}
+        )
         await run_generation(
             args.script_path,
             args.output,
@@ -122,25 +130,57 @@ async def main():  # Make main function async
             args.hw_encoder,
             args.quality,
         )
-        logger.info("Video generation completed successfully.")
+        logger.kv_info(
+            "Video generation completed successfully.",
+            kv_pairs={"Event": "GenerationSuccess"},
+        )
         end_time = time.time()  # Record end time
         elapsed_time = end_time - start_time
-        logger.info(f"Total execution time: {elapsed_time:.2f} seconds.")
+        logger.kv_info(
+            f"Total execution time: {elapsed_time:.2f} seconds.",
+            kv_pairs={
+                "Event": "TotalExecutionTime",
+                "Duration": f"{elapsed_time:.2f}s",
+            },
+        )
     except ValidationError as e:
         end_time = time.time()  # Record end time even on error
         elapsed_time = end_time - start_time
-        logger.error(f"Validation Error: {e.message}")
-        if e.line_number is not None:
-            logger.error(f"  Line: {e.line_number}")
-        if e.column_number is not None:
-            logger.error(f"  Column: {e.column_number}")
-        logger.error(f"Total execution time before error: {elapsed_time:.2f} seconds.")
+        logger.kv_error(
+            f"Validation Error: {e.message}",
+            kv_pairs={
+                "Event": "ValidationError",
+                "Message": e.message,
+                "Line": e.line_number,
+                "Column": e.column_number,
+            },
+        )
+        logger.kv_error(
+            f"Total execution time before error: {elapsed_time:.2f} seconds.",
+            kv_pairs={
+                "Event": "TotalExecutionTimeOnError",
+                "Duration": f"{elapsed_time:.2f}s",
+            },
+        )
         sys.exit(1)
     except Exception as e:
         end_time = time.time()  # Record end time even on error
         elapsed_time = end_time - start_time
-        logger.exception(f"An unexpected error occurred during generation: {e}")
-        logger.error(f"Total execution time before error: {elapsed_time:.2f} seconds.")
+        logger.kv_error(
+            f"An unexpected error occurred during generation: {e}",
+            kv_pairs={
+                "Event": "UnexpectedError",
+                "Message": str(e),
+                "Traceback": traceback.format_exc(),
+            },
+        )
+        logger.kv_error(
+            f"Total execution time before error: {elapsed_time:.2f} seconds.",
+            kv_pairs={
+                "Event": "TotalExecutionTimeOnError",
+                "Duration": f"{elapsed_time:.2f}s",
+            },
+        )
         sys.exit(1)
 
 

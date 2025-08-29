@@ -37,7 +37,7 @@ class SubtitleGenerator:
         x_expr = style.get("x", "(W-w)/2").replace("H", "main_h").replace("W", "main_w")
         x_expr = x_expr.replace("h", "overlay_h").replace("w", "overlay_w")
 
-        use_cuda = is_nvenc_available() and has_cuda_filters()
+        use_cuda = await is_nvenc_available() and await has_cuda_filters()
 
         extra_input = {"-loop": "1", "-i": str(png_path)}
 

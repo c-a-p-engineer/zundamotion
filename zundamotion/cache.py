@@ -1,11 +1,21 @@
 import hashlib
 import json
+import os
 import shutil
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional  # Awaitableを追加
+from typing import Any, Awaitable, Callable, Dict, Optional
+
+from zundamotion.utils.ffmpeg_utils import MediaInfo  # MediaInfo を追加
 
 from .exceptions import CacheError
+from .utils.ffmpeg_utils import build_normalize_cmd_async  # 新規追加
+from .utils.ffmpeg_utils import (
+    get_media_info,
+    probe_media_params_async,
+    run_ffmpeg_async,
+)
 from .utils.logger import logger
 
 
@@ -27,24 +37,25 @@ class CacheManager:
         try:
             self.cache_dir.mkdir(exist_ok=True)
             logger.info(f"Cache directory initialized: {self.cache_dir.resolve()}")
-            if self.no_cache:
-                logger.info(
-                    "Cache is disabled (--no-cache). All files will be regenerated."
-                )
-                if self.cache_dir.exists():
-                    shutil.rmtree(self.cache_dir)
-                    self.cache_dir.mkdir(exist_ok=True)
-            elif self.cache_refresh:
-                logger.info(
-                    "Cache refresh requested (--cache-refresh). All files will be regenerated and cache updated."
-                )
-                if self.cache_dir.exists():
-                    shutil.rmtree(self.cache_dir)
-                    self.cache_dir.mkdir(exist_ok=True)
-            else:
-                logger.info(
-                    "Using existing cache. Use --no-cache to disable or --cache-refresh to force regeneration."
-                )
+            # no_cache や cache_refresh のロジックは get_or_create_normalized_video 内で処理するため、ここではディレクトリ削除は行わない
+            # if self.no_cache:
+            #     logger.info(
+            #         "Cache is disabled (--no-cache). All files will be regenerated."
+            #     )
+            #     if self.cache_dir.exists():
+            #         shutil.rmtree(self.cache_dir)
+            #         self.cache_dir.mkdir(exist_ok=True)
+            # elif self.cache_refresh:
+            #     logger.info(
+            #         "Cache refresh requested (--cache-refresh). All files will be regenerated and cache updated."
+            #     )
+            #     if self.cache_dir.exists():
+            #         shutil.rmtree(self.cache_dir)
+            #         self.cache_dir.mkdir(exist_ok=True)
+            # else:
+            #     logger.info(
+            #         "Using existing cache. Use --no-cache to disable or --cache-refresh to force regeneration."
+            #     )
 
             self._clean_cache()  # キャッシュ初期化時にクリーンアップを実行
 
@@ -62,6 +73,146 @@ class CacheManager:
 
         sorted_data = json.dumps(data, sort_keys=True, cls=PathEncoder).encode("utf-8")
         return hashlib.sha256(sorted_data).hexdigest()
+
+    async def get_or_create_media_info(self, file_path: Path) -> MediaInfo:
+        """
+        メディアのメタ情報を取得し、キャッシュする。
+        """
+        key_data = {
+            "file_path": str(file_path.resolve()),
+            "file_size": file_path.stat().st_size,
+            "file_mtime": file_path.stat().st_mtime,
+            "operation": "media_info",
+        }
+        cache_key = self._generate_hash(key_data)
+        cached_meta_path = self.cache_dir / f"info_{cache_key}.json"
+
+        if self.no_cache:
+            logger.debug(
+                f"Cache disabled. Getting media info for {file_path.name} directly."
+            )
+            return await get_media_info(str(file_path))
+
+        if self.cache_refresh and cached_meta_path.exists():
+            logger.info(
+                f"Cache refresh requested. Removing existing media info cache: {cached_meta_path.name}"
+            )
+            cached_meta_path.unlink()
+
+        if cached_meta_path.exists():
+            try:
+                with open(cached_meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                info = meta["media_info"]
+                logger.info(
+                    f"Cache HIT for media info of {file_path.name} (key: {cache_key[:8]})"
+                )
+                return info
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(
+                    f"Corrupted media info cache for {file_path.name}: {e}. Regenerating."
+                )
+                cached_meta_path.unlink(missing_ok=True)
+
+        logger.info(
+            f"Cache MISS for media info of {file_path.name} (key: {cache_key[:8]}). Generating..."
+        )
+        try:
+            info = await get_media_info(str(file_path))
+            with open(cached_meta_path, "w", encoding="utf-8") as f:
+                json.dump({"media_info": info, "created_at": time.time()}, f)
+            logger.debug(f"Cached media info for {file_path.name}")
+            self._clean_cache()
+            return info
+        except Exception as e:
+            raise CacheError(
+                f"Failed to get or cache media info for {file_path.name}: {e}"
+            )
+
+    async def get_or_create_media_duration(self, file_path: Path) -> float:
+        """
+        メディアファイルの長さを取得し、キャッシュする。
+        """
+        key_data = {
+            "file_path": str(file_path.resolve()),
+            "file_size": file_path.stat().st_size,
+            "file_mtime": file_path.stat().st_mtime,
+            "operation": "media_duration",
+        }
+        cache_key = self._generate_hash(key_data)
+        cached_meta_path = self.cache_dir / f"duration_{cache_key}.json"
+
+        if self.no_cache:
+            logger.debug(
+                f"Cache disabled. Getting duration for {file_path.name} directly."
+            )
+            # get_media_duration は ffmpeg_utils から削除されたため、直接 ffprobe を呼び出す
+            cmd = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+                str(file_path),
+            ]
+            result = await run_ffmpeg_async(cmd)
+            probe = json.loads(result.stdout)
+            duration = float(probe["format"]["duration"])
+            return round(duration, 2)
+
+        if self.cache_refresh and cached_meta_path.exists():
+            logger.info(
+                f"Cache refresh requested. Removing existing duration cache: {cached_meta_path.name}"
+            )
+            cached_meta_path.unlink()
+
+        if cached_meta_path.exists():
+            try:
+                with open(cached_meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                duration = meta["duration"]
+                logger.info(
+                    f"Cache HIT for duration of {file_path.name} (key: {cache_key[:8]}) -> {duration:.2f}s"
+                )
+                return duration
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(
+                    f"Corrupted duration cache for {file_path.name}: {e}. Regenerating."
+                )
+                cached_meta_path.unlink(missing_ok=True)
+
+        logger.info(
+            f"Cache MISS for duration of {file_path.name} (key: {cache_key[:8]}). Generating..."
+        )
+        try:
+            # get_media_info はストリーム情報のみを返すため、duration は別途取得
+            # ffmpeg_utils.py から get_media_duration を削除したため、ここで直接 ffprobe を呼び出す
+            cmd = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+                str(file_path),
+            ]
+            result = await run_ffmpeg_async(cmd)  # _run_ffmpeg_async を直接呼び出す
+            probe = json.loads(result.stdout)
+            duration = float(probe["format"]["duration"])
+            duration = round(duration, 2)
+
+            with open(cached_meta_path, "w", encoding="utf-8") as f:
+                json.dump({"duration": duration, "created_at": time.time()}, f)
+            logger.debug(f"Cached duration for {file_path.name} -> {duration:.2f}s")
+            self._clean_cache()
+            return duration
+        except Exception as e:
+            raise CacheError(
+                f"Failed to get or cache media duration for {file_path.name}: {e}"
+            )
 
     def _clean_cache(self):
         """
@@ -84,9 +235,8 @@ class CacheManager:
             expired_threshold = current_time - (self.ttl_hours * 3600)  # 秒
 
             initial_count = len(files)
-            files = [
-                f for f in files if f[2] > expired_threshold
-            ]  # 最終アクセス時刻が閾値より新しいものだけ残す
+            # 最終アクセス時刻が閾値より新しいものだけ残す
+            files = [f for f in files if f[2] > expired_threshold]
 
             deleted_count = initial_count - len(files)
             if deleted_count > 0:
@@ -227,3 +377,146 @@ class CacheManager:
             raise CacheError(
                 f"Failed to generate or cache file {file_name}.{extension}: {e}"
             )
+
+    def _hash_for_normalized(self, input_path: Path, target_spec: Dict) -> str:
+        p = input_path.resolve()
+        st = p.stat()
+        signature = {
+            "path": str(p),
+            "mtime": int(st.st_mtime),
+            "size": st.st_size,
+            "target": target_spec,
+        }
+        blob = json.dumps(signature, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        return hashlib.sha256(blob).hexdigest()
+
+    def _paths_for_hash(self, h: str) -> Dict[str, Path]:
+        return {
+            "out": self.cache_dir / f"temp_normalized_{h}.mp4",
+            "meta": self.cache_dir / f"temp_normalized_{h}.meta.json",
+            "lock": self.cache_dir / f"temp_normalized_{h}.lock",
+        }
+
+    @contextmanager
+    def _file_lock(self, lock_path: Path, timeout_sec: int = 600):
+        # 超簡易ロック（プロセス間でファイル存在をロック扱い）
+        start = time.time()
+        while lock_path.exists():
+            if time.time() - start > timeout_sec:
+                raise TimeoutError(f"Lock timeout: {lock_path}")
+            time.sleep(0.1)
+        try:
+            lock_path.touch(exist_ok=False)
+            yield
+        finally:
+            if lock_path.exists():
+                lock_path.unlink(missing_ok=True)
+
+    async def get_or_create_normalized_video(
+        self,
+        input_path: Path,
+        target_spec: Dict,
+        prefer_copy: bool = True,
+        force_refresh: bool = False,
+        no_cache: bool = False,
+    ) -> Path:
+        h = self._hash_for_normalized(input_path, target_spec)
+        p = self._paths_for_hash(h)
+        out_mp4, meta_json, lock_file = p["out"], p["meta"], p["lock"]
+
+        # no_cache → 常に作り直す（既存ファイルは使わない）
+        if (
+            not no_cache
+            and out_mp4.exists()
+            and meta_json.exists()
+            and not force_refresh
+        ):
+            logger.info(f"[Cache] Normalized hit: {input_path} -> {out_mp4}")
+            return out_mp4
+
+        # 二重生成防止
+        with self._file_lock(lock_file):
+            # ロック取得後に再チェック
+            if (
+                not no_cache
+                and out_mp4.exists()
+                and meta_json.exists()
+                and not force_refresh
+            ):
+                logger.info(
+                    f"[Cache] Normalized hit(after lock): {input_path} -> {out_mp4}"
+                )
+                return out_mp4
+
+            logger.info(f"[Cache] Normalized miss: {input_path} -> generating...")
+
+            # すでに“正規化済み”の可能性（≒入力がターゲットを満たす）をプローブで判定
+            current = await probe_media_params_async(input_path)
+            needs_encode, copy_ok = self._judge_need_encode(
+                current, target_spec, prefer_copy
+            )
+
+            # ffmpeg コマンド構築
+            cmd = await build_normalize_cmd_async(
+                input_path=input_path,
+                output_path=out_mp4,
+                target_spec=target_spec,
+                use_copy=(copy_ok and not force_refresh and not no_cache),
+            )
+            await run_ffmpeg_async(cmd)
+
+            # サイドカー保存
+            meta = {
+                "input": str(input_path.resolve()),
+                "output": str(out_mp4.resolve()),
+                "hash": h,
+                "target_spec": target_spec,
+                "needs_encode": needs_encode,
+                "used_copy": copy_ok,
+                "created_at": int(time.time()),
+                "ffmpeg_cmd": cmd,
+                "tool_version": "zundamotion_0.1.0",  # 自プロダクトのバージョンを入れておく
+            }
+            meta_json.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+            logger.info(
+                f"Successfully normalized {input_path} to {out_mp4} (file exists)."
+            )
+            return out_mp4
+
+    def _judge_need_encode(self, current: Dict, target_spec: Dict, prefer_copy: bool):
+        """
+        current: probeで得た vwidth, vheight, vfps, vpix_fmt, vcodec, asr, ach, acodec など
+        """
+        v_tgt = target_spec.get("video") or {}
+        a_tgt = target_spec.get("audio") or {}
+
+        # “完全一致”の簡易判定（実用はもう少し緩くてもよい）
+        video_match = all(
+            [
+                (v_tgt.get("width") is None or v_tgt["width"] == current.get("width")),
+                (
+                    v_tgt.get("height") is None
+                    or v_tgt["height"] == current.get("height")
+                ),
+                (
+                    v_tgt.get("fps") is None
+                    or int(v_tgt["fps"]) == int(current.get("fps", 0))
+                ),
+                (
+                    v_tgt.get("pix_fmt") is None
+                    or v_tgt["pix_fmt"] == current.get("pix_fmt")
+                ),
+                (v_tgt.get("codec") is None or v_tgt["codec"] == current.get("vcodec")),
+            ]
+        )
+        audio_match = all(
+            [
+                (a_tgt.get("sr") is None or a_tgt["sr"] == current.get("asr")),
+                (a_tgt.get("ch") is None or a_tgt["ch"] == current.get("ach")),
+                (a_tgt.get("codec") is None or a_tgt["codec"] == current.get("acodec")),
+            ]
+        )
+
+        needs_encode = not (video_match and audio_match)
+        copy_ok = prefer_copy and (video_match and audio_match)
+        return needs_encode, copy_ok

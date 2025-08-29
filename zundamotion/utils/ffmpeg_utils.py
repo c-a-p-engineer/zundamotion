@@ -10,17 +10,19 @@ FFmpeg 7 対応のユーティリティ群（全文置き換え用）
 - バージョン検出＆エンコーダ存在チェックを強化（`ffmpeg -encoders`）
 - 動画長取得の専用関数（`get_media_duration`）を追加（従来の `get_audio_duration` を動画に誤用しない）
 """
+from __future__ import annotations  # 循環参照を避けるため追加
 
-import asyncio  # 追加
+import asyncio
 import json
 import os
+import platform  # is_nvenc_available で利用
 import re
 import subprocess
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path  # ここに移動
 from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
-from zundamotion.cache import CacheManager
 from zundamotion.utils.logger import logger
 
 
@@ -160,13 +162,16 @@ async def _run_ffmpeg_async(args: List[str]) -> subprocess.CompletedProcess:
 
         if process.returncode != 0:
             logger.error(f"FFmpeg command failed with exit code {process.returncode}")
-            logger.error(f"Command: {' '.join(map(str, args))}")
+            logger.debug(f"Command: {' '.join(map(str, args))}")  # コマンドはDEBUGに
             if stdout_str:
-                logger.error(f"FFmpeg stdout:\n{stdout_str}")
+                logger.debug(f"FFmpeg stdout:\n{stdout_str}")  # stdoutはDEBUGに
             if stderr_str:
-                logger.error(f"FFmpeg stderr:\n{stderr_str}")
+                logger.debug(f"FFmpeg stderr:\n{stderr_str}")  # stderrはDEBUGに
             raise subprocess.CalledProcessError(
-                process.returncode, args, stdout=stdout_str, stderr=stderr_str
+                process.returncode if process.returncode is not None else 0,
+                args,
+                output=stdout_str,
+                stderr=stderr_str,
             )
 
         if stderr_str:
@@ -204,6 +209,121 @@ async def _ffmpeg_major_version(ffmpeg_path: str = "ffmpeg") -> Optional[int]:
     # 例: '7.0.2-...'
     m = re.match(r"(\d+)", v)
     return int(m.group(1)) if m else None
+
+
+# =========================================================
+# 同期ラッパー
+# =========================================================
+async def run_ffmpeg_async(cmd: List[str]) -> subprocess.CompletedProcess:
+    """
+    _run_ffmpeg_async の非同期ラッパー。
+    CacheManager から呼び出されることを想定。
+    """
+    try:
+        return await _run_ffmpeg_async(cmd)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"ffmpeg failed: {e.stderr[:500]}") from e
+    except Exception as e:
+        raise RuntimeError(f"ffmpeg execution failed: {e}") from e
+
+
+# =========================================================
+# ffprobe 系 (同期版)
+# =========================================================
+async def probe_media_params_async(path: Path) -> Dict[str, Any]:
+    """
+    ffprobeで最小限の情報を取得（非同期版）。
+    CacheManager から呼び出されることを想定。
+    """
+    try:
+        media_info = await get_media_info(str(path))
+
+        result: Dict[str, Any] = {}
+        video_info = media_info.get("video")
+        if video_info:
+            result["width"] = video_info.get("width")
+            result["height"] = video_info.get("height")
+            result["fps"] = video_info.get("fps")
+            result["pix_fmt"] = video_info.get("pix_fmt")
+            result["vcodec"] = video_info.get("codec_name")
+
+        audio_info = media_info.get("audio")
+        if audio_info:
+            result["asr"] = audio_info.get("sample_rate")
+            result["ach"] = audio_info.get("channels")
+            result["acodec"] = audio_info.get("codec_name")
+        return result
+    except Exception as e:
+        logger.error(f"Error probing media params for {path}: {e}")
+        return {}
+
+
+# =========================================================
+# build_normalize_cmd (同期版)
+# =========================================================
+async def build_normalize_cmd_async(
+    input_path: Path, output_path: Path, target_spec: Dict, use_copy: bool
+) -> List[str]:
+    """
+    正規化のためのffmpegコマンドを構築（非同期版）。
+    CacheManager から呼び出されることを想定。
+    """
+    if use_copy:
+        # 完全一致時は -c copy（マップを明示）
+        return [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(input_path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0?",
+            "-c",
+            "copy",
+            str(output_path),
+        ]
+
+    # 変換が必要な場合
+    v = target_spec.get("video", {})
+    a = target_spec.get("audio", {})
+
+    # NVENC等の選択は既存ロジックを流用
+    nvenc_available = await is_nvenc_available()
+    vcodec = (
+        "h264_nvenc"
+        if nvenc_available and (v.get("codec") in [None, "h264"])
+        else "libx264"
+    )
+    acodec = a.get("codec", "aac")
+
+    args = ["ffmpeg", "-y", "-i", str(input_path), "-map", "0:v:0", "-map", "0:a:0?"]
+
+    # 映像フィルタ（解像度・fps・pix_fmt）
+    vf = []
+    if v.get("width") and v.get("height"):
+        vf.append(f"scale={v['width']}:{v['height']}:flags=bicubic")
+    if v.get("fps"):
+        args += ["-r", str(int(v["fps"]))]  # 出力fps
+
+    if vf:
+        args += ["-vf", ",".join(vf)]
+
+    if v.get("pix_fmt"):
+        args += ["-pix_fmt", v["pix_fmt"]]
+
+    # コーデックと高速プリセット
+    args += ["-c:v", vcodec, "-preset", "fast", "-tune", "zerolatency"]
+
+    # 音声
+    if a.get("sr"):
+        args += ["-ar", str(int(a["sr"]))]
+    if a.get("ch"):
+        args += ["-ac", str(int(a["ch"]))]
+    args += ["-c:a", acodec]
+
+    args += [str(output_path)]
+    return args
 
 
 async def _list_encoders(ffmpeg_path: str = "ffmpeg") -> str:
@@ -246,6 +366,7 @@ async def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
     結果はキャッシュされる。
     """
     if ffmpeg_path in _nvenc_availability_cache:
+        logger.debug(f"NVENC availability for '{ffmpeg_path}' retrieved from cache.")
         return _nvenc_availability_cache[ffmpeg_path]
 
     # First, check if 'h264_nvenc' is listed in encoders (fast fail)
@@ -260,7 +381,7 @@ async def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
         _nvenc_availability_cache[ffmpeg_path] = False
         return False
 
-    # Perform a smoke test
+    # Perform a smoke test only if not in cache
     logger.info("Performing a quick smoke test for h264_nvenc...")
     cmd = [
         ffmpeg_path,
@@ -279,7 +400,7 @@ async def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
     ]
     try:
         # Use a timeout to prevent hanging
-        await _run_ffmpeg_async(cmd)  # subprocess.run を _run_ffmpeg_async に変更
+        await _run_ffmpeg_async(cmd)
         logger.info("h264_nvenc smoke test successful. NVENC is available.")
         _nvenc_availability_cache[ffmpeg_path] = True
         return True
@@ -472,59 +593,6 @@ def _threading_flags(ffmpeg_path: str = "ffmpeg") -> List[str]:
 # =========================================================
 # ffprobe 系
 # =========================================================
-async def get_audio_duration(file_path: str) -> float:
-    """音声ファイルの長さ（秒, 小数2桁丸め）。"""
-    try:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            file_path,
-        ]
-        result = await _run_ffmpeg_async(cmd)
-        probe = json.loads(result.stdout)
-        duration = float(probe["format"]["duration"])
-        return round(duration, 2)
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error running ffprobe for {file_path}: {e}\n{e.stderr}")
-        raise
-    except (json.JSONDecodeError, KeyError, ValueError) as e:
-        logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
-        raise
-
-
-async def get_media_duration(file_path: str) -> float:
-    """音声/動画問わず、コンテナから長さ（秒）を取得。"""
-    try:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            file_path,
-        ]
-        result = await _run_ffmpeg_async(cmd)
-        probe = json.loads(result.stdout)
-        duration = float(probe["format"]["duration"])
-        return round(duration, 2)
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error running ffprobe for {file_path}: {e}\n{e.stderr}")
-        raise
-    except (json.JSONDecodeError, KeyError, ValueError) as e:
-        logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
-        raise
-
-
-# from typing import Any, Dict, List, Optional, Tuple, TypedDict # 既にインポート済み
-
-
 class VideoInfo(TypedDict, total=False):
     codec_name: str
     width: int
@@ -544,9 +612,6 @@ class AudioInfo(TypedDict, total=False):
 class MediaInfo(TypedDict, total=False):
     video: Optional[VideoInfo]
     audio: Optional[AudioInfo]
-
-
-# ... (既存の関数は省略)
 
 
 async def get_media_info(file_path: str) -> MediaInfo:
@@ -595,6 +660,56 @@ async def get_media_info(file_path: str) -> MediaInfo:
 
     except subprocess.CalledProcessError as e:
         logger.error(f"Error running ffprobe for {file_path}: {e.stderr}")
+        raise
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
+        raise
+
+
+async def get_audio_duration(file_path: str) -> float:
+    """音声ファイルの長さ（秒, 小数2桁丸め）。"""
+    try:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+            file_path,
+        ]
+        result = await _run_ffmpeg_async(cmd)
+        probe = json.loads(result.stdout)
+        duration = float(probe["format"]["duration"])
+        return round(duration, 2)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error running ffprobe for {file_path}: {e}\n{e.stderr}")
+        raise
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
+        raise
+
+
+async def get_media_duration(file_path: str) -> float:
+    """音声/動画問わず、コンテナから長さ（秒）を取得。"""
+    try:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+            file_path,
+        ]
+        result = await _run_ffmpeg_async(cmd)
+        probe = json.loads(result.stdout)
+        duration = float(probe["format"]["duration"])
+        return round(duration, 2)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error running ffprobe for {file_path}: {e}\n{e.stderr}")
         raise
     except (json.JSONDecodeError, KeyError, ValueError) as e:
         logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
@@ -725,37 +840,13 @@ async def concat_videos_copy(
 
 async def has_audio_stream(file_path: str) -> bool:
     """動画に音声ストリームがあるか。"""
-    try:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "a",
-            "-show_entries",
-            "stream=codec_type",
-            "-of",
-            "json",
-            file_path,
-        ]
-        result = await _run_ffmpeg_async(cmd)
-        probe = json.loads(result.stdout)
-        return len(probe.get("streams", [])) > 0
-    except subprocess.CalledProcessError as e:
-        logger.error(
-            f"Error running ffprobe to check audio stream for {file_path}: {e}\n{e.stderr}"
-        )
-        return False
-    except (json.JSONDecodeError, KeyError) as e:
-        logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
-        return False
+    media_info = await get_media_info(file_path)
+    return media_info.get("audio") is not None
 
 
 # =========================================================
 # 変換・生成
 # =========================================================
-import hashlib
-from pathlib import Path
 
 
 def generate_normalization_hash_data(
@@ -1100,7 +1191,7 @@ async def normalize_media(
     input_path: Path,
     video_params: VideoParams,
     audio_params: AudioParams,
-    cache_manager: CacheManager,
+    cache_manager: Any,  # CacheManager の循環インポートを避けるため Any を使用
     ffmpeg_path: str = "ffmpeg",
 ) -> Path:
     """

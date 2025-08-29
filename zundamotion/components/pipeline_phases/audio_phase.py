@@ -132,11 +132,19 @@ class AudioPhase:
                     if insert_config:
                         insert_path = Path(insert_config["path"])
                         if insert_path.suffix.lower() in self.video_extensions:
-                            duration = await get_audio_duration(str(insert_path))
+                            duration = (
+                                await self.cache_manager.get_or_create_media_duration(
+                                    insert_path
+                                )
+                            )
                         else:
                             duration = insert_config.get("duration", 2.0)
                     else:
-                        duration = await get_audio_duration(str(audio_path))
+                        duration = (
+                            await self.cache_manager.get_or_create_media_duration(
+                                audio_path
+                            )
+                        )
 
                     character_name = line.get("speaker_name", "Unknown")
                     timeline.add_event(
