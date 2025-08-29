@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import time
+import inspect
 from datetime import datetime
 from functools import wraps
 from typing import Any, Dict, Optional
@@ -188,47 +189,86 @@ class KVLogger(logging.Logger):
 
 
 def time_log(logger_instance: logging.Logger):
-    """A decorator to log the execution time of a function."""
+    """A decorator to log execution time for sync and async functions.
+
+    - Detects coroutine functions and wraps them with an async wrapper that awaits
+      the function to ensure accurate timing and correct log ordering.
+    - Uses time.monotonic() for reliable duration measurement.
+    """
 
     def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            # Check if the function is a method of a class
+        log_target_name = func.__name__
+
+        def _resolve_name(args):
             if args and hasattr(args[0], "__class__"):
-                class_name = args[0].__class__.__name__
-                log_name = f"{class_name}.{func.__name__}"
-            else:
-                log_name = func.__name__
+                return f"{args[0].__class__.__name__}.{func.__name__}"
+            return log_target_name
 
-            start_time = time.time()
-            if isinstance(logger_instance, KVLogger):
-                logger_instance.kv_info(
-                    f"--- Starting: {log_name} ---",
-                    kv_pairs={"Event": "Start", "Function": log_name},
-                )
-            else:
-                logger_instance.info(f"--- Starting: {log_name} ---")
+        if inspect.iscoroutinefunction(func):
 
-            result = func(*args, **kwargs)
-            end_time = time.time()
-            duration = end_time - start_time
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                log_name = _resolve_name(args)
+                start_time = time.monotonic()
+                if isinstance(logger_instance, KVLogger):
+                    logger_instance.kv_info(
+                        f"--- Starting: {log_name} ---",
+                        kv_pairs={"Event": "Start", "Function": log_name},
+                    )
+                else:
+                    logger_instance.info(f"--- Starting: {log_name} ---")
+                try:
+                    return await func(*args, **kwargs)
+                finally:
+                    duration = time.monotonic() - start_time
+                    if isinstance(logger_instance, KVLogger):
+                        logger_instance.kv_info(
+                            f"--- Finished: {log_name}. Duration: {duration:.2f} seconds ---",
+                            kv_pairs={
+                                "Event": "Finish",
+                                "Function": log_name,
+                                "Duration": f"{duration:.2f}s",
+                            },
+                        )
+                    else:
+                        logger_instance.info(
+                            f"--- Finished: {log_name}. Duration: {duration:.2f} seconds ---"
+                        )
 
-            if isinstance(logger_instance, KVLogger):
-                logger_instance.kv_info(
-                    f"--- Finished: {log_name}. Duration: {duration:.2f} seconds ---",
-                    kv_pairs={
-                        "Event": "Finish",
-                        "Function": log_name,
-                        "Duration": f"{duration:.2f}s",
-                    },
-                )
-            else:
-                logger_instance.info(
-                    f"--- Finished: {log_name}. Duration: {duration:.2f} seconds ---"
-                )
-            return result
+            return async_wrapper
 
-        return wrapper
+        else:
+
+            @wraps(func)
+            def sync_wrapper(*args, **kwargs):
+                log_name = _resolve_name(args)
+                start_time = time.monotonic()
+                if isinstance(logger_instance, KVLogger):
+                    logger_instance.kv_info(
+                        f"--- Starting: {log_name} ---",
+                        kv_pairs={"Event": "Start", "Function": log_name},
+                    )
+                else:
+                    logger_instance.info(f"--- Starting: {log_name} ---")
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    duration = time.monotonic() - start_time
+                    if isinstance(logger_instance, KVLogger):
+                        logger_instance.kv_info(
+                            f"--- Finished: {log_name}. Duration: {duration:.2f} seconds ---",
+                            kv_pairs={
+                                "Event": "Finish",
+                                "Function": log_name,
+                                "Duration": f"{duration:.2f}s",
+                            },
+                        )
+                    else:
+                        logger_instance.info(
+                            f"--- Finished: {log_name}. Duration: {duration:.2f} seconds ---"
+                        )
+
+            return sync_wrapper
 
     return decorator
 

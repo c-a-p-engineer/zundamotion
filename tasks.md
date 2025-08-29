@@ -4,13 +4,6 @@
 
 ## P0（必須・最優先）
 
-### 01. time_logデコレータの非同期対応（誤った0.00秒計測の是正）
-
-- 背景: `@time_log` が `async def` を同期関数として包んでおり、即座にコルーチンを返すため開始/終了ログが実処理前後に対応せず、`Duration: 0.00 seconds` となる。
-- 影響: `GenerationPipeline.run`、`AudioPhase.run`、`VideoPhase.run`、`BGMPhase.run`、`FinalizePhase.run` の時間計測とログの整合性が崩れる。
-- 対応: デコレータでコルーチン関数を検出し、`async def wrapper` にして `await func(*)` を実行。計測に `time.monotonic()` を使用。
-- 確認: `logs/20250829_112339_645.log:4-9, 41-45` のような 0.00 秒表記が実時間（例: `VideoPhase completed in 184.98 seconds.` と一致）に是正される。
-
 
 ### 02. 正規化キャッシュの自己再正規化防止
 
