@@ -357,68 +357,90 @@ async def _list_audio_encoders(ffmpeg_path: str = "ffmpeg") -> str:
 # ハードウェア検出（FFmpeg 7 向け）
 # =========================================================
 _nvenc_availability_cache: Dict[str, bool] = {}
+# 同一プロセス内での重複スモークテスト実行を防ぐためのタスクキャッシュとロック
+_nvenc_availability_tasks: Dict[str, asyncio.Task] = {}
+_nvenc_lock = asyncio.Lock()
 
 
 async def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
     """
     h264_nvencエンコーダが利用可能かスモークテストで確認する。
-    0.1秒のテストエンコードを実行し、成功すればTrueを返す。
-    結果はキャッシュされる。
+    - 最初の1回のみスモークテストを実施し、以降は結果をキャッシュ。
+    - 並行呼び出し時も単一タスクに集約（同時多重実行を防止）。
     """
+    # 既に判定済みなら即返す
     if ffmpeg_path in _nvenc_availability_cache:
         logger.debug(f"NVENC availability for '{ffmpeg_path}' retrieved from cache.")
         return _nvenc_availability_cache[ffmpeg_path]
 
-    # First, check if 'h264_nvenc' is listed in encoders (fast fail)
-    try:
-        encoders = await _list_encoders(ffmpeg_path)
-        if "h264_nvenc" not in encoders:
-            logger.info("h264_nvenc not found in `ffmpeg -encoders` list.")
+    async def _compute() -> bool:
+        # 'h264_nvenc' がエンコーダ一覧に存在するかを先に確認（高速失敗）
+        try:
+            encoders = await _list_encoders(ffmpeg_path)
+            if "h264_nvenc" not in encoders:
+                logger.info("h264_nvenc not found in `ffmpeg -encoders` list.")
+                _nvenc_availability_cache[ffmpeg_path] = False
+                return False
+        except Exception as e:
+            logger.error(f"Error listing FFmpeg encoders: {e}")
             _nvenc_availability_cache[ffmpeg_path] = False
             return False
-    except Exception as e:
-        logger.error(f"Error listing FFmpeg encoders: {e}")
-        _nvenc_availability_cache[ffmpeg_path] = False
-        return False
 
-    # Perform a smoke test only if not in cache
-    logger.info("Performing a quick smoke test for h264_nvenc...")
-    cmd = [
-        ffmpeg_path,
-        "-y",
-        "-f",
-        "lavfi",
-        "-i",
-        "color=c=black:s=128x128:d=0.1",
-        "-vcodec",
-        "h264_nvenc",
-        "-preset",
-        "p1",  # Use the fastest preset for the test
-        "-f",
-        "null",
-        "-",
-    ]
+        # スモークテスト（最速プリセットで極小フレームをエンコード）
+        logger.info("Performing a quick smoke test for h264_nvenc...")
+        cmd = [
+            ffmpeg_path,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=128x128:d=0.1",
+            "-vcodec",
+            "h264_nvenc",
+            "-preset",
+            "p1",
+            "-f",
+            "null",
+            "-",
+        ]
+        try:
+            await _run_ffmpeg_async(cmd)
+            logger.info("h264_nvenc smoke test successful. NVENC is available.")
+            _nvenc_availability_cache[ffmpeg_path] = True
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.warning(
+                "h264_nvenc smoke test failed. NVENC is not available or not configured correctly. Falling back to CPU."
+            )
+            logger.debug(f"FFmpeg stderr for smoke test:\n{e.stderr}")
+            _nvenc_availability_cache[ffmpeg_path] = False
+            return False
+        except FileNotFoundError:
+            logger.error(f"ffmpeg command not found at '{ffmpeg_path}'.")
+            _nvenc_availability_cache[ffmpeg_path] = False
+            return False
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during NVENC smoke test: {e}")
+            _nvenc_availability_cache[ffmpeg_path] = False
+            return False
+
+    # 並行呼び出しを単一化
+    async with _nvenc_lock:
+        # ロック獲得後に再確認（他のタスクでキャッシュされた可能性）
+        if ffmpeg_path in _nvenc_availability_cache:
+            return _nvenc_availability_cache[ffmpeg_path]
+        task = _nvenc_availability_tasks.get(ffmpeg_path)
+        if task is None:
+            task = asyncio.create_task(_compute())
+            _nvenc_availability_tasks[ffmpeg_path] = task
+
     try:
-        # Use a timeout to prevent hanging
-        await _run_ffmpeg_async(cmd)
-        logger.info("h264_nvenc smoke test successful. NVENC is available.")
-        _nvenc_availability_cache[ffmpeg_path] = True
-        return True
-    except subprocess.CalledProcessError as e:
-        logger.warning(
-            "h264_nvenc smoke test failed. NVENC is not available or not configured correctly. Falling back to CPU."
-        )
-        logger.debug(f"FFmpeg stderr for smoke test:\n{e.stderr}")
-        _nvenc_availability_cache[ffmpeg_path] = False
-        return False
-    except FileNotFoundError:
-        logger.error(f"ffmpeg command not found at '{ffmpeg_path}'.")
-        _nvenc_availability_cache[ffmpeg_path] = False
-        return False
-    except Exception as e:
-        logger.error(f"An unexpected error occurred during NVENC smoke test: {e}")
-        _nvenc_availability_cache[ffmpeg_path] = False
-        return False
+        result = await task
+        return result
+    finally:
+        # 完了後はタスクキャッシュを掃除
+        async with _nvenc_lock:
+            _nvenc_availability_tasks.pop(ffmpeg_path, None)
 
 
 async def has_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
