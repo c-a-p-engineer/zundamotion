@@ -10,11 +10,15 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 from zundamotion.utils.ffmpeg_utils import MediaInfo  # MediaInfo を追加
 
 from .exceptions import CacheError
-from .utils.ffmpeg_utils import build_normalize_cmd_async  # 新規追加
 from .utils.ffmpeg_utils import (
     get_media_info,
     probe_media_params_async,
     run_ffmpeg_async,
+)
+from .utils.ffmpeg_utils import (
+    AudioParams,
+    VideoParams,
+    normalize_media,
 )
 from .utils.logger import logger
 
@@ -483,32 +487,70 @@ class CacheManager:
                 current, target_spec, prefer_copy
             )
 
-            # ffmpeg コマンド構築
-            cmd = await build_normalize_cmd_async(
-                input_path=input_path,
-                output_path=out_mp4,
-                target_spec=target_spec,
-                use_copy=(copy_ok and not force_refresh and not no_cache),
-            )
-            await run_ffmpeg_async(cmd)
+            # 新経路: normalize_media を使用し、HW検出とオプションを統一
+            # target_spec から VideoParams / AudioParams を構築
+            v_spec = target_spec.get("video", {}) if isinstance(target_spec, dict) else {}
+            a_spec = target_spec.get("audio", {}) if isinstance(target_spec, dict) else {}
 
-            # サイドカー保存
-            meta = {
-                "input": str(input_path.resolve()),
-                "output": str(out_mp4.resolve()),
-                "hash": h,
-                "target_spec": target_spec,
-                "needs_encode": needs_encode,
-                "used_copy": copy_ok,
-                "created_at": int(time.time()),
-                "ffmpeg_cmd": cmd,
-                "tool_version": "zundamotion_0.1.0",  # 自プロダクトのバージョンを入れておく
-            }
-            meta_json.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-            logger.info(
-                f"Successfully normalized {input_path} to {out_mp4} (file exists)."
+            video_params = VideoParams(
+                width=int(v_spec.get("width", 1920)) if v_spec.get("width") else 1920,
+                height=int(v_spec.get("height", 1080)) if v_spec.get("height") else 1080,
+                fps=int(v_spec.get("fps", 30)) if v_spec.get("fps") else 30,
+                pix_fmt=v_spec.get("pix_fmt", "yuv420p"),
+                profile=v_spec.get("profile", "high"),
+                level=v_spec.get("level", "4.2"),
             )
-            return out_mp4
+            audio_params = AudioParams(
+                sample_rate=int(a_spec.get("sr", 48000)) if a_spec.get("sr") else 48000,
+                channels=int(a_spec.get("ch", 2)) if a_spec.get("ch") else 2,
+                codec=a_spec.get("codec", "libmp3lame"),
+            )
+
+            # normalize_media はキャッシュマネージャを通じてキャッシュ名で出力する
+            try:
+                normalized_path = await normalize_media(
+                    input_path=input_path,
+                    video_params=video_params,
+                    audio_params=audio_params,
+                    cache_manager=self,
+                )
+                logger.info(
+                    f"Successfully normalized {input_path} to {normalized_path} using normalize_media."
+                )
+                return normalized_path
+            except Exception as e:
+                # NVENC 失敗 (exit code 234) などを検知し、libx264 で1回だけ再試行
+                msg = str(e)
+                should_fallback = (
+                    "exit status 234" in msg
+                    or "exit code 234" in msg
+                    or "h264_nvenc" in msg
+                    or "NVENC" in msg
+                )
+                if should_fallback:
+                    logger.warning(
+                        "NVENC failed during normalization. Falling back to libx264 and retrying once."
+                    )
+                    prev = os.environ.get("DISABLE_HWENC")
+                    os.environ["DISABLE_HWENC"] = "1"
+                    try:
+                        normalized_path = await normalize_media(
+                            input_path=input_path,
+                            video_params=video_params,
+                            audio_params=audio_params,
+                            cache_manager=self,
+                        )
+                        logger.info(
+                            f"Successfully normalized (fallback CPU) {input_path} -> {normalized_path}"
+                        )
+                        return normalized_path
+                    finally:
+                        if prev is None:
+                            os.environ.pop("DISABLE_HWENC", None)
+                        else:
+                            os.environ["DISABLE_HWENC"] = prev
+                # フォールバック対象でなければそのまま送出
+                raise
 
     def _judge_need_encode(self, current: Dict, target_spec: Dict, prefer_copy: bool):
         """
