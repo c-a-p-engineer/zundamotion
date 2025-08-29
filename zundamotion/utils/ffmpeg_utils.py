@@ -1328,57 +1328,78 @@ async def normalize_media(
                     f"Audio parameters mismatch for {input_path}. Input: {input_a}, Target: {audio_params.__dict__}"
                 )
 
-        cmd = [ffmpeg_path, "-y"]
-        cmd.extend(_threading_flags(ffmpeg_path))
-        cmd.extend(["-i", str(input_path)])
+        async def _build_cmd(disable_hwenc: bool = False) -> List[str]:
+            cmd_local: List[str] = [ffmpeg_path, "-y"]
+            cmd_local.extend(_threading_flags(ffmpeg_path))
+            cmd_local.extend(["-i", str(input_path)])
 
-        if can_copy_video and can_copy_audio:
-            cmd.extend(["-c", "copy"])
-            logger.info(f"Using -c copy for both video and audio for {input_path}")
-        elif can_copy_video:
-            cmd.extend(["-c:v", "copy"])
-            if has_audio:
-                cmd.extend(
+            if can_copy_video and can_copy_audio:
+                cmd_local.extend(["-c", "copy"])
+                logger.info(
+                    f"Using -c copy for both video and audio for {input_path}"
+                )
+            elif can_copy_video:
+                cmd_local.extend(["-c:v", "copy"])
+                if has_audio:
+                    cmd_local.extend(
+                        [
+                            "-af",
+                            f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS",
+                        ]
+                    )
+                    cmd_local.extend(audio_params.to_ffmpeg_opts())
+                else:
+                    cmd_local.extend(["-an"])
+                logger.info(f"Using -c:v copy for video for {input_path}")
+            elif can_copy_audio:
+                cmd_local.extend(["-c:a", "copy"])
+                cmd_local.extend(
                     [
                         "-af",
                         f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS",
                     ]
+                )  # 音声はコピーだが、サンプルレート調整は必要
+                cmd_local.extend(["-vf", f"fps={video_params.fps},setpts=PTS-STARTPTS"])
+                # HW検出（フォールバック用に環境変数を尊重）
+                hw_kind_local = None
+                if not disable_hwenc:
+                    hw_kind_local = await get_hw_encoder_kind_for_video_params(
+                        ffmpeg_path
+                    )
+                cmd_local.extend(video_params.to_ffmpeg_opts(hw_kind_local))
+                logger.info(f"Using -c:a copy for audio for {input_path}")
+            else:
+                # 再エンコードが必要な場合
+                video_filter = f"fps={video_params.fps},setpts=PTS-STARTPTS"
+                audio_filter = (
+                    f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"
                 )
-                cmd.extend(audio_params.to_ffmpeg_opts())
-            else:
-                cmd.extend(["-an"])
-            logger.info(f"Using -c:v copy for video for {input_path}")
-        elif can_copy_audio:
-            cmd.extend(["-c:a", "copy"])
-            cmd.extend(
-                ["-af", f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"]
-            )  # 音声はコピーだが、サンプルレート調整は必要
-            cmd.extend(["-vf", f"fps={video_params.fps},setpts=PTS-STARTPTS"])
-            hw_kind = await get_hw_encoder_kind_for_video_params(ffmpeg_path)
-            cmd.extend(video_params.to_ffmpeg_opts(hw_kind))
-            logger.info(f"Using -c:a copy for audio for {input_path}")
-        else:
-            # 再エンコードが必要な場合
-            video_filter = f"fps={video_params.fps},setpts=PTS-STARTPTS"
-            audio_filter = f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"
 
-            hw_kind = await get_hw_encoder_kind_for_video_params(ffmpeg_path)
-            video_opts = video_params.to_ffmpeg_opts(hw_kind)
-            audio_opts = audio_params.to_ffmpeg_opts()
+                # HW検出（フォールバック用に環境変数を尊重）
+                hw_kind_local = None
+                if not disable_hwenc:
+                    hw_kind_local = await get_hw_encoder_kind_for_video_params(
+                        ffmpeg_path
+                    )
+                video_opts = video_params.to_ffmpeg_opts(hw_kind_local)
+                audio_opts = audio_params.to_ffmpeg_opts()
 
-            cmd.extend(["-vf", video_filter])
-            if has_audio:
-                cmd.extend(["-af", audio_filter])
-            else:
-                cmd.extend(["-an"])
+                cmd_local.extend(["-vf", video_filter])
+                if has_audio:
+                    cmd_local.extend(["-af", audio_filter])
+                else:
+                    cmd_local.extend(["-an"])
 
-            cmd.extend(video_opts)
-            if has_audio:
-                cmd.extend(audio_opts)
-            logger.info(f"Re-encoding video and/or audio for {input_path}")
+                cmd_local.extend(video_opts)
+                if has_audio:
+                    cmd_local.extend(audio_opts)
+                logger.info(f"Re-encoding video and/or audio for {input_path}")
 
-        cmd.extend([str(output_path)])
+            cmd_local.extend([str(output_path)])
+            return cmd_local
 
+        # 1st try: allow hardware encoder
+        cmd = await _build_cmd(disable_hwenc=False)
         try:
             await _run_ffmpeg_async(cmd)
             if Path(output_path).exists():
@@ -1391,10 +1412,43 @@ async def normalize_media(
                 )
             return output_path
         except subprocess.CalledProcessError as e:
-            logger.error(f"Error normalizing media {input_path}: {e}")
-            logger.error(f"FFmpeg stdout:\n{e.stdout}")
-            logger.error(f"FFmpeg stderr:\n{e.stderr}")
-            raise
+            # Detect NVENC-specific failure and fallback to CPU once
+            msg = (e.stderr or "") + "\n" + (e.stdout or "")
+            should_fallback = (
+                "exit status 234" in msg
+                or "exit code 234" in msg
+                or "h264_nvenc" in msg
+                or "nvenc" in msg.lower()
+                or "No NVENC capable devices found" in msg
+            )
+            if not should_fallback:
+                logger.error(f"Error normalizing media {input_path}: {e}")
+                logger.error(f"FFmpeg stdout:\n{e.stdout}")
+                logger.error(f"FFmpeg stderr:\n{e.stderr}")
+                raise
+
+            logger.warning(
+                "NVENC failed during normalization. Falling back to libx264 and retrying once."
+            )
+            prev = os.environ.get("DISABLE_HWENC")
+            os.environ["DISABLE_HWENC"] = "1"
+            try:
+                cmd_cpu = await _build_cmd(disable_hwenc=True)
+                await _run_ffmpeg_async(cmd_cpu)
+                if Path(output_path).exists():
+                    logger.info(
+                        f"Successfully normalized (fallback CPU) {input_path} -> {output_path}"
+                    )
+                else:
+                    logger.error(
+                        f"Failed to normalize (fallback CPU) {input_path} -> {output_path}"
+                    )
+                return output_path
+            finally:
+                if prev is None:
+                    os.environ.pop("DISABLE_HWENC", None)
+                else:
+                    os.environ["DISABLE_HWENC"] = prev
 
     return await cache_manager.get_or_create(
         key_data=key_data,

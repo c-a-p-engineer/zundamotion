@@ -156,39 +156,48 @@ class VideoRenderer:
 
         if background_config.get("type") == "video":
             try:
-                # 正規化（失敗時は as-is）
-                try:
-                    key_data = {
-                        "input_path": str(bg_path.resolve()),
-                        "video_params": self.video_params.__dict__,
-                        "audio_params": self.audio_params.__dict__,
-                    }
+                # ループ済みシーンBGなど、既に正規化済みの入力はスキップ
+                normalized_hint = bool(background_config.get("normalized", False))
+                is_temp_scene_bg = (
+                    bg_path.parent.resolve() == self.temp_dir.resolve()
+                    and bg_path.name.startswith("scene_bg_")
+                )
+                should_skip_normalize = normalized_hint or is_temp_scene_bg
 
-                    async def _normalize_bg_creator(temp_output_path: Path) -> Path:
-                        return await normalize_media(
-                            input_path=bg_path,
-                            video_params=self.video_params,
-                            audio_params=self.audio_params,
-                            cache_manager=self.cache_manager,
-                            ffmpeg_path=self.ffmpeg_path,
-                        )
+                if not should_skip_normalize:
+                    # 正規化（失敗時は as-is）
+                    try:
+                        key_data = {
+                            "input_path": str(bg_path.resolve()),
+                            "video_params": self.video_params.__dict__,
+                            "audio_params": self.audio_params.__dict__,
+                        }
 
-                    # cache_manager.get_or_create は Path を返すことを期待
-                    bg_path_result = await self.cache_manager.get_or_create(
-                        key_data=key_data,
-                        file_name="normalized_bg",
-                        extension="mp4",
-                        creator_func=_normalize_bg_creator,
-                    )
-                    if bg_path_result is None:
-                        raise PipelineError(
-                            f"Failed to normalize background video: {bg_path}"
+                        async def _normalize_bg_creator(temp_output_path: Path) -> Path:
+                            return await normalize_media(
+                                input_path=bg_path,
+                                video_params=self.video_params,
+                                audio_params=self.audio_params,
+                                cache_manager=self.cache_manager,
+                                ffmpeg_path=self.ffmpeg_path,
+                            )
+
+                        # cache_manager.get_or_create は Path を返すことを期待
+                        bg_path_result = await self.cache_manager.get_or_create(
+                            key_data=key_data,
+                            file_name="normalized_bg",
+                            extension="mp4",
+                            creator_func=_normalize_bg_creator,
                         )
-                    bg_path = bg_path_result
-                except Exception as e:
-                    print(
-                        f"[Warning] Could not inspect/normalize BG video {bg_path.name}: {e}. Using as-is."
-                    )
+                        if bg_path_result is None:
+                            raise PipelineError(
+                                f"Failed to normalize background video: {bg_path}"
+                            )
+                        bg_path = bg_path_result
+                    except Exception as e:
+                        print(
+                            f"[Warning] Could not inspect/normalize BG video {bg_path.name}: {e}. Using as-is."
+                        )
                 cmd.extend(
                     [
                         "-ss",
@@ -242,28 +251,14 @@ class VideoRenderer:
             ]
             if not insert_is_image:
                 try:
-                    insert_path = (
-                        await self.cache_manager.get_or_create_normalized_video(
-                            input_path=insert_path,
-                            target_spec={
-                                "video": {
-                                    "width": self.video_params.width,
-                                    "height": self.video_params.height,
-                                    "fps": self.video_params.fps,
-                                    "pix_fmt": self.video_params.pix_fmt,
-                                    "codec": "h264",  # または適切なコーデック
-                                },
-                                "audio": {
-                                    "sr": self.audio_params.sample_rate,
-                                    "ch": self.audio_params.channels,
-                                    "codec": self.audio_params.codec,
-                                },
-                            },
-                            prefer_copy=True,
-                            force_refresh=self.cache_manager.cache_refresh,
-                            no_cache=self.cache_manager.no_cache,
-                        )
+                    normalized_insert = await normalize_media(
+                        input_path=insert_path,
+                        video_params=self.video_params,
+                        audio_params=self.audio_params,
+                        cache_manager=self.cache_manager,
+                        ffmpeg_path=self.ffmpeg_path,
                     )
+                    insert_path = normalized_insert
                 except Exception as e:
                     print(
                         f"[Warning] Could not inspect/normalize insert video {insert_path.name}: {e}. Using as-is."
@@ -545,35 +540,44 @@ class VideoRenderer:
 
         if background_config.get("type") == "video":
             try:
-                # 正規化（失敗時は as-is）
-                try:
-                    key_data = {
-                        "input_path": str(bg_path.resolve()),
-                        "video_params": self.video_params.__dict__,
-                        "audio_params": self.audio_params.__dict__,
-                    }
+                # ループ済みシーンBGなど、既に正規化済みの入力はスキップ
+                normalized_hint = bool(background_config.get("normalized", False))
+                is_temp_scene_bg = (
+                    bg_path.parent.resolve() == self.temp_dir.resolve()
+                    and bg_path.name.startswith("scene_bg_")
+                )
+                should_skip_normalize = normalized_hint or is_temp_scene_bg
 
-                    async def _normalize_bg_creator_wait(
-                        temp_output_path: Path,
-                    ) -> Path:
-                        return await normalize_media(
-                            input_path=bg_path,
-                            video_params=self.video_params,
-                            audio_params=self.audio_params,
-                            cache_manager=self.cache_manager,
-                            ffmpeg_path=self.ffmpeg_path,
+                if not should_skip_normalize:
+                    # 正規化（失敗時は as-is）
+                    try:
+                        key_data = {
+                            "input_path": str(bg_path.resolve()),
+                            "video_params": self.video_params.__dict__,
+                            "audio_params": self.audio_params.__dict__,
+                        }
+
+                        async def _normalize_bg_creator_wait(
+                            temp_output_path: Path,
+                        ) -> Path:
+                            return await normalize_media(
+                                input_path=bg_path,
+                                video_params=self.video_params,
+                                audio_params=self.audio_params,
+                                cache_manager=self.cache_manager,
+                                ffmpeg_path=self.ffmpeg_path,
+                            )
+
+                        bg_path = await self.cache_manager.get_or_create(
+                            key_data=key_data,
+                            file_name="normalized_bg",
+                            extension="mp4",
+                            creator_func=_normalize_bg_creator_wait,
                         )
-
-                    bg_path = await self.cache_manager.get_or_create(
-                        key_data=key_data,
-                        file_name="normalized_bg",
-                        extension="mp4",
-                        creator_func=_normalize_bg_creator_wait,
-                    )
-                except Exception as e:
-                    print(
-                        f"[Warning] Could not inspect/normalize BG video {bg_path.name}: {e}. Using as-is."
-                    )
+                    except Exception as e:
+                        print(
+                            f"[Warning] Could not inspect/normalize BG video {bg_path.name}: {e}. Using as-is."
+                        )
                 cmd.extend(
                     [
                         "-ss",

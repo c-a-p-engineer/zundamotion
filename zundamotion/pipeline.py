@@ -92,6 +92,11 @@ class GenerationPipeline:
         pipeline_start_time = time.time()
         with tempfile.TemporaryDirectory() as temp_dir_str:
             temp_dir = Path(temp_dir_str)
+            # Route ephemeral (no-cache) outputs to temp_dir for this run
+            try:
+                self.cache_manager.set_ephemeral_dir(temp_dir)
+            except Exception:
+                pass
             if isinstance(logger, KVLogger):
                 logger.kv_info(
                     f"Using temporary directory: {temp_dir}",

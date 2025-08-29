@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import os
@@ -37,6 +38,11 @@ class CacheManager:
         self.cache_refresh = cache_refresh
         self.max_size_mb = max_size_mb
         self.ttl_hours = ttl_hours
+        # Ephemeral (temporary) directory to use when no_cache=True
+        self.ephemeral_dir: Optional[Path] = None
+        # In-process de-duplication for no-cache creation
+        self._inflight_lock = asyncio.Lock()
+        self._inflight_tasks: Dict[str, asyncio.Task] = {}
 
         try:
             self.cache_dir.mkdir(exist_ok=True)
@@ -65,6 +71,15 @@ class CacheManager:
 
         except Exception as e:
             raise CacheError(f"Failed to initialize cache directory: {e}")
+
+    def set_ephemeral_dir(self, temp_dir: Path) -> None:
+        """Sets the directory for ephemeral outputs when cache is disabled."""
+        try:
+            temp_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            # Directory may already exist or be a TemporaryDirectory
+            pass
+        self.ephemeral_dir = temp_dir
 
     def _generate_hash(self, data: Dict[str, Any]) -> str:
         """Generates a SHA256 hash from a dictionary, handling Path objects."""
@@ -343,14 +358,29 @@ class CacheManager:
         )
 
         if self.no_cache:
-            # キャッシュ無効時は一時ファイルとして生成し、キャッシュディレクトリには保存しない
-            temp_output_path = (
-                self.cache_dir / f"temp_{file_name}_{cache_key}.{extension}"
-            )
-            logger.info(
-                f"Cache disabled. Generating temporary file: {temp_output_path.name}"
-            )
-            return await creator_func(temp_output_path)
+            # キャッシュ無効時は一時ファイルとして生成し、ephemeral_dir（temp_dir）に保存
+            # 同一キーの多重実行を同プロセス内で抑止
+            async with self._inflight_lock:
+                existing = self._inflight_tasks.get(cache_key)
+                if existing is None:
+                    base_dir = self.ephemeral_dir or self.cache_dir
+                    temp_output_path = (
+                        base_dir / f"temp_{file_name}_{cache_key}.{extension}"
+                    )
+                    logger.info(
+                        f"Cache disabled. Generating temporary file: (Ephemeral) {temp_output_path}"
+                    )
+                    task = asyncio.create_task(creator_func(temp_output_path))
+                    self._inflight_tasks[cache_key] = task
+                else:
+                    task = existing
+            try:
+                result_path = await task
+                return result_path
+            finally:
+                # creator completion: remove inflight task
+                async with self._inflight_lock:
+                    self._inflight_tasks.pop(cache_key, None)
 
         if self.cache_refresh and cached_path.exists():
             logger.info(

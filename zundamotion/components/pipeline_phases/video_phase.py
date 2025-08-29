@@ -40,6 +40,27 @@ class VideoPhase:
             "video_extensions",
             [".mp4", ".mov", ".webm", ".avi", ".mkv"],
         )
+        # クリップ並列実行ワーカー数を決定
+        self.clip_workers = self._determine_clip_workers(jobs)
+
+    @staticmethod
+    def _determine_clip_workers(jobs: str) -> int:
+        """決定的な並列度を返す。"""
+        try:
+            import os
+
+            if jobs is None:
+                return max(1, (os.cpu_count() or 2) // 2)
+            j = jobs.strip().lower()
+            if j in ("0", "auto"):
+                return max(2, (os.cpu_count() or 2) // 2)
+            val = int(j)
+            if val <= 0:
+                return max(2, (os.cpu_count() or 2) // 2)
+            # 上限はCPU数
+            return max(1, min(val, os.cpu_count() or val))
+        except Exception:
+            return 2
 
     @classmethod
     async def create(
@@ -113,7 +134,9 @@ class VideoPhase:
     ) -> List[Path]:
         """Phase 2: Render video clips for each scene."""
         start_time = time.time()  # Start timing
-        logger.info("VideoPhase started.")
+        logger.info(
+            f"VideoPhase started. clip_workers={self.clip_workers}, hw_kind={self.hw_kind}"
+        )
 
         all_clips: List[Path] = []
         bg_default = self.config.get("background", {}).get("default")
@@ -176,82 +199,90 @@ class VideoPhase:
                             f"Failed to generate looped background video for scene {scene_id}"
                         )
 
-                scene_line_clips: List[Path] = []
-                current_scene_time = 0.0
-                for idx, line in enumerate(scene.get("lines", []), start=1):
-                    line_id = f"{scene_id}_{idx}"
-                    line_data = line_data_map[line_id]
-                    duration = line_data["duration"]
-                    line_config = line_data["line_config"]
+                # 先に各行の開始時刻を決定
+                lines = list(enumerate(scene.get("lines", []), start=1))
+                start_time_by_idx: Dict[int, float] = {}
+                t_acc = 0.0
+                for idx, _line in lines:
+                    line_id2 = f"{scene_id}_{idx}"
+                    d = line_data_map[line_id2]["duration"]
+                    start_time_by_idx[idx] = t_acc
+                    t_acc += d
 
-                    background_config = {
-                        "type": "video" if is_bg_video else "image",
-                        "path": (
-                            str(scene_bg_video_path) if is_bg_video else bg_image
-                        ),  # Pathオブジェクトを文字列に変換
-                        "start_time": current_scene_time,
-                    }
+                # 並列レンダリング用のタスクを構築
+                import asyncio
 
-                    if line_data["type"] == "wait":
-                        logger.debug(
-                            f"Rendering wait clip for {duration}s (Scene '{scene_id}', Line {idx})"
-                        )
-                        wait_cache_data = {
-                            "type": "wait",
-                            "duration": duration,
-                            "bg_image_path": bg_image,
-                            "is_bg_video": is_bg_video,
-                            "start_time": current_scene_time,
-                            "video_config": self.config.get("video", {}),
-                            "line_config": line_config,
-                            "hw_kind": self.hw_kind,  # 追加
-                            "video_params": self.video_params.__dict__,  # 追加
-                            "audio_params": self.audio_params.__dict__,  # 追加
+                sem = asyncio.Semaphore(self.clip_workers)
+                results: List[Optional[Path]] = [None] * len(lines)
+
+                async def process_one(idx: int, line: Dict[str, Any]):
+                    async with sem:
+                        line_id = f"{scene_id}_{idx}"
+                        line_data = line_data_map[line_id]
+                        duration = line_data["duration"]
+                        line_config = line_data["line_config"]
+
+                        background_config = {
+                            "type": "video" if is_bg_video else "image",
+                            "path": (
+                                str(scene_bg_video_path) if is_bg_video else bg_image
+                            ),
+                            "start_time": start_time_by_idx[idx],
                         }
+                        # ループ済みシーンBGは既に正規化済みのため、以降のクリップ生成での正規化をスキップ
+                        if is_bg_video and scene_bg_video_path is not None:
+                            background_config["normalized"] = True
 
-                        async def wait_creator_func(
-                            output_path: Path,
-                        ) -> Path:
-                            clip_path = await self.video_renderer.render_wait_clip(
-                                duration,
-                                background_config,
-                                output_path.stem,
-                                line_config,
+                        if line_data["type"] == "wait":
+                            logger.debug(
+                                f"Rendering wait clip for {duration}s (Scene '{scene_id}', Line {idx})"
                             )
-                            if clip_path is None:
-                                raise PipelineError(
-                                    f"Wait clip rendering failed for line: {line_id}"
-                                )
-                            return clip_path
+                            wait_cache_data = {
+                                "type": "wait",
+                                "duration": duration,
+                                "bg_image_path": bg_image,
+                                "is_bg_video": is_bg_video,
+                                "start_time": start_time_by_idx[idx],
+                                "video_config": self.config.get("video", {}),
+                                "line_config": line_config,
+                                "hw_kind": self.hw_kind,
+                                "video_params": self.video_params.__dict__,
+                                "audio_params": self.audio_params.__dict__,
+                            }
 
-                        clip_path = await self.cache_manager.get_or_create(
-                            key_data=wait_cache_data,
-                            file_name=line_id,
-                            extension="mp4",
-                            creator_func=wait_creator_func,
-                        )
-                        if clip_path:
-                            scene_line_clips.append(clip_path)
-                    else:  # Talk Step
+                            async def wait_creator_func(output_path: Path) -> Path:
+                                clip_path = await self.video_renderer.render_wait_clip(
+                                    duration,
+                                    background_config,
+                                    output_path.stem,
+                                    line_config,
+                                )
+                                if clip_path is None:
+                                    raise PipelineError(
+                                        f"Wait clip rendering failed for line: {line_id}"
+                                    )
+                                return clip_path
+
+                            clip_path = await self.cache_manager.get_or_create(
+                                key_data=wait_cache_data,
+                                file_name=line_id,
+                                extension="mp4",
+                                creator_func=wait_creator_func,
+                            )
+                            results[idx - 1] = clip_path
+                            return
+
+                        # Talk step
                         text = line_data["text"]
                         audio_path = line_data["audio_path"]
                         logger.debug(
                             f"Rendering clip for line '{text[:30]}...' (Scene '{scene_id}', Line {idx})"
                         )
 
-                        # 字幕PNGを生成し、FFmpegの入力とフィルタースニペットを取得
-                        # 現在の入力ストリーム数を考慮してインデックスを決定
-                        # VideoRenderer.render_clip内で動的に入力インデックスを管理するため、ここでは仮のインデックスを渡す
-                        # 実際にはVideoRendererが管理する
-                        (
-                            extra_subtitle_inputs,
-                            subtitle_filter_snippet,
-                        ) = await self.subtitle_gen.build_subtitle_overlay(
-                            text,
-                            duration,
-                            line_config,
-                            "with_char",
-                            0,  # 0は仮の値、VideoRendererが調整
+                        extra_subtitle_inputs, subtitle_filter_snippet = (
+                            await self.subtitle_gen.build_subtitle_overlay(
+                                text, duration, line_config, "with_char", 0
+                            )
                         )
 
                         audio_cache_key_data = {
@@ -265,27 +296,23 @@ class VideoPhase:
                                 audio_cache_key_data
                             ),
                             "duration": duration,
-                            "subtitle_png_path": extra_subtitle_inputs[
-                                "-i"
-                            ],  # キャッシュキーにPNGパスを含める
-                            "subtitle_filter_snippet": subtitle_filter_snippet,  # キャッシュキーにフィルタースニペットを含める
+                            "subtitle_png_path": extra_subtitle_inputs["-i"],
+                            "subtitle_filter_snippet": subtitle_filter_snippet,
                             "bg_image_path": bg_image,
                             "is_bg_video": is_bg_video,
-                            "start_time": current_scene_time,
+                            "start_time": start_time_by_idx[idx],
                             "video_config": self.config.get("video", {}),
                             "subtitle_config": self.config.get("subtitle", {}),
                             "bgm_config": self.config.get("bgm", {}),
                             "insert_config": line_config.get("insert"),
-                            "hw_kind": self.hw_kind,  # 追加
-                            "video_params": self.video_params.__dict__,  # 追加
-                            "audio_params": self.audio_params.__dict__,  # 追加
+                            "hw_kind": self.hw_kind,
+                            "video_params": self.video_params.__dict__,
+                            "audio_params": self.audio_params.__dict__,
                         }
 
-                        async def clip_creator_func(
-                            output_path: Path,
-                        ) -> Path:
+                        async def clip_creator_func(output_path: Path) -> Path:
                             clip_path = await self.video_renderer.render_clip(
-                                audio_path=audio_path,  # Pathオブジェクトのまま渡す
+                                audio_path=audio_path,
                                 duration=duration,
                                 background_config=background_config,
                                 characters_config=line.get("characters", []),
@@ -305,14 +332,14 @@ class VideoPhase:
                             extension="mp4",
                             creator_func=clip_creator_func,
                         )
-                        if clip_path:
-                            scene_line_clips.append(clip_path)
-                        else:
-                            raise PipelineError(
-                                f"Clip rendering failed for line: {line_id}"
-                            )
+                        results[idx - 1] = clip_path
 
-                    current_scene_time += duration
+                tasks = [process_one(idx, line) for idx, line in lines]
+                # 並列実行
+                await asyncio.gather(*tasks)
+
+                # 順序維持で集約
+                scene_line_clips: List[Path] = [p for p in results if p is not None]
 
                 if scene_line_clips:
                     scene_output_path = self.temp_dir / f"scene_output_{scene_id}.mp4"
