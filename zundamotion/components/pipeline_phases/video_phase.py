@@ -185,39 +185,65 @@ class VideoPhase:
 
                 # シーンベース映像（背景のみ）を事前生成（動画/静止画どちらでも）
                 scene_base_path: Optional[Path] = None
-                # 静的レイヤ（全行で不変な立ち絵・挿入画像）を検出
+                # 静的レイヤ（全行で不変な立ち絵・挿入画像）を検出（項目単位の共通部分を抽出）
                 static_overlays: List[Dict[str, Any]] = []
+                static_char_keys: set = set()
+                static_insert_in_base = False
                 try:
                     talk_lines = [
-                        l for l in scene.get("lines", []) if not ("wait" in l or l.get("type") == "wait")
+                        l
+                        for l in scene.get("lines", [])
+                        if not ("wait" in l or l.get("type") == "wait")
                     ]
                     if talk_lines:
-                        # 立ち絵の共通性
-                        first_chars = talk_lines[0].get("characters", [])
-                        same_chars_all = all(
-                            (tl.get("characters", []) == first_chars) for tl in talk_lines
-                        )
-                        if same_chars_all and first_chars:
-                            for ch in first_chars:
+                        # 各行の可視キャラを正規化してキー化（name, expr, scale, anchor, pos）
+                        def _norm_char_entries(line: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:
+                            entries: Dict[tuple, Dict[str, Any]] = {}
+                            for ch in line.get("characters", []) or []:
                                 if not ch.get("visible", False):
                                     continue
-                                char_name = ch.get("name")
+                                name = ch.get("name")
                                 expr = ch.get("expression", "default")
-                                # 画像パス（存在チェックは renderer に任せる）
-                                static_overlays.append(
-                                    {
-                                        "path": f"assets/characters/{char_name}/{expr}.png",
-                                        "scale": ch.get("scale", 1.0),
-                                        "anchor": ch.get("anchor", "bottom_center"),
-                                        "position": ch.get("position", {"x": "0", "y": "0"}),
-                                    }
+                                scale = ch.get("scale", 1.0)
+                                anchor = ch.get("anchor", "bottom_center")
+                                pos = ch.get("position", {"x": "0", "y": "0"}) or {}
+                                key = (
+                                    name,
+                                    expr,
+                                    float(scale),
+                                    str(anchor),
+                                    str(pos.get("x", "0")),
+                                    str(pos.get("y", "0")),
                                 )
+                                entries[key] = {
+                                    "path": f"assets/characters/{name}/{expr}.png",
+                                    "scale": scale,
+                                    "anchor": anchor,
+                                    "position": {"x": pos.get("x", "0"), "y": pos.get("y", "0")},
+                                }
+                            return entries
 
-                        # 画像の挿入が全行共通か
+                        per_line_char_maps = [_norm_char_entries(tl) for tl in talk_lines]
+                        if per_line_char_maps:
+                            common_keys = set(per_line_char_maps[0].keys())
+                            for m in per_line_char_maps[1:]:
+                                common_keys &= set(m.keys())
+                            for key in sorted(common_keys):
+                                ov = per_line_char_maps[0][key]
+                                p = Path(ov["path"])  # expr 固定のはず
+                                if not p.exists():
+                                    # default フォールバック
+                                    name, _expr, _s, _a, _x, _y = key
+                                    alt = Path(f"assets/characters/{name}/default.png")
+                                    if not alt.exists():
+                                        continue
+                                    ov = {**ov, "path": str(alt)}
+                                static_overlays.append(ov)
+                                static_char_keys.add(key)
+
+                        # 画像の挿入が全行共通か（画像のみ、動画は対象外）
                         first_insert = talk_lines[0].get("insert")
                         if first_insert:
-                            import os
-
                             same_insert_all = all(
                                 (tl.get("insert") == first_insert) for tl in talk_lines
                             )
@@ -229,19 +255,24 @@ class VideoPhase:
                                     ".jpeg",
                                     ".bmp",
                                     ".webp",
-                                ]:
+                                ] and insert_path.exists():
                                     static_overlays.append(
                                         {
                                             "path": str(insert_path),
                                             "scale": first_insert.get("scale", 1.0),
-                                            "anchor": first_insert.get("anchor", "middle_center"),
-                                            "position": first_insert.get("position", {"x": "0", "y": "0"}),
+                                            "anchor": first_insert.get(
+                                                "anchor", "middle_center"
+                                            ),
+                                            "position": first_insert.get(
+                                                "position", {"x": "0", "y": "0"}
+                                            ),
                                         }
                                     )
+                                    static_insert_in_base = True
                 except Exception as e:
-                    logger.debug(f"Static overlay detection failed on scene {scene_id}: {e}")
-                strip_static_chars = False
-                strip_static_insert = False
+                    logger.debug(
+                        f"Static overlay detection failed on scene {scene_id}: {e}"
+                    )
                 try:
                     bg_config_for_base = {
                         "type": "video" if is_bg_video else "image",
@@ -255,32 +286,7 @@ class VideoPhase:
                             scene_base_filename,
                             static_overlays,
                         )
-                        # ベースに取り込んだ静的オーバーレイの種類を反映
-                        # 立ち絵を入れた場合は per-line から除去
-                        talk_lines = [
-                            l for l in scene.get("lines", []) if not ("wait" in l or l.get("type") == "wait")
-                        ]
-                        if talk_lines:
-                            first_chars = talk_lines[0].get("characters", [])
-                            same_chars_all = all(
-                                (tl.get("characters", []) == first_chars) for tl in talk_lines
-                            )
-                            if same_chars_all and first_chars and any(c.get("visible", False) for c in first_chars):
-                                strip_static_chars = True
-                        first_insert = talk_lines[0].get("insert") if talk_lines else None
-                        if first_insert:
-                            insert_path = Path(first_insert.get("path", ""))
-                            same_insert_all = all(
-                                (tl.get("insert") == first_insert) for tl in talk_lines
-                            )
-                            if same_insert_all and insert_path.suffix.lower() in [
-                                ".png",
-                                ".jpg",
-                                ".jpeg",
-                                ".bmp",
-                                ".webp",
-                            ]:
-                                strip_static_insert = True
+                        # ベースに取り込んだ静的オーバーレイの種類は per-line で個別に除外処理
                     else:
                         scene_base_path = await self.video_renderer.render_scene_base(
                             bg_config_for_base, scene_duration, scene_base_filename
@@ -412,13 +418,30 @@ class VideoPhase:
                             "line_config": line_config,
                             "voice_config": self.config.get("voice", {}),
                         }
-                        # 静的レイヤをベースに取り込んでいる場合、行側の対象を除去
-                        effective_characters = (
-                            [] if strip_static_chars else line.get("characters", [])
-                        )
-                        effective_insert = (
-                            None if strip_static_insert else line_config.get("insert")
-                        )
+                        # 静的レイヤをベースに取り込んでいる場合、行側から該当項目のみ除去
+                        original_characters = line.get("characters", []) or []
+                        if static_char_keys:
+                            eff_chars: List[Dict[str, Any]] = []
+                            for ch in original_characters:
+                                if not ch.get("visible", False):
+                                    eff_chars.append(ch)
+                                    continue
+                                key = (
+                                    ch.get("name"),
+                                    ch.get("expression", "default"),
+                                    float(ch.get("scale", 1.0)),
+                                    str(ch.get("anchor", "bottom_center")),
+                                    str((ch.get("position", {}) or {}).get("x", "0")),
+                                    str((ch.get("position", {}) or {}).get("y", "0")),
+                                )
+                                if key in static_char_keys:
+                                    continue
+                                eff_chars.append(ch)
+                            effective_characters = eff_chars
+                        else:
+                            effective_characters = original_characters
+
+                        effective_insert = None if static_insert_in_base else line_config.get("insert")
 
                         video_cache_data = {
                             "type": "talk",
@@ -435,8 +458,8 @@ class VideoPhase:
                             "subtitle_config": self.config.get("subtitle", {}),
                             "bgm_config": self.config.get("bgm", {}),
                             "insert_config": effective_insert,
-                            "static_chars_in_base": strip_static_chars,
-                            "static_insert_in_base": strip_static_insert,
+                            "static_chars_in_base": bool(static_char_keys),
+                            "static_insert_in_base": static_insert_in_base,
                             "hw_kind": self.hw_kind,
                             "video_params": self.video_params.__dict__,
                             "audio_params": self.audio_params.__dict__,

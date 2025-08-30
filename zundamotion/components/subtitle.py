@@ -3,7 +3,7 @@ from typing import Any, Dict, Tuple
 
 from zundamotion.cache import CacheManager
 
-from ..utils.ffmpeg_utils import has_cuda_filters, is_nvenc_available
+from ..utils.ffmpeg_utils import has_cuda_filters, is_nvenc_available, get_hw_filter_mode
 from .subtitle_png import SubtitlePNGRenderer
 
 
@@ -20,6 +20,7 @@ class SubtitleGenerator:
         in_label: str,
         index: int,
         force_cpu: bool = False,
+        allow_cuda: bool | None = None,
     ) -> Tuple[Dict[str, Any], str]:
         """
         Returns:
@@ -50,7 +51,14 @@ class SubtitleGenerator:
         y_expr = convert_expr(style.get("y", "H-100"))
         x_expr = convert_expr(style.get("x", "(W-w)/2"))
 
-        use_cuda = (not force_cpu) and await is_nvenc_available() and await has_cuda_filters()
+        # CUDA 使用可否は VideoRenderer 側の判定結果（allow_cuda）を優先
+        global_mode = get_hw_filter_mode()
+        if global_mode == "cpu":
+            use_cuda = False
+        elif allow_cuda is None:
+            use_cuda = (not force_cpu) and await is_nvenc_available() and await has_cuda_filters()
+        else:
+            use_cuda = (not force_cpu) and bool(allow_cuda)
 
         extra_input = {"-loop": "1", "-i": str(png_path)}
 

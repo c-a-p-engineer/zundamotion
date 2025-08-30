@@ -18,6 +18,8 @@ from ..utils.ffmpeg_utils import (
     has_cuda_filters,
     smoke_test_cuda_filters,
     normalize_media,
+    get_hw_filter_mode,
+    set_hw_filter_mode,
 )
 from .subtitle import SubtitleGenerator
 
@@ -75,6 +77,9 @@ class VideoRenderer:
         has_cuda_filters_val = (
             has_cuda_filters_listed and (await smoke_test_cuda_filters(ffmpeg_path))
         )
+        # Respect global HW filter mode (process-wide backoff)
+        if get_hw_filter_mode() == "cpu":
+            has_cuda_filters_val = False
         return cls(
             config,
             temp_dir,
@@ -318,11 +323,13 @@ class VideoRenderer:
         # RGBAを含むオーバーレイ（字幕PNG/立ち絵/挿入画像）が1つでもあれば CPU 合成へ（実験フラグで緩和）
         uses_alpha_overlay = any_character_visible or (insert_config and insert_is_image)
         # If experimental flag is on, try GPU overlays even with RGBA inputs
+        global_mode = get_hw_filter_mode()
         use_cuda_filters = (
             self.has_cuda_filters
             and self.hw_kind == "nvenc"
             and (self.gpu_overlay_experimental or not uses_alpha_overlay)
             and not _force_cpu
+            and global_mode != "cpu"
         )
         if use_cuda_filters:
             print(
@@ -458,6 +465,7 @@ class VideoRenderer:
                     in_label=in_label_name,
                     index=subtitle_ffmpeg_index,
                     force_cpu=_force_cpu,
+                    allow_cuda=use_cuda_filters,
                 )
                 # PNG 入力を追加
                 if isinstance(extra_inputs, dict) and extra_inputs.get("-i"):
@@ -552,6 +560,11 @@ class VideoRenderer:
             )
             if not _force_cpu and should_fallback:
                 print("[Fallback] NVENC/CUDA path failed. Retrying with CPU filters/encoder.")
+                # Process-wide backoff to CPU filters to avoid repeat failures
+                try:
+                    set_hw_filter_mode("cpu")
+                except Exception:
+                    pass
                 prev_hw = os.environ.get("DISABLE_HWENC")
                 prev_ft = os.environ.get("FFMPEG_FILTER_THREADS")
                 prev_fct = os.environ.get("FFMPEG_FILTER_COMPLEX_THREADS")
@@ -747,23 +760,13 @@ class VideoRenderer:
                 print(process.stderr.strip())
             return output_path
         except subprocess.CalledProcessError as e:
-            # CUDA 経路での失敗は CPU フィルタへ自動フォールバック（NVENC は継続）
-            if (used_any_cuda or use_cuda_filters) and not _force_cpu:
-                print(
-                    "[Filters] CUDA path failed; retrying once with CPU filters while keeping NVENC if available."
-                )
-                return await self.render_clip(
-                    audio_path=audio_path,
-                    duration=duration,
-                    background_config=background_config,
-                    characters_config=characters_config,
-                    output_filename=output_filename,
-                    subtitle_text=subtitle_text,
-                    subtitle_line_config=subtitle_line_config,
-                    insert_config=insert_config,
-                    _force_cpu=True,
-                )
-            # それ以外は従来のエラーとして再送出
+            print(
+                f"[Error] ffmpeg failed for composited scene base {output_filename}"
+            )
+            print("---- FFmpeg STDERR ----")
+            print((e.stderr or "").strip())
+            print("---- FFmpeg STDOUT ----")
+            print((e.stdout or "").strip())
             raise
 
     # --------------------------

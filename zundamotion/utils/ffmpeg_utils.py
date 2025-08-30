@@ -25,6 +25,36 @@ from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 from zundamotion.utils.logger import logger
 
+# =========================================================
+# Global HW filter mode (process-wide backoff control)
+# =========================================================
+# Modes:
+#  - 'auto': decide dynamically (prefer CUDA filters if available/stable)
+#  - 'cuda': force allow CUDA filters when possible
+#  - 'cpu' : disable CUDA filters globally in this process
+_hw_filter_mode: str = (
+    os.environ.get("HW_FILTER_MODE", "auto").lower()
+    if os.environ.get("HW_FILTER_MODE", "auto").lower() in {"auto", "cuda", "cpu"}
+    else "auto"
+)
+
+
+def set_hw_filter_mode(mode: str) -> None:
+    """Set global HW filter mode: 'auto' | 'cuda' | 'cpu'."""
+    global _hw_filter_mode
+    mode_l = (mode or "").lower()
+    if mode_l not in {"auto", "cuda", "cpu"}:
+        logger.warning(f"Invalid HW filter mode '{mode}'; keeping '{_hw_filter_mode}'.")
+        return
+    if _hw_filter_mode != mode_l:
+        logger.info(f"Setting HW filter mode to '{mode_l}'.")
+    _hw_filter_mode = mode_l
+
+
+def get_hw_filter_mode() -> str:
+    """Get global HW filter mode: 'auto' | 'cuda' | 'cpu'."""
+    return _hw_filter_mode
+
 
 # =========================================================
 # データクラス
@@ -513,9 +543,15 @@ async def smoke_test_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
             _cuda_smoke_result = True
         except Exception as e:
             logger.warning(
-                "CUDA filter smoke test failed; will fallback to CPU filters when needed: %s",
+                "CUDA filter smoke test failed; switching global HW filter mode to CPU: %s",
                 e,
             )
+            # On first failure, enforce process-wide CPU filters to avoid repeated failures.
+            try:
+                set_hw_filter_mode("cpu")
+            except Exception:
+                # Avoid cascading errors if logger/env have issues
+                pass
             _cuda_smoke_result = False
         return _cuda_smoke_result
 
