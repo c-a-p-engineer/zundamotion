@@ -16,6 +16,7 @@ from ..utils.ffmpeg_utils import (
     get_media_info,
     has_audio_stream,
     has_cuda_filters,
+    smoke_test_cuda_filters,
     normalize_media,
 )
 from .subtitle import SubtitleGenerator
@@ -68,8 +69,11 @@ class VideoRenderer:
         video_params: Optional[VideoParams] = None,
         audio_params: Optional[AudioParams] = None,
     ):
-        has_cuda_filters_val = await has_cuda_filters(
-            config.get("ffmpeg_path", "ffmpeg")
+        ffmpeg_path = config.get("ffmpeg_path", "ffmpeg")
+        # フィルタ存在チェックに加えて実行スモークテストで確度を上げる
+        has_cuda_filters_listed = await has_cuda_filters(ffmpeg_path)
+        has_cuda_filters_val = (
+            has_cuda_filters_listed and (await smoke_test_cuda_filters(ffmpeg_path))
         )
         return cls(
             config,
@@ -479,14 +483,12 @@ class VideoRenderer:
         used_any_cuda = use_cuda_filters or (
             isinstance(subtitle_snippet, str) and ("overlay_cuda" in subtitle_snippet)
         )
-        if used_any_cuda:
-            filter_complex_parts.append(
-                f"{current_video_stream}hwdownload,format=yuv420p[final_v]"
-            )
+        if used_any_cuda and self.hw_kind == "nvenc":
+            # GPU内完結: そのまま NVENC に渡す（CPUへの hwdownload を回避）
+            filter_complex_parts.append(f"{current_video_stream}null[final_v]")
         else:
-            filter_complex_parts.append(
-                f"{current_video_stream}format=yuv420p[final_v]"
-            )
+            # CPU 経路（または NVENC 以外）は従来通り yuv420p へ確定
+            filter_complex_parts.append(f"{current_video_stream}format=yuv420p[final_v]")
 
         # --- Audio --------------------------------------------------------------
         # has_audio_stream is async; ensure we await it to get a boolean
@@ -739,10 +741,30 @@ class VideoRenderer:
         cmd.extend(["-an"])  # ベースは映像のみ
         cmd.extend([str(output_path)])
 
-        process = await _run_ffmpeg_async(cmd)
-        if process.stderr:
-            print(process.stderr.strip())
-        return output_path
+        try:
+            process = await _run_ffmpeg_async(cmd)
+            if process.stderr:
+                print(process.stderr.strip())
+            return output_path
+        except subprocess.CalledProcessError as e:
+            # CUDA 経路での失敗は CPU フィルタへ自動フォールバック（NVENC は継続）
+            if (used_any_cuda or use_cuda_filters) and not _force_cpu:
+                print(
+                    "[Filters] CUDA path failed; retrying once with CPU filters while keeping NVENC if available."
+                )
+                return await self.render_clip(
+                    audio_path=audio_path,
+                    duration=duration,
+                    background_config=background_config,
+                    characters_config=characters_config,
+                    output_filename=output_filename,
+                    subtitle_text=subtitle_text,
+                    subtitle_line_config=subtitle_line_config,
+                    insert_config=insert_config,
+                    _force_cpu=True,
+                )
+            # それ以外は従来のエラーとして再送出
+            raise
 
     # --------------------------
     # 無音待機クリップ

@@ -470,6 +470,56 @@ async def has_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
         return False
 
 
+# 軽量な CUDA フィルタのスモークテスト（overlay_cuda/scale_cuda 実行確認）
+_cuda_smoke_result: Optional[bool] = None
+_cuda_smoke_lock = asyncio.Lock()
+
+
+async def smoke_test_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
+    """
+    overlay_cuda/scale_cuda が実行できるかを短いフィルタグラフで検証。
+    成功/失敗をプロセス内でキャッシュする。
+    """
+    global _cuda_smoke_result
+    if _cuda_smoke_result is not None:
+        return _cuda_smoke_result
+
+    async with _cuda_smoke_lock:
+        if _cuda_smoke_result is not None:
+            return _cuda_smoke_result
+        # 64x64黒 + 32x32白を GPU に上げて overlay_cuda。
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=64x64:d=0.1",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=white:s=32x32:d=0.1",
+            "-filter_complex",
+            "[0:v]format=nv12,hwupload_cuda[bg];[1:v]format=rgba,hwupload_cuda,scale_cuda=32:32[ov];[bg][ov]overlay_cuda=x=16:y=16[out]",
+            "-map",
+            "[out]",
+            "-f",
+            "null",
+            "-",
+        ]
+        try:
+            await _run_ffmpeg_async(cmd)
+            _cuda_smoke_result = True
+        except Exception as e:
+            logger.warning(
+                "CUDA filter smoke test failed; will fallback to CPU filters when needed: %s",
+                e,
+            )
+            _cuda_smoke_result = False
+        return _cuda_smoke_result
+
+
 async def get_hardware_encoder_kind(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
     """
     利用可能なH.264/HEVCハードウェア「エンコーダ」を判定して返す。
