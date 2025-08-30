@@ -67,7 +67,10 @@ class FinalizePhase:
                 "FinalizePhase: All video clips have identical parameters. Attempting -c copy concat."
             )
             try:
-                await concat_videos_copy(input_video_str_paths, str(output_video_path))
+                # Final output should be faststart-enabled for better streaming
+                await concat_videos_copy(
+                    input_video_str_paths, str(output_video_path), movflags_faststart=True
+                )
                 logger.info(
                     f"FinalizePhase: Successfully concatenated videos using -c copy to {output_video_path}"
                 )
@@ -150,12 +153,8 @@ class FinalizePhase:
         cmd.extend(["-c:v", encoder])
         cmd.extend(video_opts)
         cmd.extend(audio_opts)
-        cmd.extend(
-            [
-                "-shortest",
-                str(output_video_path),
-            ]
-        )
+        cmd.extend(["-movflags", "+faststart"])  # final output only
+        cmd.extend(["-shortest", str(output_video_path)])
 
         logger.info(f"FinalizePhase: FFmpeg re-encode concat command: {' '.join(cmd)}")
 

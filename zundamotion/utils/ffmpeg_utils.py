@@ -100,7 +100,20 @@ class VideoParams:
                 opts.extend(["-b:v", "5M"])  # デフォルト
         else:  # CPU
             opts.extend(["-c:v", "libx264"])
-            opts.extend(["-preset", self.preset])
+            # Map NVENC-style presets (p7..p1) to libx264 presets if present
+            preset = self.preset
+            if isinstance(preset, str) and preset.startswith("p"):
+                mapping = {
+                    "p7": "ultrafast",
+                    "p6": "veryfast",
+                    "p5": "medium",
+                    "p4": "slow",
+                    "p3": "slower",
+                    "p2": "veryslow",
+                    "p1": "veryslow",
+                }
+                preset = mapping.get(preset, "medium")
+            opts.extend(["-preset", preset])
             if self.crf is not None:
                 opts.extend(["-crf", str(self.crf)])
             elif self.bitrate_kbps is not None:
@@ -814,7 +827,10 @@ async def compare_media_params(file_paths: List[str]) -> bool:
 
 
 async def concat_videos_copy(
-    input_paths: List[str], output_path: str, ffmpeg_path: str = "ffmpeg"
+    input_paths: List[str],
+    output_path: str,
+    ffmpeg_path: str = "ffmpeg",
+    movflags_faststart: bool = False,
 ):
     """
     -f concat -c copy を使用して動画を再エンコードなしで結合する。
@@ -840,8 +856,12 @@ async def concat_videos_copy(
         list_file_path,
         "-c",
         "copy",
-        output_path,
     ]
+    if movflags_faststart:
+        cmd.extend(["-movflags", "+faststart"])
+    cmd.extend([
+        output_path,
+    ])
 
     try:
         proc = await _run_ffmpeg_async(cmd)  # await を追加

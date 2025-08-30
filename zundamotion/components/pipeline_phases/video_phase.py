@@ -40,27 +40,39 @@ class VideoPhase:
             "video_extensions",
             [".mp4", ".mov", ".webm", ".avi", ".mkv"],
         )
-        # クリップ並列実行ワーカー数を決定
-        self.clip_workers = self._determine_clip_workers(jobs)
+        # クリップ並列実行ワーカー数を決定（NVENC 時は保守的に 1-2）
+        self.clip_workers = self._determine_clip_workers(jobs, self.hw_kind)
 
     @staticmethod
-    def _determine_clip_workers(jobs: str) -> int:
+    def _determine_clip_workers(jobs: str, hw_kind: Optional[str]) -> int:
         """決定的な並列度を返す。"""
         try:
             import os
 
             if jobs is None:
-                return max(1, (os.cpu_count() or 2) // 2)
+                base = max(1, (os.cpu_count() or 2) // 2)
+                if hw_kind == "nvenc":
+                    return min(2, max(1, base))
+                return base
             j = jobs.strip().lower()
             if j in ("0", "auto"):
-                return max(2, (os.cpu_count() or 2) // 2)
+                base = max(2, (os.cpu_count() or 2) // 2)
+                if hw_kind == "nvenc":
+                    return min(2, max(1, base))
+                return base
             val = int(j)
             if val <= 0:
-                return max(2, (os.cpu_count() or 2) // 2)
+                base = max(2, (os.cpu_count() or 2) // 2)
+                if hw_kind == "nvenc":
+                    return min(2, max(1, base))
+                return base
             # 上限はCPU数
-            return max(1, min(val, os.cpu_count() or val))
+            decided = max(1, min(val, os.cpu_count() or val))
+            if hw_kind == "nvenc":
+                return min(2, decided)
+            return decided
         except Exception:
-            return 2
+            return 1 if hw_kind == "nvenc" else 2
 
     @classmethod
     async def create(
@@ -171,33 +183,136 @@ class VideoPhase:
                     for idx, line in enumerate(scene.get("lines", []))
                 )
 
-                scene_bg_video_path: Optional[Path] = None
-                if is_bg_video:
-                    # 正規化用のパラメータを取得 (self.video_params と self.audio_params を使用)
-                    # 背景動画を正規化
-                    normalized_bg_path = await normalize_media(
-                        input_path=Path(bg_image),
-                        video_params=self.video_params,  # 変更
-                        audio_params=self.audio_params,  # 変更
-                        cache_manager=self.cache_manager,
-                    )
+                # シーンベース映像（背景のみ）を事前生成（動画/静止画どちらでも）
+                scene_base_path: Optional[Path] = None
+                # 静的レイヤ（全行で不変な立ち絵・挿入画像）を検出
+                static_overlays: List[Dict[str, Any]] = []
+                try:
+                    talk_lines = [
+                        l for l in scene.get("lines", []) if not ("wait" in l or l.get("type") == "wait")
+                    ]
+                    if talk_lines:
+                        # 立ち絵の共通性
+                        first_chars = talk_lines[0].get("characters", [])
+                        same_chars_all = all(
+                            (tl.get("characters", []) == first_chars) for tl in talk_lines
+                        )
+                        if same_chars_all and first_chars:
+                            for ch in first_chars:
+                                if not ch.get("visible", False):
+                                    continue
+                                char_name = ch.get("name")
+                                expr = ch.get("expression", "default")
+                                # 画像パス（存在チェックは renderer に任せる）
+                                static_overlays.append(
+                                    {
+                                        "path": f"assets/characters/{char_name}/{expr}.png",
+                                        "scale": ch.get("scale", 1.0),
+                                        "anchor": ch.get("anchor", "bottom_center"),
+                                        "position": ch.get("position", {"x": "0", "y": "0"}),
+                                    }
+                                )
 
-                    scene_bg_video_filename = f"scene_bg_{scene_id}"
-                    scene_bg_video_path: Optional[Path] = (
-                        await self.video_renderer.render_looped_background_video(
-                            str(normalized_bg_path),  # Pathオブジェクトを文字列に変換
+                        # 画像の挿入が全行共通か
+                        first_insert = talk_lines[0].get("insert")
+                        if first_insert:
+                            import os
+
+                            same_insert_all = all(
+                                (tl.get("insert") == first_insert) for tl in talk_lines
+                            )
+                            if same_insert_all:
+                                insert_path = Path(first_insert.get("path", ""))
+                                if insert_path.suffix.lower() in [
+                                    ".png",
+                                    ".jpg",
+                                    ".jpeg",
+                                    ".bmp",
+                                    ".webp",
+                                ]:
+                                    static_overlays.append(
+                                        {
+                                            "path": str(insert_path),
+                                            "scale": first_insert.get("scale", 1.0),
+                                            "anchor": first_insert.get("anchor", "middle_center"),
+                                            "position": first_insert.get("position", {"x": "0", "y": "0"}),
+                                        }
+                                    )
+                except Exception as e:
+                    logger.debug(f"Static overlay detection failed on scene {scene_id}: {e}")
+                strip_static_chars = False
+                strip_static_insert = False
+                try:
+                    bg_config_for_base = {
+                        "type": "video" if is_bg_video else "image",
+                        "path": str(bg_image),
+                    }
+                    scene_base_filename = f"scene_base_{scene_id}"
+                    if static_overlays:
+                        scene_base_path = await self.video_renderer.render_scene_base_composited(
+                            bg_config_for_base,
                             scene_duration,
-                            scene_bg_video_filename,
+                            scene_base_filename,
+                            static_overlays,
                         )
-                    )
-                    if scene_bg_video_path:
-                        logger.debug(
-                            f"Generated looped scene background video -> {scene_bg_video_path.name}"
-                        )
+                        # ベースに取り込んだ静的オーバーレイの種類を反映
+                        # 立ち絵を入れた場合は per-line から除去
+                        talk_lines = [
+                            l for l in scene.get("lines", []) if not ("wait" in l or l.get("type") == "wait")
+                        ]
+                        if talk_lines:
+                            first_chars = talk_lines[0].get("characters", [])
+                            same_chars_all = all(
+                                (tl.get("characters", []) == first_chars) for tl in talk_lines
+                            )
+                            if same_chars_all and first_chars and any(c.get("visible", False) for c in first_chars):
+                                strip_static_chars = True
+                        first_insert = talk_lines[0].get("insert") if talk_lines else None
+                        if first_insert:
+                            insert_path = Path(first_insert.get("path", ""))
+                            same_insert_all = all(
+                                (tl.get("insert") == first_insert) for tl in talk_lines
+                            )
+                            if same_insert_all and insert_path.suffix.lower() in [
+                                ".png",
+                                ".jpg",
+                                ".jpeg",
+                                ".bmp",
+                                ".webp",
+                            ]:
+                                strip_static_insert = True
                     else:
-                        logger.warning(
-                            f"Failed to generate looped background video for scene {scene_id}"
+                        scene_base_path = await self.video_renderer.render_scene_base(
+                            bg_config_for_base, scene_duration, scene_base_filename
                         )
+                    if scene_base_path:
+                        logger.info(
+                            f"Scene {scene_id}: generated base with {len(static_overlays)} static overlay(s) -> {scene_base_path.name}"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to generate scene base for scene {scene_id}: {e}"
+                    )
+                    # フォールバック: 動画背景なら従来のループ生成を試みる
+                    if is_bg_video:
+                        try:
+                            normalized_bg_path = await normalize_media(
+                                input_path=Path(bg_image),
+                                video_params=self.video_params,
+                                audio_params=self.audio_params,
+                                cache_manager=self.cache_manager,
+                            )
+                            scene_base_path = await self.video_renderer.render_looped_background_video(
+                                str(normalized_bg_path), scene_duration, f"scene_bg_{scene_id}"
+                            )
+                            if scene_base_path:
+                                logger.debug(
+                                    f"Fallback generated looped background -> {scene_base_path.name}"
+                                )
+                        except Exception as e2:
+                            logger.warning(
+                                f"Fallback looped BG generation also failed for scene {scene_id}: {e2}"
+                            )
 
                 # 先に各行の開始時刻を決定
                 lines = list(enumerate(scene.get("lines", []), start=1))
@@ -222,16 +337,29 @@ class VideoPhase:
                         duration = line_data["duration"]
                         line_config = line_data["line_config"]
 
-                        background_config = {
-                            "type": "video" if is_bg_video else "image",
-                            "path": (
-                                str(scene_bg_video_path) if is_bg_video else bg_image
-                            ),
-                            "start_time": start_time_by_idx[idx],
-                        }
-                        # ループ済みシーンBGは既に正規化済みのため、以降のクリップ生成での正規化をスキップ
-                        if is_bg_video and scene_bg_video_path is not None:
-                            background_config["normalized"] = True
+                        # シーンベース映像が生成できたらそれを使い、再スケール/正規化をスキップ
+                        if scene_base_path is not None and scene_base_path.exists():
+                            background_config = {
+                                "type": "video",
+                                "path": str(scene_base_path),
+                                "start_time": start_time_by_idx[idx],
+                                "normalized": True,  # 正規化済み（ベース作成時）
+                                "pre_scaled": True,  # width/height/fps 済み
+                            }
+                        else:
+                            # フォールバック（従来動作）: ベースなしで個別処理
+                            if is_bg_video:
+                                background_config = {
+                                    "type": "video",
+                                    "path": str(bg_image),
+                                    "start_time": start_time_by_idx[idx],
+                                }
+                            else:
+                                background_config = {
+                                    "type": "image",
+                                    "path": str(bg_image),
+                                    "start_time": start_time_by_idx[idx],
+                                }
 
                         if line_data["type"] == "wait":
                             logger.debug(
@@ -279,32 +407,36 @@ class VideoPhase:
                             f"Rendering clip for line '{text[:30]}...' (Scene '{scene_id}', Line {idx})"
                         )
 
-                        extra_subtitle_inputs, subtitle_filter_snippet = (
-                            await self.subtitle_gen.build_subtitle_overlay(
-                                text, duration, line_config, "with_char", 0
-                            )
-                        )
-
                         audio_cache_key_data = {
                             "text": text,
                             "line_config": line_config,
                             "voice_config": self.config.get("voice", {}),
                         }
+                        # 静的レイヤをベースに取り込んでいる場合、行側の対象を除去
+                        effective_characters = (
+                            [] if strip_static_chars else line.get("characters", [])
+                        )
+                        effective_insert = (
+                            None if strip_static_insert else line_config.get("insert")
+                        )
+
                         video_cache_data = {
                             "type": "talk",
                             "audio_cache_key": self.cache_manager._generate_hash(
                                 audio_cache_key_data
                             ),
                             "duration": duration,
-                            "subtitle_png_path": extra_subtitle_inputs["-i"],
-                            "subtitle_filter_snippet": subtitle_filter_snippet,
+                            "subtitle_text": text,
+                            "subtitle_style_override": line_config.get("subtitle"),
                             "bg_image_path": bg_image,
                             "is_bg_video": is_bg_video,
                             "start_time": start_time_by_idx[idx],
                             "video_config": self.config.get("video", {}),
                             "subtitle_config": self.config.get("subtitle", {}),
                             "bgm_config": self.config.get("bgm", {}),
-                            "insert_config": line_config.get("insert"),
+                            "insert_config": effective_insert,
+                            "static_chars_in_base": strip_static_chars,
+                            "static_insert_in_base": strip_static_insert,
                             "hw_kind": self.hw_kind,
                             "video_params": self.video_params.__dict__,
                             "audio_params": self.audio_params.__dict__,
@@ -315,10 +447,11 @@ class VideoPhase:
                                 audio_path=audio_path,
                                 duration=duration,
                                 background_config=background_config,
-                                characters_config=line.get("characters", []),
+                                characters_config=effective_characters,
                                 output_filename=output_path.stem,
-                                extra_subtitle_inputs=extra_subtitle_inputs,
-                                insert_config=line_config.get("insert"),
+                                subtitle_text=text,
+                                subtitle_line_config=line_config,
+                                insert_config=effective_insert,
                             )
                             if clip_path is None:
                                 raise PipelineError(
@@ -355,11 +488,14 @@ class VideoPhase:
                         extension="mp4",
                     )
 
-                if scene_bg_video_path and scene_bg_video_path.exists():
-                    scene_bg_video_path.unlink()
-                    logger.debug(
-                        f"Cleaned up temporary scene background video -> {scene_bg_video_path.name}"
-                    )
+                if scene_base_path and scene_base_path.exists():
+                    try:
+                        scene_base_path.unlink()
+                        logger.debug(
+                            f"Cleaned up temporary scene base video -> {scene_base_path.name}"
+                        )
+                    except Exception:
+                        pass
                 pbar_scenes.update(1)
 
         end_time = time.time()  # End timing

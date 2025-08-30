@@ -1,3 +1,4 @@
+import re
 from typing import Any, Dict, Tuple
 
 from zundamotion.cache import CacheManager
@@ -18,6 +19,7 @@ class SubtitleGenerator:
         line_config: Dict[str, Any],
         in_label: str,
         index: int,
+        force_cpu: bool = False,
     ) -> Tuple[Dict[str, Any], str]:
         """
         Returns:
@@ -32,12 +34,23 @@ class SubtitleGenerator:
         png_path, dims = await self.png_renderer.render(text, style)
 
         # 位置式（あなたの置換ロジックはそのまま活かす）
-        y_expr = style.get("y", "H-100").replace("H", "main_h").replace("W", "main_w")
-        y_expr = y_expr.replace("h", "overlay_h").replace("w", "overlay_w")
-        x_expr = style.get("x", "(W-w)/2").replace("H", "main_h").replace("W", "main_w")
-        x_expr = x_expr.replace("h", "overlay_h").replace("w", "overlay_w")
+        # Convert drawtext-style expr to overlay(_cuda) variables
+        def convert_expr(expr: str) -> str:
+            # Preserve text_* first using placeholders to avoid nested replacements
+            expr = expr.replace("text_w", "{OVERLAY_W}").replace("text_h", "{OVERLAY_H}")
+            # drawtext: w/h => main width/height; overlay: W/H are main dims
+            # Replace lone 'w'/'h' tokens with 'W'/'H'
+            expr = re.sub(r"(?<![A-Za-z_])w(?![A-Za-z_])", "W", expr)
+            expr = re.sub(r"(?<![A-Za-z_])h(?![A-Za-z_])", "H", expr)
+            # Uppercase W/H can be kept as-is for overlay filters
+            # Restore placeholders to overlay input dims (w/h)
+            expr = expr.replace("{OVERLAY_W}", "w").replace("{OVERLAY_H}", "h")
+            return expr
 
-        use_cuda = await is_nvenc_available() and await has_cuda_filters()
+        y_expr = convert_expr(style.get("y", "H-100"))
+        x_expr = convert_expr(style.get("x", "(W-w)/2"))
+
+        use_cuda = (not force_cpu) and await is_nvenc_available() and await has_cuda_filters()
 
         extra_input = {"-loop": "1", "-i": str(png_path)}
 

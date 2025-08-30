@@ -18,6 +18,7 @@ from ..utils.ffmpeg_utils import (
     has_cuda_filters,
     normalize_media,
 )
+from .subtitle import SubtitleGenerator
 
 
 class VideoRenderer:
@@ -44,6 +45,12 @@ class VideoRenderer:
         self.video_params = video_params or VideoParams()
         self.audio_params = audio_params or AudioParams()
         self.has_cuda_filters = has_cuda_filters
+        # Experimental flag: allow GPU overlays even with RGBA inputs
+        self.gpu_overlay_experimental = bool(
+            config.get("video", {}).get("gpu_overlay_experimental", False)
+        )
+        # Subtitle generator (used to build overlay snippet and PNG input)
+        self.subtitle_gen = SubtitleGenerator(self.config, self.cache_manager)
 
         if self.has_cuda_filters:
             print("[Encoder] CUDA filters (scale_cuda, overlay_cuda) are available.")
@@ -81,9 +88,12 @@ class VideoRenderer:
     def _thread_flags(self) -> List[str]:
         """
         ffmpeg7 向けスレッド指定:
-        -threads 0（自動）＋ filter_threads / filter_complex_threads = 物理コア数
+        -threads 0（自動）＋ filter_threads / filter_complex_threads
+        既定は物理コア数。ただし安定性のためのオーバーライドをサポート。
         """
         nproc = multiprocessing.cpu_count() or 1
+
+        # Global worker threads for encoders/decoders
         if self.jobs == "auto":
             threads = "0"
             print(f"[Jobs] Auto-detected CPU cores: {nproc} (threads=auto)")
@@ -97,13 +107,30 @@ class VideoRenderer:
             except ValueError:
                 threads = "0"
                 print(f"[Jobs] Invalid --jobs '{self.jobs}'. Falling back to auto (0).")
+
+        # Filter thread overrides via env (used for fallback stability)
+        ft_override = os.environ.get("FFMPEG_FILTER_THREADS")
+        fct_override = os.environ.get("FFMPEG_FILTER_COMPLEX_THREADS")
+
+        if ft_override and ft_override.isdigit():
+            ft = ft_override
+        else:
+            # NVENC パスではフィルタ並列を抑制（CUDA 安定化）。既定 1。
+            ft = "1" if self.hw_kind == "nvenc" else str(nproc)
+
+        if fct_override and fct_override.isdigit():
+            fct = fct_override
+        else:
+            # NVENC パスではフィルタ並列を抑制（CUDA 安定化）。既定 1。
+            fct = "1" if self.hw_kind == "nvenc" else str(nproc)
+
         return [
             "-threads",
             threads,
             "-filter_threads",
-            str(nproc),
+            ft,
             "-filter_complex_threads",
-            str(nproc),
+            fct,
         ]
 
     # --------------------------
@@ -116,23 +143,20 @@ class VideoRenderer:
         background_config: Dict[str, Any],
         characters_config: List[Dict[str, Any]],
         output_filename: str,
-        extra_subtitle_inputs: Optional[Dict[str, Any]] = None,
+        subtitle_text: Optional[str] = None,
+        subtitle_line_config: Optional[Dict[str, Any]] = None,
         insert_config: Optional[Dict[str, Any]] = None,
+        _force_cpu: bool = False,
     ) -> Optional[Path]:
         """
         drawtext 全廃版:
-        - 字幕は PNG 事前生成入力（-loop 1 -i png）→ overlay のみで合成
-        - 位置はデフォルトで下中央（下マージン: subtitle.bottom_margin_px or 100）
-        - subtitle_filter_snippet は無視（誤式混入防止）
+        - 字幕は SubtitleGenerator の GPU/CPU スニペットを使用し、PNG 事前生成入力（-loop 1 -i png）→ overlay
+        - 位置/スタイルは line_config の subtitle 設定 + デフォルトを反映
         """
         output_path = self.temp_dir / f"{output_filename}.mp4"
         width = self.video_params.width
         height = self.video_params.height
         fps = self.video_params.fps
-
-        # 下マージン（px）
-        subtitle_cfg = self.config.get("subtitle", {})
-        bottom_margin = int(subtitle_cfg.get("bottom_margin_px", 100))
 
         print(f"[Video] Rendering clip -> {output_path.name}")
 
@@ -220,20 +244,9 @@ class VideoRenderer:
         speech_audio_index = len(input_layers)
         input_layers.append({"type": "audio", "index": speech_audio_index})
 
-        # 2) Subtitle PNG (optional)
+        # 2) (Removed) Subtitle PNG pre-injection is handled later via SubtitleGenerator snippet
         subtitle_ffmpeg_index = -1
         subtitle_png_used = False
-        if isinstance(extra_subtitle_inputs, dict) and extra_subtitle_inputs.get("-i"):
-            loop_val = extra_subtitle_inputs.get("-loop", "1")
-            png_path = extra_subtitle_inputs["-i"]
-            cmd.extend(["-loop", loop_val, "-i", str(Path(png_path).resolve())])
-            subtitle_ffmpeg_index = len(input_layers)
-            input_layers.append({"type": "video", "index": subtitle_ffmpeg_index})
-            subtitle_png_used = True
-        elif extra_subtitle_inputs:
-            print(
-                f"[Warning] extra_subtitle_inputs has unexpected format: {extra_subtitle_inputs}. Subtitle overlay will be skipped."
-            )
 
         # 3) Insert media (optional)
         insert_ffmpeg_index = -1
@@ -298,14 +311,14 @@ class VideoRenderer:
             input_layers.append({"type": "video", "index": len(input_layers)})
 
         # ---- ここで GPU フィルタ使用可否を判定 --------------------------------
-        # RGBAを含むオーバーレイ（字幕PNG/立ち絵/挿入画像）が1つでもあれば CPU 合成へ
-        uses_alpha_overlay = (
-            subtitle_png_used
-            or any_character_visible
-            or (insert_config and insert_is_image)
-        )
+        # RGBAを含むオーバーレイ（字幕PNG/立ち絵/挿入画像）が1つでもあれば CPU 合成へ（実験フラグで緩和）
+        uses_alpha_overlay = any_character_visible or (insert_config and insert_is_image)
+        # If experimental flag is on, try GPU overlays even with RGBA inputs
         use_cuda_filters = (
-            self.has_cuda_filters and self.hw_kind == "nvenc" and not uses_alpha_overlay
+            self.has_cuda_filters
+            and self.hw_kind == "nvenc"
+            and (self.gpu_overlay_experimental or not uses_alpha_overlay)
+            and not _force_cpu
         )
         if use_cuda_filters:
             print(
@@ -324,16 +337,22 @@ class VideoRenderer:
         filter_complex_parts: List[str] = []
 
         # 背景スケール
-        if use_cuda_filters:
-            # CUDA: 一旦GPUへ上げてスケール＋fps。RGBA→NV12 変換はCUDA側に任せる。
-            filter_complex_parts.append("[0:v]format=rgba,hwupload_cuda[hw_bg_in]")
-            filter_complex_parts.append(
-                f"[hw_bg_in]scale_cuda={width}:{height},fps={fps}[bg]"
-            )
+        pre_scaled = bool(background_config.get("pre_scaled", False))
+        if pre_scaled:
+            # すでに width/height/fps に整形済みのベース映像（シーンベース）
+            # 無駄な再スケールを避けるため passthrough
+            filter_complex_parts.append("[0:v]null[bg]")
         else:
-            filter_complex_parts.append(
-                f"[0:v]scale={width}:{height}:flags=lanczos,fps={fps}[bg]"
-            )
+            if use_cuda_filters:
+                # CUDA: 一旦GPUへ上げてスケール＋fps。RGBA→NV12 変換はCUDA側に任せる。
+                filter_complex_parts.append("[0:v]format=rgba,hwupload_cuda[hw_bg_in]")
+                filter_complex_parts.append(
+                    f"[hw_bg_in]scale_cuda={width}:{height},fps={fps}[bg]"
+                )
+            else:
+                filter_complex_parts.append(
+                    f"[0:v]scale={width}:{height}:flags=lanczos,fps={fps}[bg]"
+                )
 
         current_video_stream = "[bg]"
         overlay_streams: List[str] = []
@@ -407,25 +426,6 @@ class VideoRenderer:
                 overlay_streams.append(f"[char_scaled_{i}]")
                 overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
 
-        # 字幕PNG overlay（下中央、between(t,0,duration)）
-        if subtitle_ffmpeg_index != -1:
-            x_expr = "(W-w)/2"
-            y_expr = f"H-{bottom_margin}-h"
-            if use_cuda_filters:
-                # 想定上ここには来ない（uses_alpha_overlay True → CPU 合成）
-                filter_complex_parts.append(
-                    f"[{subtitle_ffmpeg_index}:v]format=rgba,hwupload_cuda[subtitle_hw]"
-                )
-                overlay_streams.append("[subtitle_hw]")
-                overlay_filters.append(
-                    f"overlay_cuda=x='{x_expr}':y='{y_expr}':enable='between(t,0,{duration})'"
-                )
-            else:
-                overlay_streams.append(f"[{subtitle_ffmpeg_index}:v]")
-                overlay_filters.append(
-                    f"overlay=x='{x_expr}':y='{y_expr}':enable='between(t,0,{duration})'"
-                )
-
         # オーバーレイを連結
         if overlay_streams:
             chain = current_video_stream
@@ -440,8 +440,46 @@ class VideoRenderer:
         else:
             current_video_stream = "[bg]"
 
-        # 最終フォーマット変換
-        if use_cuda_filters:
+        # 字幕スニペットを反映（存在時）
+        subtitle_snippet = None
+        if subtitle_text and isinstance(subtitle_text, str) and subtitle_text.strip():
+            try:
+                # この時点での字幕入力インデックスを確定
+                subtitle_ffmpeg_index = len(input_layers)
+                in_label_name = current_video_stream.strip("[]")
+                extra_inputs, subtitle_snippet = await self.subtitle_gen.build_subtitle_overlay(
+                    subtitle_text,
+                    duration,
+                    subtitle_line_config or {},
+                    in_label=in_label_name,
+                    index=subtitle_ffmpeg_index,
+                    force_cpu=_force_cpu,
+                )
+                # PNG 入力を追加
+                if isinstance(extra_inputs, dict) and extra_inputs.get("-i"):
+                    loop_val = extra_inputs.get("-loop", "1")
+                    png_path = extra_inputs["-i"]
+                    cmd.extend(["-loop", loop_val, "-i", str(Path(png_path).resolve())])
+                    input_layers.append({"type": "video", "index": subtitle_ffmpeg_index})
+                    subtitle_png_used = True
+                else:
+                    print(
+                        f"[Warning] Unexpected subtitle extra inputs: {extra_inputs}. Skipping subtitle overlay."
+                    )
+                    subtitle_snippet = None
+                # フィルタスニペットを適用
+                if subtitle_snippet:
+                    filter_complex_parts.append(subtitle_snippet)
+                    current_video_stream = f"[with_subtitle_{subtitle_ffmpeg_index}]"
+            except Exception as e:
+                print(f"[Warning] Failed to build subtitle overlay snippet: {e}")
+                subtitle_snippet = None
+
+        # 最終フォーマット変換（CUDA使用がどこかであれば hwdownload を挟む）
+        used_any_cuda = use_cuda_filters or (
+            isinstance(subtitle_snippet, str) and ("overlay_cuda" in subtitle_snippet)
+        )
+        if used_any_cuda:
             filter_complex_parts.append(
                 f"{current_video_stream}hwdownload,format=yuv420p[final_v]"
             )
@@ -482,9 +520,8 @@ class VideoRenderer:
         cmd.extend(["-filter_complex", ";".join(filter_complex_parts)])
         cmd.extend(["-map", "[final_v]", "-map", audio_map])
         cmd.extend(["-t", str(duration)])
-        cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
+        cmd.extend(self.video_params.to_ffmpeg_opts(None if _force_cpu else self.hw_kind))
         cmd.extend(self.audio_params.to_ffmpeg_opts())
-        cmd.extend(["-movflags", "+faststart"])
         cmd.extend(["-shortest", str(output_path)])
 
         try:
@@ -499,11 +536,212 @@ class VideoRenderer:
             print((e.stderr or "").strip())
             print("---- FFmpeg STDOUT ----")
             print((e.stdout or "").strip())
+            # NVENC/CUDA 系の失敗時は一度だけ CPU でリトライ
+            msg = (e.stderr or "") + "\n" + (e.stdout or "")
+            should_fallback = (
+                ("exit status 234" in msg)
+                or ("exit code 234" in msg)
+                or ("exit status 218" in msg)
+                or ("exit code 218" in msg)
+                or ("h264_nvenc" in msg)
+                or ("nvenc" in msg.lower())
+                or ("overlay_cuda" in msg)
+                or ("scale_cuda" in msg)
+            )
+            if not _force_cpu and should_fallback:
+                print("[Fallback] NVENC/CUDA path failed. Retrying with CPU filters/encoder.")
+                prev_hw = os.environ.get("DISABLE_HWENC")
+                prev_ft = os.environ.get("FFMPEG_FILTER_THREADS")
+                prev_fct = os.environ.get("FFMPEG_FILTER_COMPLEX_THREADS")
+                os.environ["DISABLE_HWENC"] = "1"
+                # 安定化のためフィルタグラフ並列を最小化
+                os.environ["FFMPEG_FILTER_THREADS"] = "1"
+                os.environ["FFMPEG_FILTER_COMPLEX_THREADS"] = "1"
+                try:
+                    return await self.render_clip(
+                        audio_path=audio_path,
+                        duration=duration,
+                        background_config=background_config,
+                        characters_config=characters_config,
+                        output_filename=output_filename,
+                        subtitle_text=subtitle_text,
+                        subtitle_line_config=subtitle_line_config,
+                        insert_config=insert_config,
+                        _force_cpu=True,
+                    )
+                finally:
+                    if prev_hw is None:
+                        os.environ.pop("DISABLE_HWENC", None)
+                    else:
+                        os.environ["DISABLE_HWENC"] = prev_hw
+                    if prev_ft is None:
+                        os.environ.pop("FFMPEG_FILTER_THREADS", None)
+                    else:
+                        os.environ["FFMPEG_FILTER_THREADS"] = prev_ft
+                    if prev_fct is None:
+                        os.environ.pop("FFMPEG_FILTER_COMPLEX_THREADS", None)
+                    else:
+                        os.environ["FFMPEG_FILTER_COMPLEX_THREADS"] = prev_fct
             raise
         except Exception as e:
             print(f"[Error] Unexpected exception during ffmpeg: {e}")
             raise
 
+        return output_path
+
+    # --------------------------
+    # シーンベース（背景のみ、静的）
+    # --------------------------
+    async def render_scene_base(
+        self,
+        background_config: Dict[str, Any],
+        duration: float,
+        output_filename: str,
+    ) -> Path:
+        """
+        背景のみでシーン全長のベース映像を事前生成。
+        - 背景が動画: ループ＋正規化して width/height/fps に整える（無音でも可）
+        - 背景が静止画: 画像ループで映像を作成（無音のサイレントトラック付き）
+
+        返り値は temp_dir 配下のパス。
+        """
+        bg_type = background_config.get("type")
+        bg_path = Path(background_config.get("path"))
+        # 動画背景 → 既存のループ関数を使用
+        if bg_type == "video":
+            return await self.render_looped_background_video(
+                str(bg_path), duration, output_filename
+            )
+
+        # 画像背景 → wait クリップ相当で全長の無音ビデオを生成
+        # line_config は未使用のため空でOK
+        line_cfg: Dict[str, Any] = {}
+        base_path = await self.render_wait_clip(
+            duration=duration,
+            background_config={"type": "image", "path": str(bg_path)},
+            output_filename=output_filename,
+            line_config=line_cfg,
+        )
+        if base_path is None:
+            raise PipelineError("Failed to render scene base from image background.")
+        return base_path
+
+    async def render_scene_base_composited(
+        self,
+        background_config: Dict[str, Any],
+        duration: float,
+        output_filename: str,
+        overlays: List[Dict[str, Any]],
+    ) -> Path:
+        """
+        背景に複数の静的画像レイヤを事前合成して、シーン全長のベース映像を生成。
+        - overlays: [{ path, scale, anchor, position: {x,y} }]
+        - 出力は width/height/fps に整形済みの H.264/HEVC ベース映像（音声なし）
+        """
+        output_path = self.temp_dir / f"{output_filename}.mp4"
+        width = self.video_params.width
+        height = self.video_params.height
+        fps = self.video_params.fps
+
+        cmd: List[str] = [
+            self.ffmpeg_path,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+        ]
+        cmd.extend(self._thread_flags())
+
+        # Inputs
+        bg_type = background_config.get("type")
+        bg_path = Path(background_config.get("path"))
+        if bg_type == "video":
+            # 正規化（キャッシュ込み）
+            try:
+                key_data = {
+                    "input_path": str(bg_path.resolve()),
+                    "video_params": self.video_params.__dict__,
+                    "audio_params": self.audio_params.__dict__,
+                }
+
+                async def _normalize_bg_creator(temp_output_path: Path) -> Path:
+                    return await normalize_media(
+                        input_path=bg_path,
+                        video_params=self.video_params,
+                        audio_params=self.audio_params,
+                        cache_manager=self.cache_manager,
+                        ffmpeg_path=self.ffmpeg_path,
+                    )
+
+                bg_path = await self.cache_manager.get_or_create(
+                    key_data=key_data,
+                    file_name="normalized_bg",
+                    extension="mp4",
+                    creator_func=_normalize_bg_creator,
+                )
+            except Exception:
+                pass
+            cmd.extend(["-stream_loop", "-1", "-i", str(bg_path)])
+        else:
+            cmd.extend(["-loop", "1", "-i", str(bg_path)])
+
+        overlay_indices: List[int] = []
+        for ov in overlays:
+            cmd.extend(["-loop", "1", "-i", str(Path(ov["path"]).resolve())])
+            overlay_indices.append(len(overlay_indices) + 1)  # 1-based against bg as 0
+
+        # Filters
+        filter_parts: List[str] = []
+        if bg_type == "video":
+            filter_parts.append(
+                f"[0:v]scale={width}:{height}:flags=lanczos,fps={fps}[bg]"
+            )
+        else:
+            filter_parts.append(
+                f"[0:v]scale={width}:{height}:flags=lanczos,fps={fps},trim=duration={duration}[bg]"
+            )
+
+        chain = "[bg]"
+        for i, ov in enumerate(overlays):
+            idx = i + 1  # ffmpeg input index for this overlay (after bg)
+            scale = float(ov.get("scale", 1.0))
+            anchor = ov.get("anchor", "middle_center")
+            pos = ov.get("position", {"x": "0", "y": "0"})
+            x_expr, y_expr = calculate_overlay_position(
+                "W",
+                "H",
+                "w",
+                "h",
+                anchor,
+                str(pos.get("x", "0")),
+                str(pos.get("y", "0")),
+            )
+            filter_parts.append(
+                f"[{idx}:v]scale=iw*{scale}:ih*{scale}[ov_{i}]"
+            )
+            if i < len(overlays) - 1:
+                chain += f"[ov_{i}]overlay=x={x_expr}:y={y_expr}[tmp_{i}];[tmp_{i}]"
+            else:
+                chain += f"[ov_{i}]overlay=x={x_expr}:y={y_expr}[ov_final]"
+        if overlays:
+            filter_parts.append(f"{chain}")
+            final_stream = "[ov_final]"
+        else:
+            final_stream = "[bg]"
+
+        filter_parts.append(f"{final_stream}format=yuv420p[final_v]")
+
+        cmd.extend(["-filter_complex", ";".join(filter_parts)])
+        cmd.extend(["-map", "[final_v]"])
+        if bg_type == "video":
+            cmd.extend(["-t", str(duration)])
+        cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
+        cmd.extend(["-an"])  # ベースは映像のみ
+        cmd.extend([str(output_path)])
+
+        process = await _run_ffmpeg_async(cmd)
+        if process.stderr:
+            print(process.stderr.strip())
         return output_path
 
     # --------------------------
@@ -605,14 +843,18 @@ class VideoRenderer:
         )
 
         # Filters（CPUで十分）
-        filter_complex = f"[0:v]scale={width}:{height},trim=duration={duration},format=yuv420p[final_v]"
+        pre_scaled = bool(background_config.get("pre_scaled", False))
+        if pre_scaled:
+            # ベースがすでに width/height/fps に整形済みなら再スケール不要
+            filter_complex = f"[0:v]trim=duration={duration},format=yuv420p[final_v]"
+        else:
+            filter_complex = f"[0:v]scale={width}:{height},trim=duration={duration},format=yuv420p[final_v]"
 
         cmd.extend(["-filter_complex", filter_complex])
         cmd.extend(["-map", "[final_v]", "-map", "1:a"])
         cmd.extend(["-t", str(duration)])
         cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
         cmd.extend(self.audio_params.to_ffmpeg_opts())
-        cmd.extend(["-movflags", "+faststart"])
         cmd.extend(["-shortest", str(output_path)])
 
         try:
@@ -703,7 +945,6 @@ class VideoRenderer:
         )
         cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
         cmd.extend(["-an"])  # 音声は不要
-        cmd.extend(["-movflags", "+faststart"])
         cmd.extend([str(output_path)])
 
         try:
