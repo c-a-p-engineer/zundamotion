@@ -21,6 +21,7 @@ class SubtitleGenerator:
         index: int,
         force_cpu: bool = False,
         allow_cuda: bool | None = None,
+        existing_png_path: str | None = None,
     ) -> Tuple[Dict[str, Any], str]:
         """
         Returns:
@@ -32,7 +33,17 @@ class SubtitleGenerator:
         if "subtitle" in line_config and isinstance(line_config["subtitle"], dict):
             style.update(line_config["subtitle"])
 
-        png_path, dims = await self.png_renderer.render(text, style)
+        # Reuse pre-generated subtitle PNG if provided (e.g., on fallback retry)
+        if existing_png_path:
+            from pathlib import Path
+
+            p = Path(existing_png_path)
+            if p.exists():
+                png_path = p
+            else:
+                png_path, dims = await self.png_renderer.render(text, style)
+        else:
+            png_path, dims = await self.png_renderer.render(text, style)
 
         # 位置式（あなたの置換ロジックはそのまま活かす）
         # Convert drawtext-style expr to overlay(_cuda) variables

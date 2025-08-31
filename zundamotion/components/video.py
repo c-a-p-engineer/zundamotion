@@ -194,6 +194,7 @@ class VideoRenderer:
         subtitle_text: Optional[str] = None,
         subtitle_line_config: Optional[Dict[str, Any]] = None,
         insert_config: Optional[Dict[str, Any]] = None,
+        subtitle_png_path: Optional[Path] = None,
         _force_cpu: bool = False,
     ) -> Optional[Path]:
         """
@@ -511,6 +512,7 @@ class VideoRenderer:
                     index=subtitle_ffmpeg_index,
                     force_cpu=_force_cpu,
                     allow_cuda=use_cuda_filters,
+                    existing_png_path=str(subtitle_png_path) if subtitle_png_path else None,
                 )
                 # PNG 入力を追加
                 if isinstance(extra_inputs, dict) and extra_inputs.get("-i"):
@@ -519,6 +521,11 @@ class VideoRenderer:
                     cmd.extend(["-loop", loop_val, "-i", str(Path(png_path).resolve())])
                     input_layers.append({"type": "video", "index": subtitle_ffmpeg_index})
                     subtitle_png_used = True
+                    # Keep for potential retry reuse
+                    try:
+                        subtitle_png_path = Path(png_path)
+                    except Exception:
+                        pass
                 else:
                     logger.warning(
                         "Unexpected subtitle extra inputs: %s. Skipping subtitle overlay.",
@@ -628,6 +635,7 @@ class VideoRenderer:
                         subtitle_text=subtitle_text,
                         subtitle_line_config=subtitle_line_config,
                         insert_config=insert_config,
+                        subtitle_png_path=subtitle_png_path,
                         _force_cpu=True,
                     )
                 finally:
