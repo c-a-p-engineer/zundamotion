@@ -13,7 +13,38 @@
 - CUDAフィルタのスモークテストが exit 218 で失敗し、以降CPUフィルタへフォールバック。
 - スレッド: `clip_workers=2`, `filter_threads=6`, `filter_complex_threads=6`（CPU経路の既定ヒューリスティクス通り）。
 
+### 最新ログサマリ（2025-08-31 18:50 実行）
+
+- AudioPhase: 10.52s（軽量）
+- VideoPhase: 160.26s（支配的）
+- BGMPhase: 3.29s / Finalize: 39.16s
+- NVENC: 利用可能（エンコードはNVENC）。
+- フィルタ: 字幕PNGがあるクリップは「CPU overlays（RGBA）」を選択。RGBA無しの一部クリップのみCUDA経路。
+- 補足: `--no-cache` 下でもEphemeral再利用が機能し、同一キー生成の重複が抑止されている（ログで確認）。
+
+直近のボトルネックは VideoPhase（CPU overlay）と Finalize（concat I/O）。
+
 ## P0（必須・最優先）
+
+### 02. スレッド/並列度の自動適応（計測ループの導入）
+
+- タイトル: プロファイル結果に基づく `filter_threads`/`filter_complex_threads` と `clip_workers` の自動調整
+- 詳細:
+  - 先頭Nクリップ（例: 4）だけ `FFMPEG_PROFILE_MODE=1` を付与し、処理時間とfpsを採取。
+  - CPU overlay が支配な場合は `clip_workers×threads` の総並列をキャップ（例: CPU/2 目安）。
+  - p95が悪化した設定は拒否し、キャッシュして次回以降の既定に反映。
+- ゴール: CPU経路でも過剰並列を避け、VideoPhaseの p50/p95 を短縮。
+- 実装イメージ: `video_phase.py` で初回プロファイル→環境変数・内部設定に反映。
+
+### 03. シーンベース合成の強化（静的オーバーレイの事前合成）
+
+- タイトル: 行で不変な立ち絵/挿入画像をシーンベースに事前合成し、行ごとのCPU overlayを最小化
+- 詳細:
+  - 各シーンで可視キャラ（name/expression/scale/anchor/pos）の共通集合を抽出→ベース映像にPNG合成して書き出し。
+  - 行側は「字幕＋音声」のみの重畳に縮退。`pre_scaled`/`normalized` の伝搬を徹底。
+  - 既存の静的検出ロジック（`video_phase`）を見直し、確実に発火・再利用されるようにログと条件を強化。
+- ゴール: 行ごとのフィルタグラフを短縮し、VideoPhaseのCPU overlayコストを大幅に削減。
+- 実装イメージ: `VideoPhase.run` の静的検出→`render_looped_background_video` とベース生成へ委譲、行側で省略。
 
 ### 06. 動画結合（-f concat -c copy）の速度検証と入出力最適化（継続検証）
 

@@ -231,6 +231,8 @@ class VideoRenderer:
         height = self.video_params.height
         fps = self.video_params.fps
 
+        import time as _time
+        _t0 = _time.time()
         logger.info("[Video] Rendering clip -> %s", output_path.name)
 
         cmd: List[str] = [
@@ -792,6 +794,11 @@ class VideoRenderer:
             if process.stderr:
                 # warning ログも拾っておく
                 logger.debug("FFmpeg stderr (non-fatal):\n%s", process.stderr.strip())
+            try:
+                _elapsed = _time.time() - _t0
+                logger.info("[Video] Finished clip %s in %.2fs", output_filename, _elapsed)
+            except Exception:
+                pass
         except subprocess.CalledProcessError as e:
             logger.error("ffmpeg failed for %s", output_filename)
             logger.debug("FFmpeg STDERR:\n%s", (e.stderr or "").strip())
