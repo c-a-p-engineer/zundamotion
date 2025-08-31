@@ -21,6 +21,7 @@ from ..utils.ffmpeg_utils import (
     get_hw_filter_mode,
     set_hw_filter_mode,
     get_preferred_cuda_scale_filter,
+    _dump_cuda_diag_once,
 )
 from .subtitle import SubtitleGenerator
 from ..utils.logger import logger
@@ -381,7 +382,12 @@ class VideoRenderer:
 
         # ---- ここで GPU フィルタ使用可否を判定 --------------------------------
         # RGBAを含むオーバーレイ（字幕PNG/立ち絵/挿入画像）が1つでもあれば CPU 合成へ（実験フラグで緩和）
-        uses_alpha_overlay = any_character_visible or (insert_config and insert_is_image)
+        # RGBA を含むオーバーレイ（字幕PNG/立ち絵/挿入画像）が1つでもあれば CPU 合成へ（実験フラグで緩和）
+        uses_alpha_overlay = (
+            any_character_visible
+            or (insert_config and insert_is_image)
+            or (bool(subtitle_text) and str(subtitle_text).strip() != "")
+        )
         # If experimental flag is on, try GPU overlays even with RGBA inputs
         global_mode = get_hw_filter_mode()
         use_cuda_filters = (
@@ -793,6 +799,11 @@ class VideoRenderer:
                 logger.warning(
                     "[Fallback] NVENC/CUDA path failed. Retrying with CPU filters/encoder."
                 )
+                # 実行時CUDA失敗時も一度だけ診断ダンプを出力
+                try:
+                    await _dump_cuda_diag_once(self.ffmpeg_path)
+                except Exception:
+                    pass
                 # Process-wide backoff to CPU filters to avoid repeat failures
                 try:
                     set_hw_filter_mode("cpu")

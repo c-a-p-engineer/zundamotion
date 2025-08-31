@@ -194,8 +194,10 @@ CLI主なオプション（main.py実装）:
 補足（診断とフォールバックの強化）:
 - スモーク失敗時は一度だけ、診断情報をINFOで自動ダンプします。
   - `ffmpeg -hide_banner -buildconf`, `ffmpeg -hide_banner -filters`, `nvidia-smi -L`, `nvcc --version`
+- 実行時にCUDAフィルタがエラー（exit 218/234等）となった場合も、同様の診断を一度だけ出力します。
 - スモークは複数候補のフィルタグラフ（NV12+NV12／RGBAオーバレイ）を順に試行し、偽陰性を低減します。
 - `scale_cuda` が列挙されない環境で `scale_npp` が存在する場合、GPUパスでは `scale_npp` を優先的に使用します（自動選択）。
+- 字幕PNGはRGBAレイヤのため、既定ではCPU overlayを使用します（`video.gpu_overlay_experimental` をtrueにするとGPUを試行）。
 
 補足（運用トグル／チューニング）:
 - 環境変数で挙動を制御できます。
