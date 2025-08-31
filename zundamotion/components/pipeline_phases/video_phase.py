@@ -108,6 +108,9 @@ class VideoPhase:
             codec=config.get("video", {}).get("audio_codec", "libmp3lame"),
             bitrate_kbps=config.get("video", {}).get("audio_bitrate_kbps", 192),
         )
+        # jobs/hw_kind から先に clip_workers を算出して VideoRenderer に伝搬
+        pre_clip_workers = cls._determine_clip_workers(jobs, hw_kind)
+
         video_renderer = await VideoRenderer.create(
             config,
             temp_dir,
@@ -116,6 +119,7 @@ class VideoPhase:
             hw_kind=hw_kind,
             video_params=video_params,
             audio_params=audio_params,
+            clip_workers=pre_clip_workers,
         )
         instance = cls(
             config, temp_dir, cache_manager, jobs, hw_kind, video_params, audio_params

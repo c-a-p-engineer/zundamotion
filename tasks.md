@@ -16,18 +16,6 @@
 ## P0（必須・最優先）
 
 
-### 01. CUDAスモーク安定化＋CPUフィルタ時のスレッド調整（直近ログ対応）
-
-- タイトル: CUDA フィルタのスモーク失敗時も安定・高効率に動作させるための二段対応
-- 詳細:
-    - 直近ログで `overlay_cuda` スモークが exit 218 で失敗し CPU フィルタへ移行、VideoPhase が支配的に。
-    - CPU フィルタ経路では、`clip_workers × filter_threads` 合計で CPU を過剰占有しないように自動調整（例: `filter_threads = max(1, nproc // clip_workers)`、`filter_complex_threads` も同値）。
-    - スモークテストは軽量パターンと本番パターンの2段階（`overlay_cuda`/`scale_cuda`の個別確認）。部分的成功なら `scale_cuda + hwdownload + CPU overlay` を許容（背景スケールをGPUで肩代わり）。
-    - `HW_FILTER_MODE={auto|cuda|cpu}` と `FFMPEG_FILTER_THREADS`/`FFMPEG_FILTER_COMPLEX_THREADS` の記法を README/AI_README に明記し、運用での切り替えを容易にする。
-- ゴール: CUDA 不可環境でも CPU 合成を安定・効率化し、VideoPhase を短縮。
-- 実装イメージ: `video.py` の `_thread_flags()` と `VideoPhase._determine_clip_workers()` に上記ヒューリスティクスを反映。`ffmpeg_utils.smoke_test_*` を分離し段階的に判定。
-
-
 ### 02. 静的オーバーレイ無しのシーンでベース映像生成をスキップ＋二重スケール回避
 
 - タイトル: `static_overlays=0` のシーンはベース映像（背景のみのループ書き出し）を省略し、行単位処理へ直行

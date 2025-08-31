@@ -22,6 +22,7 @@ from ..utils.ffmpeg_utils import (
     set_hw_filter_mode,
 )
 from .subtitle import SubtitleGenerator
+from ..utils.logger import logger
 
 
 class VideoRenderer:
@@ -35,6 +36,7 @@ class VideoRenderer:
         video_params: Optional[VideoParams] = None,
         audio_params: Optional[AudioParams] = None,
         has_cuda_filters: bool = False,
+        clip_workers: Optional[int] = None,
     ):
         self.config = config
         self.temp_dir = temp_dir
@@ -48,6 +50,8 @@ class VideoRenderer:
         self.video_params = video_params or VideoParams()
         self.audio_params = audio_params or AudioParams()
         self.has_cuda_filters = has_cuda_filters
+        # 並列クリップ数（VideoPhase 側の決定を受け取る）
+        self.clip_workers = max(1, int(clip_workers)) if clip_workers else 1
         # Experimental flag: allow GPU overlays even with RGBA inputs
         self.gpu_overlay_experimental = bool(
             config.get("video", {}).get("gpu_overlay_experimental", False)
@@ -56,9 +60,15 @@ class VideoRenderer:
         self.subtitle_gen = SubtitleGenerator(self.config, self.cache_manager)
 
         if self.has_cuda_filters:
-            print("[Encoder] CUDA filters (scale_cuda, overlay_cuda) are available.")
+            logger.info("CUDA filters available: True (scale_cuda/overlay_cuda)")
         else:
-            print("[Encoder] CUDA filters are not available. Using CPU filters.")
+            logger.info("CUDA filters available: False (using CPU filters)")
+        logger.info(
+            "VideoRenderer initialized: hw_kind=%s, clip_workers=%s, hw_filter_mode=%s",
+            self.hw_kind,
+            self.clip_workers,
+            get_hw_filter_mode(),
+        )
 
     @classmethod
     async def create(
@@ -70,6 +80,7 @@ class VideoRenderer:
         hw_kind: Optional[str] = None,
         video_params: Optional[VideoParams] = None,
         audio_params: Optional[AudioParams] = None,
+        clip_workers: Optional[int] = None,
     ):
         ffmpeg_path = config.get("ffmpeg_path", "ffmpeg")
         # フィルタ存在チェックに加えて実行スモークテストで確度を上げる
@@ -89,6 +100,7 @@ class VideoRenderer:
             video_params,
             audio_params,
             has_cuda_filters_val,
+            clip_workers=clip_workers,
         )
 
     # --------------------------
@@ -105,17 +117,20 @@ class VideoRenderer:
         # Global worker threads for encoders/decoders
         if self.jobs == "auto":
             threads = "0"
-            print(f"[Jobs] Auto-detected CPU cores: {nproc} (threads=auto)")
+            logger.info("[Jobs] Auto-detected CPU cores: %s (threads=auto)", nproc)
         else:
             try:
                 num_jobs = int(self.jobs)
                 if num_jobs < 0:
                     raise ValueError
                 threads = str(num_jobs)
-                print(f"[Jobs] Using {threads} specified threads")
+                logger.info("[Jobs] Using specified threads=%s", threads)
             except ValueError:
                 threads = "0"
-                print(f"[Jobs] Invalid --jobs '{self.jobs}'. Falling back to auto (0).")
+                logger.warning(
+                    "[Jobs] Invalid --jobs '%s'. Falling back to auto (0).",
+                    self.jobs,
+                )
 
         # Filter thread overrides via env (used for fallback stability)
         ft_override = os.environ.get("FFMPEG_FILTER_THREADS")
@@ -130,7 +145,9 @@ class VideoRenderer:
             # CPU フィルタ経路ではCPU向けヒューリスティクス（= nproc）
             # CUDA フィルタ想定で NVENC の場合は保守的に 1
             if global_filter_mode == "cpu":
-                ft = str(nproc)
+                # clip_workers 並列時に filter_threads を割り当て過ぎない
+                per_filter_threads = max(1, nproc // max(1, self.clip_workers))
+                ft = str(per_filter_threads)
             else:
                 ft = "1" if self.hw_kind == "nvenc" else str(nproc)
 
@@ -138,11 +155,12 @@ class VideoRenderer:
             fct = fct_override
         else:
             if global_filter_mode == "cpu":
-                fct = str(nproc)
+                per_filter_threads = max(1, nproc // max(1, self.clip_workers))
+                fct = str(per_filter_threads)
             else:
                 fct = "1" if self.hw_kind == "nvenc" else str(nproc)
 
-        return [
+        flags = [
             "-threads",
             threads,
             "-filter_threads",
@@ -150,6 +168,18 @@ class VideoRenderer:
             "-filter_complex_threads",
             fct,
         ]
+        logger.info(
+            "[FFmpeg Threads] mode=%s, nproc=%s, clip_workers=%s, threads=%s, filter_threads=%s, filter_complex_threads=%s, overrides(ft=%s,fct=%s)",
+            get_hw_filter_mode(),
+            nproc,
+            self.clip_workers,
+            threads,
+            ft,
+            fct,
+            os.environ.get("FFMPEG_FILTER_THREADS"),
+            os.environ.get("FFMPEG_FILTER_COMPLEX_THREADS"),
+        )
+        return flags
 
     # --------------------------
     # クリップ生成（字幕PNG/立ち絵対応）
@@ -176,7 +206,7 @@ class VideoRenderer:
         height = self.video_params.height
         fps = self.video_params.fps
 
-        print(f"[Video] Rendering clip -> {output_path.name}")
+        logger.info("[Video] Rendering clip -> %s", output_path.name)
 
         cmd: List[str] = [
             self.ffmpeg_path,
@@ -249,8 +279,9 @@ class VideoRenderer:
                     ]
                 )
             except Exception as e:  # 外側の try に対応する except を追加
-                print(
-                    f"[Warning] Failed to process background video: {e}. Falling back to image loop."
+                logger.warning(
+                    "Failed to process background video: %s. Falling back to image loop.",
+                    e,
                 )
                 cmd.extend(["-loop", "1", "-i", str(bg_path)])
         else:  # if background_config.get("type") == "video": の else
@@ -291,8 +322,10 @@ class VideoRenderer:
                     )
                     insert_path = normalized_insert
                 except Exception as e:
-                    print(
-                        f"[Warning] Could not inspect/normalize insert video {insert_path.name}: {e}. Using as-is."
+                    logger.warning(
+                        "Could not inspect/normalize insert video %s: %s. Using as-is.",
+                        insert_path.name,
+                        e,
                     )
                 cmd.extend(["-i", str(insert_path)])
             else:
@@ -312,7 +345,7 @@ class VideoRenderer:
             char_name = char_config.get("name")
             char_expression = char_config.get("expression", "default")
             if not char_name:
-                print("[Warning] Skipping character with missing name.")
+                logger.warning("Skipping character with missing name.")
                 continue
             char_image_path = Path(
                 f"assets/characters/{char_name}/{char_expression}.png"
@@ -320,8 +353,10 @@ class VideoRenderer:
             if not char_image_path.exists():
                 char_image_path = Path(f"assets/characters/{char_name}/default.png")
                 if not char_image_path.exists():
-                    print(
-                        f"[Warning] Character image not found for {char_name}/{char_expression} (and default). Skipping."
+                    logger.warning(
+                        "Character image not found for %s/%s (and default). Skipping.",
+                        char_name,
+                        char_expression,
                     )
                     continue
             character_indices[i] = len(input_layers)
@@ -341,17 +376,16 @@ class VideoRenderer:
             and global_mode != "cpu"
         )
         if use_cuda_filters:
-            print(
-                "[Filters] Using CUDA filters for scaling/overlay (no RGBA overlays)."
+            logger.info(
+                "[Filters] CUDA path: scaling/overlay on GPU (no RGBA overlays)"
             )
         else:
             if self.hw_kind == "nvenc" and self.has_cuda_filters and uses_alpha_overlay:
-                print(
-                    "[Filters] Detected RGBA overlays (subtitle/characters/images). "
-                    "Falling back to CPU overlays while keeping NVENC encoding."
+                logger.info(
+                    "[Filters] CPU path: RGBA overlays detected; forcing CPU overlays while keeping NVENC encoding"
                 )
             else:
-                print("[Filters] Using CPU filters.")
+                logger.info("[Filters] CPU path: using CPU filters for scaling/overlay")
 
         # --- Filter Graph -------------------------------------------------------
         filter_complex_parts: List[str] = []
@@ -484,8 +518,9 @@ class VideoRenderer:
                     input_layers.append({"type": "video", "index": subtitle_ffmpeg_index})
                     subtitle_png_used = True
                 else:
-                    print(
-                        f"[Warning] Unexpected subtitle extra inputs: {extra_inputs}. Skipping subtitle overlay."
+                    logger.warning(
+                        "Unexpected subtitle extra inputs: %s. Skipping subtitle overlay.",
+                        extra_inputs,
                     )
                     subtitle_snippet = None
                 # フィルタスニペットを適用
@@ -493,7 +528,7 @@ class VideoRenderer:
                     filter_complex_parts.append(subtitle_snippet)
                     current_video_stream = f"[with_subtitle_{subtitle_ffmpeg_index}]"
             except Exception as e:
-                print(f"[Warning] Failed to build subtitle overlay snippet: {e}")
+                logger.warning("Failed to build subtitle overlay snippet: %s", e)
                 subtitle_snippet = None
 
         # 最終フォーマット変換（CUDA使用がどこかであれば hwdownload を挟む）
@@ -544,17 +579,15 @@ class VideoRenderer:
         cmd.extend(["-shortest", str(output_path)])
 
         try:
-            print(f"Executing FFmpeg command:\n{' '.join(cmd)}")
+            logger.debug("Executing FFmpeg command: %s", " ".join(cmd))
             process = await _run_ffmpeg_async(cmd)
             if process.stderr:
                 # warning ログも拾っておく
-                print(process.stderr.strip())
+                logger.debug("FFmpeg stderr (non-fatal):\n%s", process.stderr.strip())
         except subprocess.CalledProcessError as e:
-            print(f"[Error] ffmpeg failed for {output_filename}")
-            print("---- FFmpeg STDERR ----")
-            print((e.stderr or "").strip())
-            print("---- FFmpeg STDOUT ----")
-            print((e.stdout or "").strip())
+            logger.error("ffmpeg failed for %s", output_filename)
+            logger.debug("FFmpeg STDERR:\n%s", (e.stderr or "").strip())
+            logger.debug("FFmpeg STDOUT:\n%s", (e.stdout or "").strip())
             # NVENC/CUDA 系の失敗時は一度だけ CPU でリトライ
             msg = (e.stderr or "") + "\n" + (e.stdout or "")
             should_fallback = (
@@ -568,7 +601,9 @@ class VideoRenderer:
                 or ("scale_cuda" in msg)
             )
             if not _force_cpu and should_fallback:
-                print("[Fallback] NVENC/CUDA path failed. Retrying with CPU filters/encoder.")
+                logger.warning(
+                    "[Fallback] NVENC/CUDA path failed. Retrying with CPU filters/encoder."
+                )
                 # Process-wide backoff to CPU filters to avoid repeat failures
                 try:
                     set_hw_filter_mode("cpu")
@@ -608,7 +643,7 @@ class VideoRenderer:
                         os.environ["FFMPEG_FILTER_COMPLEX_THREADS"] = prev_fct
             raise
         except Exception as e:
-            print(f"[Error] Unexpected exception during ffmpeg: {e}")
+            logger.error("Unexpected exception during ffmpeg: %s", e)
             raise
 
         return output_path
