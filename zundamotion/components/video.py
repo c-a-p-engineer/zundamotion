@@ -519,10 +519,51 @@ class VideoRenderer:
 
             # Remember placement for face animation use keyed by char name
             try:
+                # Compute numeric top-left for stable face overlays to avoid anchor jitter
+                def _to_num(v: Any) -> float:
+                    try:
+                        return float(v)
+                    except Exception:
+                        return 0.0
+                xn = yn = 0.0
+                try:
+                    from PIL import Image as _PILImage
+                    w0, h0 = _PILImage.open(char_image_path).size
+                except Exception:
+                    w0, h0 = 0, 0
+                try:
+                    vw, vh = self.video_params.width, self.video_params.height
+                    sx = _to_num(pos.get("x", "0"))
+                    sy = _to_num(pos.get("y", "0"))
+                    cw = w0 * float(scale)
+                    ch = h0 * float(scale)
+                    a = str(anchor)
+                    if a == "top_left":
+                        xn, yn = sx, sy
+                    elif a == "top_center":
+                        xn, yn = (vw - cw) / 2 + sx, sy
+                    elif a == "top_right":
+                        xn, yn = vw - cw + sx, sy
+                    elif a == "middle_left":
+                        xn, yn = sx, (vh - ch) / 2 + sy
+                    elif a == "middle_center":
+                        xn, yn = (vw - cw) / 2 + sx, (vh - ch) / 2 + sy
+                    elif a == "middle_right":
+                        xn, yn = vw - cw + sx, (vh - ch) / 2 + sy
+                    elif a == "bottom_left":
+                        xn, yn = sx, vh - ch + sy
+                    elif a == "bottom_center":
+                        xn, yn = (vw - cw) / 2 + sx, vh - ch + sy
+                    elif a == "bottom_right":
+                        xn, yn = vw - cw + sx, vh - ch + sy
+                except Exception:
+                    pass
                 char_overlay_placement[str(char_name)] = {
                     "x_expr": x_expr,
                     "y_expr": y_expr,
                     "scale": str(scale),
+                    "x_num": str(int(round(xn))),
+                    "y_num": str(int(round(yn))),
                 }
             except Exception:
                 pass
@@ -573,8 +614,9 @@ class VideoRenderer:
 
             if placement:
                 scale = placement["scale"]
-                x_expr = placement["x_expr"]
-                y_expr = placement["y_expr"]
+                # Use numeric top-left position for stability (independent of each overlay's w/h)
+                x_fix = placement.get("x_num") or placement.get("x_expr") or "0"
+                y_fix = placement.get("y_num") or placement.get("y_expr") or "0"
 
                 # Asset discovery
                 base_dir = Path(f"assets/characters/{target_name}")
@@ -625,7 +667,7 @@ class VideoRenderer:
                             f"[{idx}:v]scale=iw*{scale}:ih*{scale}[{label}]"
                         )
                         overlay_streams.append(f"[{label}]")
-                        overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
+                        overlay_filters.append(f"overlay=x={x_fix}:y={y_fix}")
 
                 eyes_segments = face_anim.get("eyes") or []
                 eyes_expr = _enable_expr(eyes_segments) if eyes_segments else None
@@ -638,7 +680,7 @@ class VideoRenderer:
                         )
                         overlay_streams.append(f"[{label}]")
                         overlay_filters.append(
-                            f"overlay=x={x_expr}:y={y_expr}:enable='{eyes_expr}'"
+                            f"overlay=x={x_fix}:y={y_fix}:enable='{eyes_expr}'"
                         )
 
                 # Mouth: close baseline + half/open（口は目より後に重ねる）
@@ -650,7 +692,7 @@ class VideoRenderer:
                             f"[{idx}:v]scale=iw*{scale}:ih*{scale}[{label}]"
                         )
                         overlay_streams.append(f"[{label}]")
-                        overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
+                        overlay_filters.append(f"overlay=x={x_fix}:y={y_fix}")
 
                 mouth_segments = face_anim.get("mouth") or []
                 if isinstance(mouth_segments, list) and mouth_segments:
@@ -669,7 +711,7 @@ class VideoRenderer:
                             )
                             overlay_streams.append(f"[{label}]")
                             overlay_filters.append(
-                                f"overlay=x={x_expr}:y={y_expr}:enable='{half_expr}'"
+                                f"overlay=x={x_fix}:y={y_fix}:enable='{half_expr}'"
                             )
 
                     if mouth_open.exists() and open_expr:
@@ -681,7 +723,7 @@ class VideoRenderer:
                             )
                             overlay_streams.append(f"[{label}]")
                             overlay_filters.append(
-                                f"overlay=x={x_expr}:y={y_expr}:enable='{open_expr}'"
+                                f"overlay=x={x_fix}:y={y_fix}:enable='{open_expr}'"
                             )
 
         # オーバーレイを連結
