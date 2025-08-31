@@ -40,7 +40,8 @@ class VideoPhase:
             "video_extensions",
             [".mp4", ".mov", ".webm", ".avi", ".mkv"],
         )
-        # クリップ並列実行ワーカー数を決定（NVENC 時は保守的に 1-2）
+        # クリップ並列実行ワーカー数を決定
+        # 実効フィルタ経路がCPUの場合は、NVENC でもCPU向けヒューリスティクスを適用する
         self.clip_workers = self._determine_clip_workers(jobs, self.hw_kind)
 
     @staticmethod
@@ -48,27 +49,32 @@ class VideoPhase:
         """決定的な並列度を返す。"""
         try:
             import os
+            from zundamotion.utils.ffmpeg_utils import get_hw_filter_mode
+
+            # 実効フィルタがCPUかどうか（プロセス全体のバックオフ判定）
+            filter_mode = get_hw_filter_mode()
+            cpu_filters_effective = filter_mode == "cpu"
 
             if jobs is None:
                 base = max(1, (os.cpu_count() or 2) // 2)
-                if hw_kind == "nvenc":
+                if hw_kind == "nvenc" and not cpu_filters_effective:
                     return min(2, max(1, base))
                 return base
             j = jobs.strip().lower()
             if j in ("0", "auto"):
                 base = max(2, (os.cpu_count() or 2) // 2)
-                if hw_kind == "nvenc":
+                if hw_kind == "nvenc" and not cpu_filters_effective:
                     return min(2, max(1, base))
                 return base
             val = int(j)
             if val <= 0:
                 base = max(2, (os.cpu_count() or 2) // 2)
-                if hw_kind == "nvenc":
+                if hw_kind == "nvenc" and not cpu_filters_effective:
                     return min(2, max(1, base))
                 return base
             # 上限はCPU数
             decided = max(1, min(val, os.cpu_count() or val))
-            if hw_kind == "nvenc":
+            if hw_kind == "nvenc" and not cpu_filters_effective:
                 return min(2, decided)
             return decided
         except Exception:

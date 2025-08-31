@@ -2,21 +2,31 @@
 
 本ファイルは、現状コード・ログの観察結果に基づく改善タスクと将来機能を、優先度順に整理したものです。
 
-参照ログ: `logs/20250830_155656_544.log`
+参照ログ: `logs/20250831_004024_506.log`, `logs/20250830_155656_544.log`
+
+### 最新ログサマリ（2025-08-31 実行）
+
+- AudioPhase: 15.09s（問題小）
+- VideoPhase: 91.55s（支配的）
+- BGMPhase: 2.68s / Finalize: 0.82s
+- 開始直後に CUDA フィルタのスモークテストが exit 218 で失敗し、CPU フィルタへフォールバック（`clip_workers=6`）。
+- シーンベース映像は「generated base with 0 static overlay(s)」が観測され、固定コストが発生。
+- クリップ本数は合計 23 本（subtitle/voice/intro/topic/outro）。
 
 ## P0（必須・最優先）
 
 
-### 01. CPUフィルタ時の並列度最適化（NVENCでもCPU扱い）
+### 01. CUDAスモーク安定化＋CPUフィルタ時のスレッド調整（直近ログ対応）
 
-- タイトル: CUDAフィルタ無効（CPUフィルタ経路）時は `clip_workers` をCPU向けに拡大
+- タイトル: CUDA フィルタのスモーク失敗時も安定・高効率に動作させるための二段対応
 - 詳細:
-    - 最新ログでは CUDA フィルタのスモークテストが失敗し、プロセス全体が CPU フィルタへフォールバック（`set_hw_filter_mode('cpu')`）。この場合でも `hw_kind=nvenc` のため `clip_workers` が最大2に制限され、CPUフィルタが律速なのに並列度が不足している。
-    - 対応として、実効フィルタ経路がCPUの場合（`get_hw_filter_mode() == 'cpu'` または `use_cuda_filters=False`）は、`hw_kind` に関わらず CPU パスのヒューリスティクス（例: `max(2, cpu_count//2)`）で決定する。
-    - 併せて `-filter_threads`/`-filter_complex_threads` もCPUパスの推奨値に合わせる。
-- 背景（今回ログ）: `logs/20250830_155656_544.log` で `clip_workers=2`、`VideoPhase=111.72s` が支配的。CPUフィルタ並列の不足が疑われる。
-- ゴール: CPUフィルタ経路でのスループット改善（目標: VideoPhase 30–50%短縮）。
-- 実装イメージ: `VideoPhase._determine_clip_workers` に実効フィルタ経路の判定を加味。`VideoRenderer._thread_flags` でも `get_hw_filter_mode()` を参照してCPU既定を適用。
+    - 直近ログで `overlay_cuda` スモークが exit 218 で失敗し CPU フィルタへ移行、VideoPhase が支配的に。
+    - CPU フィルタ経路では、`clip_workers × filter_threads` 合計で CPU を過剰占有しないように自動調整（例: `filter_threads = max(1, nproc // clip_workers)`、`filter_complex_threads` も同値）。
+    - スモークテストは軽量パターンと本番パターンの2段階（`overlay_cuda`/`scale_cuda`の個別確認）。部分的成功なら `scale_cuda + hwdownload + CPU overlay` を許容（背景スケールをGPUで肩代わり）。
+    - `HW_FILTER_MODE={auto|cuda|cpu}` と `FFMPEG_FILTER_THREADS`/`FFMPEG_FILTER_COMPLEX_THREADS` の記法を README/AI_README に明記し、運用での切り替えを容易にする。
+- ゴール: CUDA 不可環境でも CPU 合成を安定・効率化し、VideoPhase を短縮。
+- 実装イメージ: `video.py` の `_thread_flags()` と `VideoPhase._determine_clip_workers()` に上記ヒューリスティクスを反映。`ffmpeg_utils.smoke_test_*` を分離し段階的に判定。
+
 
 ### 02. 静的オーバーレイ無しのシーンでベース映像生成をスキップ＋二重スケール回避
 

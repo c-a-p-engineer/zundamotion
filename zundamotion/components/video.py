@@ -121,17 +121,26 @@ class VideoRenderer:
         ft_override = os.environ.get("FFMPEG_FILTER_THREADS")
         fct_override = os.environ.get("FFMPEG_FILTER_COMPLEX_THREADS")
 
+        # 実効フィルタ経路（プロセス全体のバックオフ判定）
+        global_filter_mode = get_hw_filter_mode()
+
         if ft_override and ft_override.isdigit():
             ft = ft_override
         else:
-            # NVENC パスではフィルタ並列を抑制（CUDA 安定化）。既定 1。
-            ft = "1" if self.hw_kind == "nvenc" else str(nproc)
+            # CPU フィルタ経路ではCPU向けヒューリスティクス（= nproc）
+            # CUDA フィルタ想定で NVENC の場合は保守的に 1
+            if global_filter_mode == "cpu":
+                ft = str(nproc)
+            else:
+                ft = "1" if self.hw_kind == "nvenc" else str(nproc)
 
         if fct_override and fct_override.isdigit():
             fct = fct_override
         else:
-            # NVENC パスではフィルタ並列を抑制（CUDA 安定化）。既定 1。
-            fct = "1" if self.hw_kind == "nvenc" else str(nproc)
+            if global_filter_mode == "cpu":
+                fct = str(nproc)
+            else:
+                fct = "1" if self.hw_kind == "nvenc" else str(nproc)
 
         return [
             "-threads",
