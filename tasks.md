@@ -2,18 +2,39 @@
 
 本ファイルは、現状コード・ログの観察結果に基づく改善タスクと将来機能を、優先度順に整理したものです。
 
-参照ログ: `logs/20250831_004024_506.log`, `logs/20250830_155656_544.log`
+参照ログ: `logs/20250831_172922_025.log`, `logs/20250831_004024_506.log`, `logs/20250830_155656_544.log`
 
-### 最新ログサマリ（2025-08-31 実行）
+### 最新ログサマリ（2025-08-31 17:29 実行）
 
-- AudioPhase: 15.09s（問題小）
-- VideoPhase: 91.55s（支配的）
-- BGMPhase: 2.68s / Finalize: 0.82s
-- 開始直後に CUDA フィルタのスモークテストが exit 218 で失敗し、CPU フィルタへフォールバック（`clip_workers=6`）。
-- シーンベース映像は「generated base with 0 static overlay(s)」が観測され、固定コストが発生。
-- クリップ本数は合計 23 本（subtitle/voice/intro/topic/outro）。
+- AudioPhase: ≈14.1s（概算、問題小）
+- VideoPhase: 136.09s（支配的）
+- BGMPhase: 2.59s / Finalize: 34.27s
+- NVENCのスモークテストは成功→エンコードはNVENC使用。
+- CUDAフィルタのスモークテストが exit 218 で失敗し、以降CPUフィルタへフォールバック。
+- スレッド: `clip_workers=2`, `filter_threads=6`, `filter_complex_threads=6`（CPU経路の既定ヒューリスティクス通り）。
 
 ## P0（必須・最優先）
+
+
+### 01. CUDAフィルタ smoke test (exit 218) の根因究明と対策
+
+- タイトル: CUDA フィルタ（overlay_cuda/scale_cuda）スモーク失敗の恒常化を解消
+- 詳細:
+    - 本日のログでも `overlay_cuda` を用いたスモークが exit 218 で失敗。NVENC は利用可能だが、合成が CPU 経路になり VideoPhase が支配的に。
+    - 調査観点: FFmpeg のビルド構成（`--enable-cuda-nvcc`/`--enable-libnpp` 有無）、ドライバ/ランタイム互換、色空間/ピクセルフォーマット（RGBA→NV12）変換、フィルタ依存関係。
+    - 観測性強化: スモーク失敗時に `ffmpeg -hide_banner -buildconf`, `ffmpeg -filters`, `nvidia-smi -L`, `nvcc --version`（存在すれば）をINFOで一括出力（1回/プロセス）。
+    - ワークアラウンド: `scale_cuda`→`scale_npp` の切替可否、`format=rgba|nv12` の明示、`hwupload_cuda` の挿入位置見直し（ベンチ付き）。
+- ゴール: CUDAフィルタ経路が正常化するか、少なくとも失敗理由がログに明確化され、恒常的にCPU経路へ落ちない。
+- 実装イメージ: `ffmpeg_utils.py` のスモークテスト強化と失敗時ダンプ、フィルタグラフの前処理（`format/hwupload`）見直しフラグの追加。
+
+### 02. CPUフィルタ経路の最適化（filter_threads/complex_threads の上限とプロファイル）
+
+- タイトル: CPU 合成時のスレッド設定とプロファイリング強化で VideoPhase を短縮
+- 詳細:
+    - 現状ヒューリスティクス（nproc=12, clip_workers=2 → filter_threads=6）は妥当だが、filter_complex_threads の効果は限定的なケースが多い。
+    - `-filter_threads` と `-filter_complex_threads` の上限を小さめにキャップ（例: 1〜4）し、`-benchmark -stats` を一時付与してFFmpegの実測をログ採取→最適域を探索。
+- ゴール: CPU経路でも過剰スレッドによるオーバーヘッドを抑え、VideoPhaseの p50/p95 を有意に短縮。
+- 実装イメージ: `ffmpeg_utils.py` にプロファイルモードを追加し、実測に基づく保守的既定値へ調整。
 
 
 ### 24. 字幕PNG生成のレイテンシばらつき解消（フォント初期化とレイアウトのキャッシュ）
@@ -45,8 +66,9 @@
 - ゴール: システム構成に応じた安定したスループットを確保。ワークロード変動時でも p95 を悪化させない。
 - 実装イメージ: `temp_dir` 初期化時に RAMディスク候補を選択。`_determine_clip_workers` を HW/Encoder 種別と `nvidia-smi`/実測に基づき調整。FFmpeg に `-filter_threads N` を付与。
 
-補足（今回ログ）:
-- ログでは `clip_workers=6`、`-filter_threads 12` が観測され、GPU フィルタ失敗の温床に。NVENC+GPUフィルタ時は `clip_workers=1〜2`、`-filter_threads=1` を上限とする保守的既定を推奨。
+補足（今回ログ 20250831_172922_025）:
+- 本件ログでは `clip_workers=2`, `filter_threads=6` と保守的な設定で稼働。CUDAフィルタ失敗が主因でCPU合成となり、VideoPhaseが支配。
+- CUDA経路が復旧すれば、ここは `clip_workers=1〜2`, `-filter_threads=1` 上限でも十分スループットが改善見込み。
 
 ### 05. 正規化済み一時ファイルの再正規化抑止（ディレクトリ非依存のメタ検証）
 
