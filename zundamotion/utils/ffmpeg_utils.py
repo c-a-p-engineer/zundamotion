@@ -503,6 +503,104 @@ async def has_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
 # 軽量な CUDA フィルタのスモークテスト（overlay_cuda/scale_cuda 実行確認）
 _cuda_smoke_result: Optional[bool] = None
 _cuda_smoke_lock = asyncio.Lock()
+_cuda_diag_dumped: bool = False  # スモーク失敗時の診断ダンプは1回のみ
+
+
+_filters_cache: Dict[str, str] = {}
+
+
+async def _list_ffmpeg_filters(ffmpeg_path: str = "ffmpeg") -> str:
+    """Return the raw output of `ffmpeg -hide_banner -filters` (cached)."""
+    cached = _filters_cache.get(ffmpeg_path)
+    if cached is not None:
+        return cached
+    try:
+        result = await _run_ffmpeg_async([ffmpeg_path, "-hide_banner", "-filters"])
+        out = result.stdout or ""
+        _filters_cache[ffmpeg_path] = out
+        return out
+    except Exception:
+        return ""
+
+
+_preferred_scale_filter_cache: Dict[str, str] = {}
+
+
+async def get_preferred_cuda_scale_filter(ffmpeg_path: str = "ffmpeg") -> str:
+    """
+    Choose GPU scale filter: prefer `scale_cuda` if available; otherwise use
+    `scale_npp` when present. Falls back to `scale_cuda` by name if nothing is
+    detectable (the call site will still fail gracefully if missing).
+    Result is cached per ffmpeg path.
+    """
+    cached = _preferred_scale_filter_cache.get(ffmpeg_path)
+    if cached:
+        return cached
+    filters = await _list_ffmpeg_filters(ffmpeg_path)
+    chosen = "scale_cuda" if "scale_cuda" in filters else (
+        "scale_npp" if "scale_npp" in filters else "scale_cuda"
+    )
+    _preferred_scale_filter_cache[ffmpeg_path] = chosen
+    return chosen
+
+
+async def _dump_cuda_diag_once(ffmpeg_path: str = "ffmpeg") -> None:
+    """On first CUDA smoke failure, dump environment/build info at INFO level."""
+    global _cuda_diag_dumped
+    if _cuda_diag_dumped:
+        return
+    _cuda_diag_dumped = True
+    logger.info("[CUDA Diag] Collecting environment diagnostics after smoke failure...")
+    # ffmpeg -buildconf
+    try:
+        proc = await _run_ffmpeg_async([ffmpeg_path, "-hide_banner", "-buildconf"])
+        if proc.stdout:
+            logger.info("[ffmpeg -buildconf]\n%s", proc.stdout.strip())
+    except Exception as e:
+        logger.info("[ffmpeg -buildconf] failed: %s", e)
+    # ffmpeg -filters
+    try:
+        proc = await _run_ffmpeg_async([ffmpeg_path, "-hide_banner", "-filters"])
+        if proc.stdout:
+            logger.info("[ffmpeg -filters]\n%s", proc.stdout.strip())
+    except Exception as e:
+        logger.info("[ffmpeg -filters] failed: %s", e)
+    # nvidia-smi -L
+    try:
+        p = await asyncio.create_subprocess_exec(
+            "nvidia-smi", "-L", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        out, err = await p.communicate()
+        if p.returncode == 0:
+            logger.info("[nvidia-smi -L]\n%s", (out or b"").decode(errors="ignore").strip())
+        else:
+            logger.info(
+                "[nvidia-smi -L] exit=%s stderr=%s",
+                p.returncode,
+                (err or b"").decode(errors="ignore").strip(),
+            )
+    except FileNotFoundError:
+        logger.info("[nvidia-smi -L] command not found")
+    except Exception as e:
+        logger.info("[nvidia-smi -L] failed: %s", e)
+    # nvcc --version (if present)
+    try:
+        p = await asyncio.create_subprocess_exec(
+            "nvcc", "--version", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        out, err = await p.communicate()
+        if p.returncode == 0:
+            logger.info("[nvcc --version]\n%s", (out or b"").decode(errors="ignore").strip())
+        else:
+            logger.info(
+                "[nvcc --version] exit=%s stderr=%s",
+                p.returncode,
+                (err or b"").decode(errors="ignore").strip(),
+            )
+    except FileNotFoundError:
+        logger.info("[nvcc --version] command not found")
+    except Exception as e:
+        logger.info("[nvcc --version] failed: %s", e)
 
 
 async def smoke_test_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
@@ -518,41 +616,79 @@ async def smoke_test_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
         if _cuda_smoke_result is not None:
             return _cuda_smoke_result
         # 64x64黒 + 32x32白を GPU に上げて overlay_cuda。
-        cmd = [
-            ffmpeg_path,
-            "-hide_banner",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=black:s=64x64:d=0.1",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=white:s=32x32:d=0.1",
-            "-filter_complex",
-            "[0:v]format=nv12,hwupload_cuda[bg];[1:v]format=rgba,hwupload_cuda,scale_cuda=32:32[ov];[bg][ov]overlay_cuda=x=16:y=16[out]",
-            "-map",
-            "[out]",
-            "-f",
-            "null",
-            "-",
-        ]
-        try:
-            await _run_ffmpeg_async(cmd)
-            _cuda_smoke_result = True
-        except Exception as e:
-            logger.warning(
-                "CUDA filter smoke test failed; switching global HW filter mode to CPU: %s",
-                e,
+        # 複数の候補フィルタグラフを試し、どれかが通れば True。
+        filters = await _list_ffmpeg_filters(ffmpeg_path)
+        use_scale_npp = ("scale_npp" in filters) and ("scale_cuda" not in filters)
+        scale_name_primary = "scale_cuda" if "scale_cuda" in filters else (
+            "scale_npp" if "scale_npp" in filters else "scale_cuda"
+        )
+        # 候補グラフ（順に試す）
+        candidates = []
+        # 1) NV12+NV12 with primary scale
+        candidates.append(
+            f"[0:v]format=nv12,hwupload_cuda[bg];[1:v]format=nv12,hwupload_cuda,{scale_name_primary}=32:32[ov];[bg][ov]overlay_cuda=x=16:y=16[out]"
+        )
+        # 2) RGBA overlay variant with primary scale (common in pipeline)
+        candidates.append(
+            f"[0:v]format=nv12,hwupload_cuda[bg];[1:v]format=rgba,hwupload_cuda,{scale_name_primary}=32:32[ov];[bg][ov]overlay_cuda=x=16:y=16[out]"
+        )
+        # 3) If both scale filters exist, try the alternative explicitly
+        if "scale_npp" in filters and "scale_cuda" in filters:
+            candidates.append(
+                "[0:v]format=nv12,hwupload_cuda[bg];[1:v]format=nv12,hwupload_cuda,scale_npp=32:32[ov];[bg][ov]overlay_cuda=x=16:y=16[out]"
             )
-            # On first failure, enforce process-wide CPU filters to avoid repeated failures.
+            candidates.append(
+                "[0:v]format=nv12,hwupload_cuda[bg];[1:v]format=rgba,hwupload_cuda,scale_npp=32:32[ov];[bg][ov]overlay_cuda=x=16:y=16[out]"
+            )
+
+        last_err: Optional[BaseException] = None
+        for fc in candidates:
+            cmd = [
+                ffmpeg_path,
+                "-hide_banner",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=64x64:d=0.1",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=white:s=32x32:d=0.1",
+                "-filter_complex",
+                fc,
+                "-map",
+                "[out]",
+                "-f",
+                "null",
+                "-",
+            ]
             try:
-                set_hw_filter_mode("cpu")
-            except Exception:
-                # Avoid cascading errors if logger/env have issues
-                pass
-            _cuda_smoke_result = False
+                await _run_ffmpeg_async(cmd)
+                _cuda_smoke_result = True
+                return _cuda_smoke_result
+            except subprocess.CalledProcessError as e:
+                last_err = e
+                logger.debug(
+                    "CUDA smoke candidate failed (exit=%s). FilterGraph=%s\nSTDERR=%s",
+                    getattr(e, "returncode", None),
+                    fc,
+                    (e.stderr or "").strip(),
+                )
+            except Exception as e:  # pragma: no cover - generic guard
+                last_err = e
+                logger.debug("CUDA smoke candidate failed: %s", e)
+
+        # All candidates failed
+        logger.warning(
+            "CUDA filter smoke test failed for all candidates; switching global HW filter mode to CPU."
+        )
+        await _dump_cuda_diag_once(ffmpeg_path)
+        try:
+            set_hw_filter_mode("cpu")
+        except Exception:
+            pass
+        _cuda_smoke_result = False
         return _cuda_smoke_result
 
 

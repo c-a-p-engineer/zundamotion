@@ -16,17 +16,6 @@
 ## P0（必須・最優先）
 
 
-### 01. CUDAフィルタ smoke test (exit 218) の根因究明と対策
-
-- タイトル: CUDA フィルタ（overlay_cuda/scale_cuda）スモーク失敗の恒常化を解消
-- 詳細:
-    - 本日のログでも `overlay_cuda` を用いたスモークが exit 218 で失敗。NVENC は利用可能だが、合成が CPU 経路になり VideoPhase が支配的に。
-    - 調査観点: FFmpeg のビルド構成（`--enable-cuda-nvcc`/`--enable-libnpp` 有無）、ドライバ/ランタイム互換、色空間/ピクセルフォーマット（RGBA→NV12）変換、フィルタ依存関係。
-    - 観測性強化: スモーク失敗時に `ffmpeg -hide_banner -buildconf`, `ffmpeg -filters`, `nvidia-smi -L`, `nvcc --version`（存在すれば）をINFOで一括出力（1回/プロセス）。
-    - ワークアラウンド: `scale_cuda`→`scale_npp` の切替可否、`format=rgba|nv12` の明示、`hwupload_cuda` の挿入位置見直し（ベンチ付き）。
-- ゴール: CUDAフィルタ経路が正常化するか、少なくとも失敗理由がログに明確化され、恒常的にCPU経路へ落ちない。
-- 実装イメージ: `ffmpeg_utils.py` のスモークテスト強化と失敗時ダンプ、フィルタグラフの前処理（`format/hwupload`）見直しフラグの追加。
-
 ### 02. CPUフィルタ経路の最適化（filter_threads/complex_threads の上限とプロファイル）
 
 - タイトル: CPU 合成時のスレッド設定とプロファイリング強化で VideoPhase を短縮

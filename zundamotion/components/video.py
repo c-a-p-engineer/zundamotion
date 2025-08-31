@@ -20,6 +20,7 @@ from ..utils.ffmpeg_utils import (
     normalize_media,
     get_hw_filter_mode,
     set_hw_filter_mode,
+    get_preferred_cuda_scale_filter,
 )
 from .subtitle import SubtitleGenerator
 from ..utils.logger import logger
@@ -56,6 +57,8 @@ class VideoRenderer:
         self.gpu_overlay_experimental = bool(
             config.get("video", {}).get("gpu_overlay_experimental", False)
         )
+        # Preferred GPU scaler ("scale_cuda" or fallback "scale_npp")
+        self.scale_filter = "scale_cuda"
         # Subtitle generator (used to build overlay snippet and PNG input)
         self.subtitle_gen = SubtitleGenerator(self.config, self.cache_manager)
 
@@ -88,10 +91,12 @@ class VideoRenderer:
         has_cuda_filters_val = (
             has_cuda_filters_listed and (await smoke_test_cuda_filters(ffmpeg_path))
         )
+        # GPUスケールフィルタの優先名を決定
+        scale_filter = await get_preferred_cuda_scale_filter(ffmpeg_path)
         # Respect global HW filter mode (process-wide backoff)
         if get_hw_filter_mode() == "cpu":
             has_cuda_filters_val = False
-        return cls(
+        inst = cls(
             config,
             temp_dir,
             cache_manager,
@@ -102,6 +107,11 @@ class VideoRenderer:
             has_cuda_filters_val,
             clip_workers=clip_workers,
         )
+        try:
+            inst.scale_filter = scale_filter or "scale_cuda"
+        except Exception:
+            inst.scale_filter = "scale_cuda"
+        return inst
 
     # --------------------------
     # 内部ユーティリティ
@@ -407,7 +417,7 @@ class VideoRenderer:
                 # CUDA: 一旦GPUへ上げてスケール＋fps。RGBA→NV12 変換はCUDA側に任せる。
                 filter_complex_parts.append("[0:v]format=rgba,hwupload_cuda[hw_bg_in]")
                 filter_complex_parts.append(
-                    f"[hw_bg_in]scale_cuda={width}:{height},fps={fps}[bg]"
+                    f"[hw_bg_in]{self.scale_filter}={width}:{height},fps={fps}[bg]"
                 )
             else:
                 filter_complex_parts.append(
@@ -439,11 +449,11 @@ class VideoRenderer:
                     # ここに来るのは想定外（uses_alpha_overlay=True でCPUに落ちる想定）
                     # ただ、保険として rgba→hwupload_cuda→scale_cuda
                     filter_complex_parts.append(
-                        f"[{insert_ffmpeg_index}:v]format=rgba,hwupload_cuda,scale_cuda=iw*{scale}:ih*{scale}[insert_scaled]"
+                        f"[{insert_ffmpeg_index}:v]format=rgba,hwupload_cuda,{self.scale_filter}=iw*{scale}:ih*{scale}[insert_scaled]"
                     )
                 else:
                     filter_complex_parts.append(
-                        f"[{insert_ffmpeg_index}:v]format=nv12,hwupload_cuda,scale_cuda=iw*{scale}:ih*{scale}[insert_scaled]"
+                        f"[{insert_ffmpeg_index}:v]format=nv12,hwupload_cuda,{self.scale_filter}=iw*{scale}:ih*{scale}[insert_scaled]"
                     )
                 overlay_streams.append("[insert_scaled]")
                 overlay_filters.append(f"overlay_cuda=x={x_expr}:y={y_expr}")
@@ -475,7 +485,7 @@ class VideoRenderer:
             if use_cuda_filters:
                 # 想定上ここには来ない（uses_alpha_overlay True → CPU 合成）
                 filter_complex_parts.append(
-                    f"[{ffmpeg_index}:v]format=rgba,hwupload_cuda,scale_cuda=iw*{scale}:ih*{scale}[char_scaled_{i}]"
+                    f"[{ffmpeg_index}:v]format=rgba,hwupload_cuda,{self.scale_filter}=iw*{scale}:ih*{scale}[char_scaled_{i}]"
                 )
                 overlay_streams.append(f"[char_scaled_{i}]")
                 overlay_filters.append(f"overlay_cuda=x={x_expr}:y={y_expr}")

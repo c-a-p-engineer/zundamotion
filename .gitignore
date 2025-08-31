@@ -6,4 +6,7 @@ cache/**
 
 # .env
 .env
+# log
 *.log
+# Todo list
+TODO.md

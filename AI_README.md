@@ -191,6 +191,12 @@ CLI主なオプション（main.py実装）:
 - 初回のCUDAフィルタ失敗（スモーク失敗 or 実行失敗）を検知した場合、プロセス内のグローバルフラグで以降の全クリップをCPUフィルタへバックオフします（NVENCの利用可否は別途維持）。`zundamotion/utils/ffmpeg_utils.py` の `set_hw_filter_mode('cpu'|'cuda'|'auto')` により明示的な制御も可能です。
  - CPUフィルタ経路が有効な場合（グローバルが`cpu`）、NVENCでのエンコード有無に関わらず、`clip_workers` と `-filter_threads`/`-filter_complex_threads` は CPU 向けヒューリスティクス（`max(1, nproc // clip_workers)`）に自動調整します（環境変数での明示指定がある場合はそちらを優先）。
 
+補足（診断とフォールバックの強化）:
+- スモーク失敗時は一度だけ、診断情報をINFOで自動ダンプします。
+  - `ffmpeg -hide_banner -buildconf`, `ffmpeg -hide_banner -filters`, `nvidia-smi -L`, `nvcc --version`
+- スモークは複数候補のフィルタグラフ（NV12+NV12／RGBAオーバレイ）を順に試行し、偽陰性を低減します。
+- `scale_cuda` が列挙されない環境で `scale_npp` が存在する場合、GPUパスでは `scale_npp` を優先的に使用します（自動選択）。
+
 補足（運用トグル／チューニング）:
 - 環境変数で挙動を制御できます。
   - `HW_FILTER_MODE={auto|cuda|cpu}`: CUDAフィルタの利用方針をプロセス全体で固定（`auto`が既定）。
