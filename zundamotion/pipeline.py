@@ -1,5 +1,6 @@
 import asyncio  # 追加
 import shutil
+import os
 import statistics
 import tempfile
 import time
@@ -90,7 +91,27 @@ class GenerationPipeline:
             output_path (str): The final output video file path.
         """
         pipeline_start_time = time.time()
-        with tempfile.TemporaryDirectory() as temp_dir_str:
+        # Prefer RAM disk (/dev/shm) when available and large enough, controlled by USE_RAMDISK env (default: 1)
+        use_ramdisk = True
+        try:
+            use_ramdisk = os.getenv("USE_RAMDISK", "1") == "1"
+        except Exception:
+            use_ramdisk = True
+        temp_ctx = None
+        if use_ramdisk and Path("/dev/shm").exists():
+            try:
+                import shutil as _sh
+
+                usage = _sh.disk_usage("/dev/shm")
+                # Require at least 256MB free
+                if usage.free > 256 * 1024 * 1024:
+                    temp_ctx = tempfile.TemporaryDirectory(dir="/dev/shm")
+            except Exception:
+                temp_ctx = None
+        if temp_ctx is None:
+            temp_ctx = tempfile.TemporaryDirectory()
+
+        with temp_ctx as temp_dir_str:
             temp_dir = Path(temp_dir_str)
             # Route ephemeral (no-cache) outputs to temp_dir for this run
             try:

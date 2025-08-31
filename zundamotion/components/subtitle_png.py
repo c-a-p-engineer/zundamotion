@@ -11,6 +11,9 @@ from zundamotion.cache import CacheManager
 
 logger = logging.getLogger(__name__)
 
+# Module-level font cache to reduce load/latency jitter inside worker processes
+_FONT_CACHE: dict[tuple[str, int], ImageFont.FreeTypeFont] = {}
+
 
 class SubtitlePNGRenderer:
     """
@@ -271,12 +274,23 @@ def _load_font_with_fallback(font_path: str, font_size: int) -> ImageFont.FreeTy
     Tries the given path first; if it fails, attempts common system fonts
     (DejaVu/Noto/Arial). Falls back to PIL's default bitmap font.
     """
+    # Return cached instance when possible
+    try:
+        key = (font_path or "", int(font_size))
+        if key in _FONT_CACHE:
+            return _FONT_CACHE[key]
+    except Exception:
+        pass
     try:
         if font_path and os.path.exists(font_path):
-            return ImageFont.truetype(font_path, font_size)
+            font = ImageFont.truetype(font_path, font_size)
+            _FONT_CACHE[key] = font
+            return font
         # Try even if path doesn't exist; Pillow may resolve by name
         if font_path:
-            return ImageFont.truetype(font_path, font_size)
+            font = ImageFont.truetype(font_path, font_size)
+            _FONT_CACHE[key] = font
+            return font
     except Exception:
         pass
 
@@ -292,12 +306,22 @@ def _load_font_with_fallback(font_path: str, font_size: int) -> ImageFont.FreeTy
     for p in candidates:
         try:
             if os.path.exists(p):
-                return ImageFont.truetype(p, font_size)
+                try:
+                    font = ImageFont.truetype(p, font_size)
+                    _FONT_CACHE[key] = font
+                    return font
+                except Exception:
+                    continue
         except Exception:
             continue
     # Final fallback
     try:
-        return ImageFont.load_default()
+        f = ImageFont.load_default()
+        try:
+            _FONT_CACHE[key] = f
+        except Exception:
+            pass
+        return f
     except Exception:
         # As a last resort, attempt DejaVu by name
         return ImageFont.truetype("DejaVuSans.ttf", font_size)

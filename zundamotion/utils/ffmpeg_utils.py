@@ -38,6 +38,10 @@ _hw_filter_mode: str = (
     else "auto"
 )
 
+# Short-term memoization caches (per-process)
+_media_info_memo: Dict[tuple, MediaInfo] = {}
+_duration_memo: Dict[tuple, float] = {}
+
 
 def set_hw_filter_mode(mode: str) -> None:
     """Set global HW filter mode: 'auto' | 'cuda' | 'cpu'."""
@@ -54,6 +58,16 @@ def set_hw_filter_mode(mode: str) -> None:
 def get_hw_filter_mode() -> str:
     """Get global HW filter mode: 'auto' | 'cuda' | 'cpu'."""
     return _hw_filter_mode
+
+
+def get_profile_flags() -> List[str]:
+    """Return profiling flags when FFMPEG_PROFILE_MODE=1."""
+    try:
+        if os.getenv("FFMPEG_PROFILE_MODE", "0") == "1":
+            return ["-benchmark", "-stats"]
+    except Exception:
+        pass
+    return []
 
 
 # =========================================================
@@ -837,13 +851,46 @@ def _threading_flags(ffmpeg_path: str = "ffmpeg") -> List[str]:
     -threads 0（自動）＋ filter_threads / filter_complex_threads = nproc
     """
     nproc = get_nproc_value()
+    # Base threads behavior
+    threads = os.getenv("FFMPEG_THREADS", "0")  # let FFmpeg decide by default
+
+    # Filter threads logic with caps
+    # Defaults: when CPU filter mode is effective → cap small (<=4), else be conservative (1)
+    try:
+        cap_ft_env = os.getenv("FFMPEG_FILTER_THREADS_CAP")
+        cap_fct_env = os.getenv("FFMPEG_FILTER_COMPLEX_THREADS_CAP")
+        cap_ft = int(cap_ft_env) if cap_ft_env and cap_ft_env.isdigit() else None
+        cap_fct = int(cap_fct_env) if cap_fct_env and cap_fct_env.isdigit() else None
+    except Exception:
+        cap_ft = cap_fct = None
+
+    effective_cpu_filters = get_hw_filter_mode() == "cpu"
+    default_cap = 4 if effective_cpu_filters else 1
+
+    ft_val = int(nproc)
+    fct_val = int(nproc)
+
+    # Apply default conservative caps
+    if effective_cpu_filters:
+        ft_val = max(1, min(ft_val, default_cap))
+        fct_val = max(1, min(fct_val, default_cap))
+    else:
+        ft_val = 1
+        fct_val = 1
+
+    # Apply explicit caps if provided
+    if cap_ft is not None:
+        ft_val = max(1, min(ft_val, cap_ft))
+    if cap_fct is not None:
+        fct_val = max(1, min(fct_val, cap_fct))
+
     return [
         "-threads",
-        "0",
+        threads,
         "-filter_threads",
-        nproc,
+        str(ft_val),
         "-filter_complex_threads",
-        nproc,
+        str(fct_val),
     ]
 
 
@@ -874,6 +921,12 @@ class MediaInfo(TypedDict, total=False):
 async def get_media_info(file_path: str) -> MediaInfo:
     """ffprobe 経由で動画/音声の主要なメタ情報を返す。"""
     try:
+        # 短期メモ化（パス+mtime+size）
+        p = Path(file_path)
+        st = p.stat()
+        key = (str(p.resolve()), int(st.st_mtime), st.st_size)
+        if key in _media_info_memo:
+            return _media_info_memo[key]
         cmd = [
             "ffprobe",
             "-v",
@@ -913,6 +966,7 @@ async def get_media_info(file_path: str) -> MediaInfo:
                     "channels": (int(s.get("channels", 0)) if s.get("channels") else 0),
                     "channel_layout": s.get("channel_layout"),
                 }
+        _media_info_memo[key] = media_info
         return media_info
 
     except subprocess.CalledProcessError as e:
@@ -926,6 +980,11 @@ async def get_media_info(file_path: str) -> MediaInfo:
 async def get_audio_duration(file_path: str) -> float:
     """音声ファイルの長さ（秒, 小数2桁丸め）。"""
     try:
+        p = Path(file_path)
+        st = p.stat()
+        key = ("aud", str(p.resolve()), int(st.st_mtime), st.st_size)
+        if key in _duration_memo:
+            return _duration_memo[key]
         cmd = [
             "ffprobe",
             "-v",
@@ -939,7 +998,9 @@ async def get_audio_duration(file_path: str) -> float:
         result = await _run_ffmpeg_async(cmd)
         probe = json.loads(result.stdout)
         duration = float(probe["format"]["duration"])
-        return round(duration, 2)
+        duration = round(duration, 2)
+        _duration_memo[key] = duration
+        return duration
     except subprocess.CalledProcessError as e:
         logger.error(f"Error running ffprobe for {file_path}: {e}\n{e.stderr}")
         raise
@@ -951,6 +1012,11 @@ async def get_audio_duration(file_path: str) -> float:
 async def get_media_duration(file_path: str) -> float:
     """音声/動画問わず、コンテナから長さ（秒）を取得。"""
     try:
+        p = Path(file_path)
+        st = p.stat()
+        key = ("med", str(p.resolve()), int(st.st_mtime), st.st_size)
+        if key in _duration_memo:
+            return _duration_memo[key]
         cmd = [
             "ffprobe",
             "-v",
@@ -964,7 +1030,9 @@ async def get_media_duration(file_path: str) -> float:
         result = await _run_ffmpeg_async(cmd)
         probe = json.loads(result.stdout)
         duration = float(probe["format"]["duration"])
-        return round(duration, 2)
+        duration = round(duration, 2)
+        _duration_memo[key] = duration
+        return duration
     except subprocess.CalledProcessError as e:
         logger.error(f"Error running ffprobe for {file_path}: {e}\n{e.stderr}")
         raise
@@ -1062,7 +1130,15 @@ async def concat_videos_copy(
         logger.warning("No input paths provided for concat_videos_copy.")
         return
 
-    list_file_path = "concat_list.txt"  # 一時ファイル名
+    # 一時リストファイルは出力先と同じディレクトリに配置（I/O 局所性）
+    try:
+        import hashlib
+
+        h = hashlib.sha256("\n".join(input_paths).encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        h = "ffconcat"
+    out_dir = os.path.dirname(os.path.abspath(output_path)) or "."
+    list_file_path = os.path.join(out_dir, f".ffconcat_{h}.txt")
     with open(list_file_path, "w", encoding="utf-8") as f:
         for path in input_paths:
             f.write(f"file '{os.path.abspath(path)}'\n")
@@ -1070,6 +1146,7 @@ async def concat_videos_copy(
     cmd = [
         ffmpeg_path,
         "-y",
+        *get_profile_flags(),
         "-f",
         "concat",
         "-safe",
@@ -1140,6 +1217,7 @@ async def create_silent_audio(
     cmd = [
         ffmpeg_path,
         "-y",
+        *get_profile_flags(),
         "-f",
         "lavfi",
         "-i",
@@ -1182,7 +1260,7 @@ async def add_bgm_to_video(
     bgm_duration = await get_audio_duration(bgm_path)
     _ = min(video_duration, bgm_start_time + bgm_duration)  # 有効長（使い道があれば）
 
-    cmd = [ffmpeg_path, "-y"]
+    cmd = [ffmpeg_path, "-y", *get_profile_flags()]
     cmd.extend(_threading_flags(ffmpeg_path))
     cmd.extend(["-i", video_path, "-i", bgm_path, "-filter_complex"])
 
@@ -1268,7 +1346,7 @@ async def apply_transition(
     video_opts = video_params.to_ffmpeg_opts(hw_kind)
     audio_opts = audio_params.to_ffmpeg_opts()
 
-    cmd = [ffmpeg_path, "-y"]
+    cmd = [ffmpeg_path, "-y", *get_profile_flags()]
     cmd.extend(_threading_flags(ffmpeg_path))
     cmd.extend(["-i", input_video1_path, "-i", input_video2_path])
 
@@ -1462,23 +1540,16 @@ async def normalize_media(
     背景・挿入動画を指定されたパラメータに正規化し、キャッシュする。
     キャッシュがHITすれば、変換処理をスキップしてキャッシュパスを返す。
     """
-    # 既に当プロジェクトの正規化キャッシュ（temp_normalized_*.mp4）が入力の場合、自己再正規化を避ける
+    # 入力が既に本プロジェクトの正規化仕様で生成されたMP4で、隣接する meta の target_spec が一致する場合は自己再正規化を避ける
     try:
-        if (
-            input_path.is_file()
-            and hasattr(cache_manager, "cache_dir")
-            and input_path.parent.resolve() == cache_manager.cache_dir.resolve()
-            and input_path.name.startswith("temp_normalized_")
-            and input_path.suffix.lower() == ".mp4"
-        ):
-            # VideoParams/AudioParams から target_spec へ変換し、メタの target_spec と比較
+        if input_path.is_file() and input_path.suffix.lower() == ".mp4":
             target_spec = {
                 "video": {
                     "width": int(video_params.width),
                     "height": int(video_params.height),
                     "fps": int(video_params.fps),
                     "pix_fmt": video_params.pix_fmt,
-                    "codec": "h264",  # normalize 側は h264 を基本に正規化
+                    "codec": "h264",
                 },
                 "audio": {
                     "sr": int(audio_params.sample_rate),
@@ -1486,7 +1557,6 @@ async def normalize_media(
                     "codec": audio_params.codec,
                 },
             }
-
             meta_candidate = input_path.with_name(input_path.stem + ".meta.json")
             if meta_candidate.exists():
                 with open(meta_candidate, "r", encoding="utf-8") as f:
@@ -1498,9 +1568,7 @@ async def normalize_media(
                     )
                     return input_path
     except Exception as e:
-        logger.debug(
-            f"Skip pre-check for already-normalized input due to error: {e}"
-        )
+        logger.debug(f"Skip pre-check for already-normalized input due to error: {e}")
     # 入力ファイルのサイズと最終更新時刻を取得
     file_stat = input_path.stat()
     file_size = file_stat.st_size
@@ -1652,6 +1720,29 @@ async def normalize_media(
                 logger.error(
                     f"Failed to normalize {input_path} to {output_path} (file does NOT exist)."
                 )
+            # Write adjacent meta for re-normalization avoidance
+            try:
+                meta = {
+                    "target_spec": {
+                        "video": {
+                            "width": int(video_params.width),
+                            "height": int(video_params.height),
+                            "fps": int(video_params.fps),
+                            "pix_fmt": video_params.pix_fmt,
+                            "codec": "h264",
+                        },
+                        "audio": {
+                            "sr": int(audio_params.sample_rate),
+                            "ch": int(audio_params.channels),
+                            "codec": audio_params.codec,
+                        },
+                    }
+                }
+                meta_path = Path(output_path).with_name(Path(output_path).stem + ".meta.json")
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    json.dump(meta, f, ensure_ascii=False)
+            except Exception as _e:
+                logger.debug(f"Failed to write normalization meta: {_e}")
             return output_path
         except subprocess.CalledProcessError as e:
             # Detect NVENC-specific failure and fallback to CPU once
@@ -1685,6 +1776,29 @@ async def normalize_media(
                     logger.error(
                         f"Failed to normalize (fallback CPU) {input_path} -> {output_path}"
                     )
+                # Write adjacent meta for re-normalization avoidance (CPU fallback)
+                try:
+                    meta = {
+                        "target_spec": {
+                            "video": {
+                                "width": int(video_params.width),
+                                "height": int(video_params.height),
+                                "fps": int(video_params.fps),
+                                "pix_fmt": video_params.pix_fmt,
+                                "codec": "h264",
+                            },
+                            "audio": {
+                                "sr": int(audio_params.sample_rate),
+                                "ch": int(audio_params.channels),
+                                "codec": audio_params.codec,
+                            },
+                        }
+                    }
+                    meta_path = Path(output_path).with_name(Path(output_path).stem + ".meta.json")
+                    with open(meta_path, "w", encoding="utf-8") as f:
+                        json.dump(meta, f, ensure_ascii=False)
+                except Exception as _e:
+                    logger.debug(f"Failed to write normalization meta (fallback): {_e}")
                 return output_path
             finally:
                 if prev is None:

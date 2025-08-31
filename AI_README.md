@@ -233,3 +233,30 @@ CLI主なオプション（main.py実装）:
 - 設定（`video.face_anim`）:
   - `mouth_fps`=15, `mouth_thr_half`=0.2, `mouth_thr_open`=0.5
   - `blink_min_interval`=2.0, `blink_max_interval`=5.0, `blink_close_frames`=2
+
+### 6.12. FFmpegプロファイルとスレッド上限（caps）
+
+- 環境変数で計測とスレッド動作を制御できます。
+  - `FFMPEG_PROFILE_MODE=1`: すべてのFFmpeg実行に `-benchmark -stats` を付与（所要時間・fps等の統計をstderrに出力）。
+  - `FFMPEG_THREADS`: グローバルの `-threads` を明示上書き（未指定時はFFmpeg既定）。
+  - `FFMPEG_FILTER_THREADS_CAP` / `FFMPEG_FILTER_COMPLEX_THREADS_CAP`: フィルタスレッドの上限をキャップ。既定はCPUフィルタ経路で各4、GPU経路では1。
+- CPUフィルタ経路では過剰並列を避けるため、`clip_workers` と合わせて保守的に設定されます。
+
+### 6.13. 一時ディレクトリ（RAMディスク優先）
+
+- 空き容量が十分な場合、`/dev/shm`（RAMディスク）を `temp_dir` として優先利用します（`USE_RAMDISK=1` 既定）。
+- `--no-cache` 時は生成物を `temp_dir`（Ephemeral）に出力し、同一キーの重複生成をプロセス内で抑止します（in-flight集約＋既存ファイル再利用）。
+
+### 6.14. 正規化メタと再正規化抑止
+
+- 正規化出力（`temp_normalized_*.mp4` 等）に隣接して `<name>.meta.json` を書き出し、`target_spec` を保存します。
+- 入力が既に正規化済みで、隣接メタの `target_spec` が現在の要求と一致する場合は再正規化をスキップします（ディレクトリに依存しない判定）。
+
+### 6.15. concatのI/O最適化
+
+- `-f concat -c copy` のリストファイルは出力先ディレクトリに配置し、I/O局所性を高めています。`FFMPEG_PROFILE_MODE=1` で結合時の所要も観測可能です。
+
+### 6.16. 字幕PNGのフォントフォールバックとキャッシュ
+
+- フォントは複数の既知パスを探索し、見つからない場合はシステムのデフォルトにフォールバックします。
+- 同一フォント/サイズの `ImageFont` をプロセス内でキャッシュし、初期化のばらつき（レイテンシスパイク）を抑制します。

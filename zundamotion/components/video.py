@@ -22,6 +22,7 @@ from ..utils.ffmpeg_utils import (
     set_hw_filter_mode,
     get_preferred_cuda_scale_filter,
     _dump_cuda_diag_once,
+    get_profile_flags,
 )
 from .subtitle import SubtitleGenerator
 from ..utils.logger import logger
@@ -158,7 +159,13 @@ class VideoRenderer:
             if global_filter_mode == "cpu":
                 # clip_workers 並列時に filter_threads を割り当て過ぎない
                 per_filter_threads = max(1, nproc // max(1, self.clip_workers))
-                ft = str(per_filter_threads)
+                # デフォルト上限（CPUフィルタ時は小さめ）
+                cap = os.environ.get("FFMPEG_FILTER_THREADS_CAP")
+                try:
+                    cap_i = int(cap) if cap and cap.isdigit() else 4
+                except Exception:
+                    cap_i = 4
+                ft = str(max(1, min(per_filter_threads, cap_i)))
             else:
                 ft = "1" if self.hw_kind == "nvenc" else str(nproc)
 
@@ -167,7 +174,12 @@ class VideoRenderer:
         else:
             if global_filter_mode == "cpu":
                 per_filter_threads = max(1, nproc // max(1, self.clip_workers))
-                fct = str(per_filter_threads)
+                cap = os.environ.get("FFMPEG_FILTER_COMPLEX_THREADS_CAP")
+                try:
+                    cap_i = int(cap) if cap and cap.isdigit() else 4
+                except Exception:
+                    cap_i = 4
+                fct = str(max(1, min(per_filter_threads, cap_i)))
             else:
                 fct = "1" if self.hw_kind == "nvenc" else str(nproc)
 
@@ -227,6 +239,7 @@ class VideoRenderer:
             "-hide_banner",
             "-loglevel",
             "warning",
+            *get_profile_flags(),
         ]
         cmd.extend(self._thread_flags())
 
@@ -910,6 +923,7 @@ class VideoRenderer:
             "-hide_banner",
             "-loglevel",
             "warning",
+            *get_profile_flags(),
         ]
         cmd.extend(self._thread_flags())
 

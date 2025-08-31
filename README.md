@@ -486,6 +486,26 @@ video:
 
 ---
 
+## 🚀 パフォーマンスと運用（上級者向け）
+
+- GPUオーバーレイ方針: 字幕はPNG（RGBA）で合成するため、既定ではCPU overlayを使用します。RGBAを含まない場合はGPU（overlay_cuda/scale_cuda or scale_npp）を利用します。実験的にGPUで字幕を重ねたい場合は設定で `video.gpu_overlay_experimental: true` を有効化してください。
+- CUDA診断とフォールバック: CUDAフィルタのスモーク/実行時に失敗した場合、初回のみ `ffmpeg -buildconf` / `ffmpeg -filters` / `nvidia-smi -L` / `nvcc --version` をINFOで自動出力し、CPUフィルタにフォールバックします。`scale_cuda` が無い環境では自動で `scale_npp` を使用します。
+- スレッドとプロファイル:
+  - `FFMPEG_PROFILE_MODE=1` で `-benchmark -stats` を付与し、FFmpegの所要・スループットを収集できます。
+  - `FFMPEG_THREADS` で `-threads` を明示上書き可能。
+  - CPUフィルタ経路では `-filter_threads`/`-filter_complex_threads` を保守的にキャップ（既定=4）。`FFMPEG_FILTER_THREADS_CAP`/`FFMPEG_FILTER_COMPLEX_THREADS_CAP` で上限を調整できます。
+- 一時ディレクトリ（RAMディスク）: `USE_RAMDISK=1`（既定）で空き容量が十分なら `/dev/shm` を一時ディレクトリに使用し、I/Oを高速化します。
+- 正規化の再実行抑止: 正規化出力に `<name>.meta.json` を隣接保存し、同一 `target_spec` の入力は再正規化をスキップします。
+- no-cache時の重複抑止: `--no-cache` でも同一キー生成はプロセス内でin-flight集約し、同一ラン内の重複生成を避けます。生成物は `temp_dir` のEphemeralとして再利用されます。
+- concat最適化: `-f concat -c copy` のリストファイルは出力ディレクトリに配置し、I/O局所性を改善しています。
+
+設定例（GPUで字幕のGPUオーバーレイを試す）:
+```yaml
+video:
+  gpu_overlay_experimental: true
+```
+
+
 ## ⚠️ ライセンスと利用ガイドライン
 
 本プロジェクトはMITライセンスの下で公開されています。詳細については[LICENSE](LICENSE)ファイルをご確認ください。

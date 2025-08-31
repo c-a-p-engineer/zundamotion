@@ -360,33 +360,42 @@ class CacheManager:
         if self.no_cache:
             # キャッシュ無効時は一時ファイルとして生成し、ephemeral_dir（temp_dir）に保存
             # 同一キーの多重実行を同プロセス内で抑止
+            base_dir = self.ephemeral_dir or self.cache_dir
+            temp_output_path = base_dir / f"temp_{file_name}_{cache_key}.{extension}"
+            # 既に同一キーの一時生成物が存在する場合は再利用
+            if temp_output_path.exists():
+                logger.info(
+                    f"Cache disabled: Reusing existing ephemeral output for key {cache_key[:8]} -> {temp_output_path.name}"
+                )
+                return temp_output_path
+            # タスクの二重生成防止
             async with self._inflight_lock:
                 existing = self._inflight_tasks.get(cache_key)
                 if existing is None:
-                    base_dir = self.ephemeral_dir or self.cache_dir
-                    temp_output_path = (
-                        base_dir / f"temp_{file_name}_{cache_key}.{extension}"
-                    )
-                    # 既に同一キーの一時生成物が存在する場合は再生成せずに再利用
-                    if temp_output_path.exists():
-                        logger.info(
-                            f"Cache disabled: Reusing existing ephemeral output for key {cache_key[:8]} -> {temp_output_path.name}"
-                        )
-                        return temp_output_path
                     logger.info(
                         f"Cache disabled. Generating temporary file: (Ephemeral) {temp_output_path}"
                     )
-                    task = asyncio.create_task(creator_func(temp_output_path))
+
+                    async def _create() -> Path:
+                        try:
+                            generated_path = await creator_func(temp_output_path)
+                            if generated_path != temp_output_path:
+                                shutil.copy(generated_path, temp_output_path)
+                                try:
+                                    generated_path.unlink()
+                                except Exception:
+                                    pass
+                            return temp_output_path
+                        finally:
+                            async with self._inflight_lock:
+                                self._inflight_tasks.pop(cache_key, None)
+
+                    task = asyncio.create_task(_create())
                     self._inflight_tasks[cache_key] = task
                 else:
                     task = existing
-            try:
-                result_path = await task
-                return result_path
-            finally:
-                # creator completion: remove inflight task
-                async with self._inflight_lock:
-                    self._inflight_tasks.pop(cache_key, None)
+            # ロック外で待機
+            return await task
 
         if self.cache_refresh and cached_path.exists():
             logger.info(
@@ -460,15 +469,9 @@ class CacheManager:
         force_refresh: bool = False,
         no_cache: bool = False,
     ) -> Path:
-        # 既に当プロセスで正規化済みの一時キャッシュ（temp_normalized_*.mp4）の再正規化を避ける
-        # - メタ情報が存在し、かつ target_spec が一致する場合は即返す
+        # 既に正規化済みのMP4が入力に来た場合でも、隣接するメタの target_spec が一致すれば再正規化を避ける
         try:
-            if (
-                input_path.is_file()
-                and input_path.parent.resolve() == self.cache_dir.resolve()
-                and input_path.name.startswith("temp_normalized_")
-                and input_path.suffix.lower() == ".mp4"
-            ):
+            if input_path.is_file() and input_path.suffix.lower() == ".mp4":
                 meta_candidate = input_path.with_name(
                     input_path.stem + ".meta.json"
                 )
@@ -476,7 +479,6 @@ class CacheManager:
                     with open(meta_candidate, "r", encoding="utf-8") as f:
                         meta_obj = json.load(f)
                     cached_spec = meta_obj.get("target_spec")
-                    # no_cache であっても自己再正規化は避ける（ループ防止）
                     if cached_spec == target_spec and not force_refresh:
                         logger.info(
                             f"[Cache] Normalized reuse: {input_path} (already matches target spec)"
