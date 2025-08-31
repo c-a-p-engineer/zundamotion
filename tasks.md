@@ -16,17 +16,6 @@
 ## P0（必須・最優先）
 
 
-### 05. 口パク/目パチ（最小版・音量しきい値）
-
-- タイトル: ゆっくり的な口パク・まばたきの簡易実装（差分PNG切替）
-- 詳細:
-    - 音声WAVを一定FPSでRMSサンプリングし、二段閾値で mouth={close,half,open} を時系列化。
-    - 目パチは 2–5 秒ランダムで ON/OFF（複数フレーム）をスケジュール。
-    - アセット規約: `assets/characters/<name>/mouth/{close,half,open}.png`, `eyes/{open,close}.png`（存在しない場合は自動無効化）。
-    - `render_clip` の `filter_complex` に `enable='between(t,...)'` 付き overlay を追加して差分を重ねる。
-- ゴール: TTSが無くても“ゆっくりらしさ”が出る最低限のアニメーション。
-- 実装イメージ: `AudioPhase` でRMSタイムラインを生成→`line_data_map` へ注入→`VideoRenderer.render_clip` で overlay 差し替え。
-
 ### 24. 字幕PNG生成のレイテンシばらつき解消（フォント初期化とレイアウトのキャッシュ）
 
 - タイトル: 字幕PNG生成で稀に数秒スパイクが発生する問題の解消

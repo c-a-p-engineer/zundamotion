@@ -2,6 +2,17 @@ meta:
   title: "キャラクターごとのデフォルト設定サンプル"
   version: 3
 
+video:
+  fps: 30
+  # ゆっくり的 口パク/目パチ（差分PNGが存在すれば自動適用）
+  face_anim:
+    mouth_fps: 15           # 口パク判定のサンプリングFPS
+    mouth_thr_half: 0.2     # 半開き閾値（RMSのmax比）
+    mouth_thr_open: 0.5     # 全開閾値（RMSのmax比）
+    blink_min_interval: 2.0 # 目パチの最小間隔（秒）
+    blink_max_interval: 5.0 # 目パチの最大間隔（秒）
+    blink_close_frames: 2   # 瞬きの閉眼フレーム数（動画FPS基準）
+
 defaults:
   characters:
     zundamon:
@@ -36,6 +47,10 @@ scenes:
           - name: "zundamon"
             expression: "normal"
             visible: true
+            # 差分PNGを配置した場合の推奨（同一配置で口/目差分を重畳）
+            anchor: "bottom_center"
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
 
       - text: "このセリフだけ、字幕の色を変えてみるのだ。"
         speaker_name: "zundamon"
@@ -45,6 +60,9 @@ scenes:
           - name: "zundamon"
             expression: "normal"
             visible: true
+            anchor: "bottom_center"
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
 
       - text: "私は四国めたん。私の字幕もデフォルト設定よ。"
         speaker_name: "metan"
@@ -52,6 +70,9 @@ scenes:
           - name: "metan"
             expression: "normal"
             visible: true
+            anchor: "bottom_center"
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
 
       - text: "このプロジェクト、なかなか面白いじゃない。"
         speaker_name: "metan"
@@ -61,6 +82,9 @@ scenes:
           - name: "metan"
             expression: "normal"
             visible: true
+            anchor: "bottom_center"
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
 
   - id: voice_zundamon
     bg: "assets/bg/room.png"
@@ -71,6 +95,9 @@ scenes:
           - name: "zundamon"
             expression: "normal"
             visible: true
+            anchor: "bottom_center"
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
 
       - text: "このセリフだけ、少しゆっくり話してみるのだ。"
         speaker_name: "zundamon"
@@ -79,6 +106,9 @@ scenes:
           - name: "zundamon"
             expression: "normal"
             visible: true
+            anchor: "bottom_center"
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
 
       - text: "私は四国めたん。私もデフォルト設定よ。"
         speaker_name: "metan"
@@ -86,6 +116,9 @@ scenes:
           - name: "metan"
             expression: "normal"
             visible: true
+            anchor: "bottom_center"
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
 
       - text: "このプロジェクト、なかなか面白いじゃない。"
         speaker_name: "metan"
@@ -94,6 +127,9 @@ scenes:
           - name: "metan"
             expression: "normal"
             visible: true
+            anchor: "bottom_center"
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
 
   - id: intro
     bg: "assets/bg/sample_video.mp4"    # シーン背景 (動画ファイル)

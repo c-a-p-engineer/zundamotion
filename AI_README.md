@@ -208,3 +208,18 @@ CLI主なオプション（main.py実装）:
 
 補足（キャッシュ無効時の重複排除）:
 - `--no-cache` 指定時でも、同一キー（入力パス＋変換パラメータ）に対する一時生成物が既に存在する場合は、再生成せずに同一出力を再利用します（プロセス内メモ＋ファイル存在チェック）。
+
+### 6.11. 口パク/目パチ（最小版・音量しきい値）
+
+- 音声WAVを一定FPS（既定15fps）でRMSサンプリングし、最大RMS比の二段閾値で `mouth={close,half,open}` を生成します。
+- 目パチは 2–5 秒ランダム間隔で、`blink_close_frames`（既定2フレーム）だけ閉眼します。
+- アセット規約（存在しない場合は自動無効化）:
+  - `assets/characters/<name>/mouth/{close,half,open}.png`
+  - `assets/characters/<name>/eyes/{open,close}.png`
+- 実装:
+  - `AudioPhase` が各 line の `line_data_map[line_id]['face_anim']` に `{target_name, mouth[], eyes[], meta}` を注入。
+  - `VideoPhase` が上記を `VideoRenderer.render_clip(..., face_anim=...)` に渡し、ビデオキャッシュキーに最小限のメタ（しきい値/バージョン）を含めます。
+  - `VideoRenderer` は差分PNGを `overlay:x=..:y=..:enable='between(t,...) + between(t,...)'` で合成。`mouth/close` と `eyes/open` をベースで常時、`mouth/half|open` と `eyes/close` は区間のみ上書きします。
+- 設定（`video.face_anim`）:
+  - `mouth_fps`=15, `mouth_thr_half`=0.2, `mouth_thr_open`=0.5
+  - `blink_min_interval`=2.0, `blink_max_interval`=5.0, `blink_close_frames`=2

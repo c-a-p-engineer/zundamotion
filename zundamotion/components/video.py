@@ -195,6 +195,7 @@ class VideoRenderer:
         subtitle_line_config: Optional[Dict[str, Any]] = None,
         insert_config: Optional[Dict[str, Any]] = None,
         subtitle_png_path: Optional[Path] = None,
+        face_anim: Optional[Dict[str, Any]] = None,
         _force_cpu: bool = False,
     ) -> Optional[Path]:
         """
@@ -340,6 +341,8 @@ class VideoRenderer:
 
         # 4) Characters (optional)
         character_indices: Dict[int, int] = {}
+        # record character overlay placement for later face animation overlays
+        char_overlay_placement: Dict[str, Dict[str, str]] = {}
         any_character_visible = False
         for i, char_config in enumerate(characters_config):
             if not char_config.get("visible", False):
@@ -482,6 +485,173 @@ class VideoRenderer:
                 )
                 overlay_streams.append(f"[char_scaled_{i}]")
                 overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
+
+            # Remember placement for face animation use keyed by char name
+            try:
+                char_overlay_placement[str(char_name)] = {
+                    "x_expr": x_expr,
+                    "y_expr": y_expr,
+                    "scale": str(scale),
+                }
+            except Exception:
+                pass
+
+        # Helper: build enable expr from segments
+        def _enable_expr(segments: List[Dict[str, Any]]) -> Optional[str]:
+            try:
+                parts = [
+                    f"between(t,{float(seg['start']):.3f},{float(seg['end']):.3f})"
+                    for seg in segments
+                    if float(seg.get("end", 0)) > float(seg.get("start", 0))
+                ]
+                if not parts:
+                    return None
+                return "+".join(parts)
+            except Exception:
+                return None
+
+        # Face animation overlays (mouth/eyes) for the speaking character
+        if face_anim and isinstance(face_anim, dict) and face_anim.get("target_name"):
+            target_name = str(face_anim.get("target_name"))
+            # Find placement: from rendered characters, or from original line config if character pre-composited in base
+            placement = char_overlay_placement.get(target_name)
+            if not placement and subtitle_line_config:
+                try:
+                    for ch in (subtitle_line_config.get("characters") or []):
+                        if ch.get("name") == target_name:
+                            scale = float(ch.get("scale", 1.0))
+                            anchor = ch.get("anchor", "bottom_center")
+                            pos = ch.get("position", {"x": "0", "y": "0"}) or {}
+                            x_expr, y_expr = calculate_overlay_position(
+                                "W",
+                                "H",
+                                "w",
+                                "h",
+                                str(anchor),
+                                str(pos.get("x", "0")),
+                                str(pos.get("y", "0")),
+                            )
+                            placement = {
+                                "x_expr": x_expr,
+                                "y_expr": y_expr,
+                                "scale": str(scale),
+                            }
+                            break
+                except Exception:
+                    placement = None
+
+            if placement:
+                scale = placement["scale"]
+                x_expr = placement["x_expr"]
+                y_expr = placement["y_expr"]
+
+                # Asset discovery
+                base_dir = Path(f"assets/characters/{target_name}")
+                mouth_dir = base_dir / "mouth"
+                eyes_dir = base_dir / "eyes"
+
+                mouth_close = mouth_dir / "close.png"
+                mouth_half = mouth_dir / "half.png"
+                mouth_open = mouth_dir / "open.png"
+                eyes_open = eyes_dir / "open.png"
+                eyes_close = eyes_dir / "close.png"
+
+                # Debug info
+                try:
+                    m_segments = face_anim.get("mouth") or []
+                    e_segments = face_anim.get("eyes") or []
+                    logger.debug(
+                        "[FaceAnim] target=%s scale=%s mouth_pngs(close=%s,half=%s,open=%s) eyes_pngs(open=%s,close=%s) segs(m=%d,e=%d)",
+                        target_name,
+                        scale,
+                        mouth_close.exists(),
+                        mouth_half.exists(),
+                        mouth_open.exists(),
+                        eyes_open.exists(),
+                        eyes_close.exists(),
+                        len(m_segments) if isinstance(m_segments, list) else 0,
+                        len(e_segments) if isinstance(e_segments, list) else 0,
+                    )
+                except Exception:
+                    pass
+
+                # Only enable when assets exist
+                # add inputs lazily and build filters
+                def _add_image_input(path: Path) -> Optional[int]:
+                    if path.exists():
+                        cmd.extend(["-loop", "1", "-i", str(path.resolve())])
+                        idx = len(input_layers)
+                        input_layers.append({"type": "video", "index": idx})
+                        return idx
+                    return None
+
+                # Eyes: baseline open + blink close intervals（目を先に重ねる）
+                if eyes_open.exists():
+                    idx = _add_image_input(eyes_open)
+                    if idx is not None:
+                        label = f"eyes_open_scaled_{idx}"
+                        filter_complex_parts.append(
+                            f"[{idx}:v]scale=iw*{scale}:ih*{scale}[{label}]"
+                        )
+                        overlay_streams.append(f"[{label}]")
+                        overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
+
+                eyes_segments = face_anim.get("eyes") or []
+                eyes_expr = _enable_expr(eyes_segments) if eyes_segments else None
+                if eyes_close.exists() and eyes_expr:
+                    idx = _add_image_input(eyes_close)
+                    if idx is not None:
+                        label = f"eyes_close_scaled_{idx}"
+                        filter_complex_parts.append(
+                            f"[{idx}:v]scale=iw*{scale}:ih*{scale}[{label}]"
+                        )
+                        overlay_streams.append(f"[{label}]")
+                        overlay_filters.append(
+                            f"overlay=x={x_expr}:y={y_expr}:enable='{eyes_expr}'"
+                        )
+
+                # Mouth: close baseline + half/open（口は目より後に重ねる）
+                if mouth_close.exists():
+                    idx = _add_image_input(mouth_close)
+                    if idx is not None:
+                        label = f"mouth_close_scaled_{idx}"
+                        filter_complex_parts.append(
+                            f"[{idx}:v]scale=iw*{scale}:ih*{scale}[{label}]"
+                        )
+                        overlay_streams.append(f"[{label}]")
+                        overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
+
+                mouth_segments = face_anim.get("mouth") or []
+                if isinstance(mouth_segments, list) and mouth_segments:
+                    half_segments = [s for s in mouth_segments if s.get("state") == "half"]
+                    open_segments = [s for s in mouth_segments if s.get("state") == "open"]
+
+                    half_expr = _enable_expr(half_segments)
+                    open_expr = _enable_expr(open_segments)
+
+                    if mouth_half.exists() and half_expr:
+                        idx = _add_image_input(mouth_half)
+                        if idx is not None:
+                            label = f"mouth_half_scaled_{idx}"
+                            filter_complex_parts.append(
+                                f"[{idx}:v]scale=iw*{scale}:ih*{scale}[{label}]"
+                            )
+                            overlay_streams.append(f"[{label}]")
+                            overlay_filters.append(
+                                f"overlay=x={x_expr}:y={y_expr}:enable='{half_expr}'"
+                            )
+
+                    if mouth_open.exists() and open_expr:
+                        idx = _add_image_input(mouth_open)
+                        if idx is not None:
+                            label = f"mouth_open_scaled_{idx}"
+                            filter_complex_parts.append(
+                                f"[{idx}:v]scale=iw*{scale}:ih*{scale}[{label}]"
+                            )
+                            overlay_streams.append(f"[{label}]")
+                            overlay_filters.append(
+                                f"overlay=x={x_expr}:y={y_expr}:enable='{open_expr}'"
+                            )
 
         # オーバーレイを連結
         if overlay_streams:
@@ -636,6 +806,7 @@ class VideoRenderer:
                         subtitle_line_config=subtitle_line_config,
                         insert_config=insert_config,
                         subtitle_png_path=subtitle_png_path,
+                        face_anim=face_anim,
                         _force_cpu=True,
                     )
                 finally:

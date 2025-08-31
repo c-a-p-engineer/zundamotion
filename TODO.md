@@ -1,0 +1,10 @@
+- [x] 05. 口パク/目パチ（最小版・音量しきい値）
+  - [x] AI_README / リポジトリ構成の把握
+  - [x] TODO.md（本ファイル）作成
+  - [x] AudioPhase: WAVを一定FPSでRMSサンプリング→mouth={close,half,open} タイムライン生成
+  - [x] AudioPhase: 2–5秒ランダムの目パチ（複数フレーム）スケジュール生成
+  - [x] VideoPhase→VideoRenderer: line_data_mapのタイムラインを渡す経路を追加
+  - [x] VideoRenderer.render_clip: 差分PNGを `overlay:enable=between(t,...)` で合成
+  - [x] キャッシュキー最小更新（しきい値/バージョン）
+  - [x] ドキュメント更新（README/AI_README にアセット規約と設定）
+  - [x] tasks.md の該当タスクを削除

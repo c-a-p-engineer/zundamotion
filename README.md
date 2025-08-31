@@ -29,7 +29,9 @@ Zundamotionは、VOICEVOXによる高品質な音声合成とFFmpegを用いた�
     - `bottom_left`: 画像の左下を基準点とします。
     - `bottom_center`: 画像の底辺中央を基準点とします（デフォルト）。
     - `bottom_right`: 画像の右下を基準点とします。
-    - `position`: `x`, `y` 座標は、指定された `anchor` からのオフセットとして機能します。例えば、`anchor: bottom_center` で `position: {x: 0, y: 0}` の場合、キャラクターの底辺中央が背景の底辺中央に配置されます。`position: {x: 100, y: -50}` の場合、底辺中央から右に100ピクセル、上に50ピクセル移動します。
+  - `position`: `x`, `y` 座標は、指定された `anchor` からのオフセットとして機能します。例えば、`anchor: bottom_center` で `position: {x: 0, y: 0}` の場合、キャラクターの底辺中央が背景の底辺中央に配置されます。`position: {x: 100, y: -50}` の場合、底辺中央から右に100ピクセル、上に50ピクセル移動します。
+
+- **ゆっくり的 口パク/目パチ（最小版）**: 音声の音量（RMS）に基づき、`mouth={close,half,open}` を切替。目パチは2–5秒間隔でランダムに閉じるスケジュール。差分PNGを `overlay:enable=between(t,...)` で重畳します（アセットが無い場合は自動で無効化）。
 
 以下は、台本ファイルでのキャラクター設定の記述例です。
 
@@ -196,6 +198,38 @@ lines:
 
 ---
 
+### AIベースでの背景除去（rembg）
+
+写真や複雑な背景では、AIベースの除去が高精度です。
+
+- ファイル: `remove_bg_ai.py`
+- 依存関係: `pip install rembg`（GPU利用時は `onnxruntime-gpu` を別途インストール）
+
+使い方:
+
+```bash
+# 一括処理（デフォルトモデル: isnet-general-use）
+python remove_bg_ai.py --input ./path/to/input_images --output ./path/to/output_png
+
+# サブフォルダも含めて処理
+python remove_bg_ai.py --input ./in --output ./out --recursive
+
+# モデル切替（アニメ調に強い）
+python remove_bg_ai.py --input ./in --output ./out --model isnet-anime
+
+# 現在のONNX Runtimeプロバイダを確認
+python remove_bg_ai.py --input ./in --output ./out --show-providers
+
+# CPU/GPUを強制（GPUが不可ならCPUにフォールバック）
+python remove_bg_ai.py --input ./in --output ./out --force-cpu
+python remove_bg_ai.py --input ./in --output ./out --force-gpu
+```
+
+備考:
+- 出力は常に透過PNGです。
+- GPU環境では `pip install onnxruntime-gpu` で高速化できます。
+
+
 ## 🎬 画像・動画の挿入
 
 セリフ中に、指定した画像や動画を画面に挿入することができます。これにより、参考資料を提示したり、視覚的なエフェクトを追加したりすることが可能です。
@@ -241,6 +275,51 @@ lines:
 
 もし指定された表情の画像ファイルが存在しない場合、システムは自動的に `assets/characters/{キャラクター名}/default.png` を探してフォールバックします。
 そのため、各キャラクターには少なくとも `default.png` を用意しておくことを推奨します。
+
+### 口パク/目パチ用の差分PNG（任意）
+
+「ゆっくり」的な最小アニメーションに対応するため、以下の差分PNGを用意すると、口パク・目パチが自動で適用されます（存在しない場合は無効化）。
+
+- 口パク: `assets/characters/<name>/mouth/{close,half,open}.png`
+- 目パチ: `assets/characters/<name>/eyes/{open,close}.png`
+
+差分PNGは、元の立ち絵と同一キャンバスサイズ・座標系で作成してください（透明背景の「差分」レイヤ）。キャラクターの拡大率・配置に追従し、音声に同期して `half/open` を切替、`close` はベースとして常時合成、`half`/`open` が上から被さる構成です。目は `open` を常時合成し、`close` を点滅区間のみ上書きします。
+
+設定（`config.yaml` またはスクリプトの `video:` セクション）
+
+```yaml
+video:
+  fps: 30
+  face_anim:
+    mouth_fps: 15           # 口パク判定のサンプリングFPS
+    mouth_thr_half: 0.2     # 半開き閾値（RMSのmax比）
+    mouth_thr_open: 0.5     # 全開閾値（RMSのmax比）
+    blink_min_interval: 2.0 # 目パチの最小間隔（秒）
+    blink_max_interval: 5.0 # 目パチの最大間隔（秒）
+    blink_close_frames: 2   # 瞬きの閉眼フレーム数（動画FPS基準）
+```
+
+対象キャラクターは、各セリフの `speaker_name`（未指定時は最初の `visible: true` のキャラ）です。
+
+#### 差分PNG配置ガイド（具体例）
+
+- 準備するファイル（ずんだもんの例）:
+  - `assets/characters/zundamon/default.png`（既存の立ち絵）
+  - `assets/characters/zundamon/mouth/close.png`
+  - `assets/characters/zundamon/mouth/half.png`
+  - `assets/characters/zundamon/mouth/open.png`
+  - `assets/characters/zundamon/eyes/open.png`
+  - `assets/characters/zundamon/eyes/close.png`
+- ファイル仕様:
+  - キャンバス: 立ち絵 `default.png` と同じ幅・高さ。
+  - 背景: 透明（PNGのアルファ）。
+  - 描画範囲: 口/目の差分部分のみ描画し、それ以外は完全に透明にします。
+  - 位置合わせ: `default.png` に対してピクセル単位で一致させてください（同一座標系）。
+  - ネーミング: 上記の固定ファイル名のみを参照します。大文字/拡張子違いは不可。
+- 動作メモ:
+  - 口は `close` が常時、`half`/`open` は音量しきい値を満たす時間だけ重なります。
+  - 目は `open` が常時、`close` はランダムな点滅時間だけ重なります。
+  - 差分PNGが存在しない場合は、その要素（口 or 目）は自動的に無効化されます（既存の静止立ち絵のみ）。
 
 ---
 

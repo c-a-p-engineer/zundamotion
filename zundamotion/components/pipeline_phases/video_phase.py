@@ -546,6 +546,9 @@ class VideoPhase:
                             else:
                                 effective_insert = raw_insert
 
+                        # Face animation config versioning for cache stability
+                        face_anim = line_data.get("face_anim")
+                        anim_meta = (face_anim or {}).get("meta") or {}
                         video_cache_data = {
                             "type": "talk",
                             "audio_cache_key": self.cache_manager._generate_hash(
@@ -566,6 +569,15 @@ class VideoPhase:
                             "hw_kind": self.hw_kind,
                             "video_params": self.video_params.__dict__,
                             "audio_params": self.audio_params.__dict__,
+                            # Minimal cache key for face animation
+                            "lip_eye_version": "v1",
+                            "face_anim_enabled": bool(face_anim),
+                            "mouth_fps": anim_meta.get("mouth_fps"),
+                            "thr_half": anim_meta.get("thr_half"),
+                            "thr_open": anim_meta.get("thr_open"),
+                            "blink_min_interval": anim_meta.get("blink_min_interval"),
+                            "blink_max_interval": anim_meta.get("blink_max_interval"),
+                            "blink_close_frames": anim_meta.get("blink_close_frames"),
                         }
 
                         async def clip_creator_func(output_path: Path) -> Path:
@@ -578,6 +590,7 @@ class VideoPhase:
                                 subtitle_text=text,
                                 subtitle_line_config=line_config,
                                 insert_config=effective_insert,
+                                face_anim=face_anim,
                             )
                             if clip_path is None:
                                 raise PipelineError(
