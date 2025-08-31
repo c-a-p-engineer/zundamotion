@@ -225,9 +225,19 @@ class VideoPhase:
                                     continue
                                 name = ch.get("name")
                                 expr = ch.get("expression", "default")
-                                scale = ch.get("scale", 1.0)
-                                anchor = ch.get("anchor", "bottom_center")
-                                pos = ch.get("position", {"x": "0", "y": "0"}) or {}
+                                # 量子化（微差を同一扱い）
+                                try:
+                                    scale = round(float(ch.get("scale", 1.0)), 2)
+                                except Exception:
+                                    scale = 1.0
+                                anchor = str(ch.get("anchor", "bottom_center")).lower()
+                                pos_raw = ch.get("position", {"x": "0", "y": "0"}) or {}
+                                def _q(v):
+                                    try:
+                                        return f"{float(v):.2f}"
+                                    except Exception:
+                                        return str(v)
+                                pos = {"x": _q(pos_raw.get("x", "0")), "y": _q(pos_raw.get("y", "0"))}
                                 key = (
                                     name,
                                     expr,

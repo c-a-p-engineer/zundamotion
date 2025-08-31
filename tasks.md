@@ -26,22 +26,7 @@
 
 ## P0（必須・最優先）
 
-### 01. フェイス差分PNGの事前スケール＆マスク前計算（品質＋速度）
 
-- 背景: 口/目の差分PNGを毎回 `scale` → `alphaextract/alphamerge` しており、CPU overlayの負荷と縁の太りに影響。
-- 対応: キャラ名・scale ごとに Pillow で事前スケールした PNG と2値アルファ（マスク）を CacheManager に保存し、FFmpegでは単純 overlay のみ行う。
-- ゴール: CPUフィルタ負荷の低減（VideoPhase短縮）と縁の安定化（品質向上）。
-- 実装: `face_overlay_cache.py`（新規）に get_or_create 実装→`video.py` から参照。
-
-### 02. スレッド/並列度の自動適応（計測ループの導入）
-
-- タイトル: プロファイル結果に基づく `filter_threads`/`filter_complex_threads` と `clip_workers` の自動調整
-- 詳細:
-  - 先頭Nクリップ（例: 4）だけ `FFMPEG_PROFILE_MODE=1` を付与し、処理時間とfpsを採取。
-  - CPU overlay が支配な場合は `clip_workers×threads` の総並列をキャップ（例: CPU/2 目安）。
-  - p95が悪化した設定は拒否し、キャッシュして次回以降の既定に反映。
-- ゴール: CPU経路でも過剰並列を避け、VideoPhaseの p50/p95 を短縮。
-- 実装イメージ: `video_phase.py` で初回プロファイル→環境変数・内部設定に反映。
 
 ### 03. シーンベース合成の強化（静的オーバーレイの事前合成）
 

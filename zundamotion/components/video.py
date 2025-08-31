@@ -25,6 +25,7 @@ from ..utils.ffmpeg_utils import (
     get_profile_flags,
 )
 from .subtitle import SubtitleGenerator
+from .face_overlay_cache import FaceOverlayCache
 from ..utils.logger import logger
 
 
@@ -63,6 +64,8 @@ class VideoRenderer:
         self.scale_filter = "scale_cuda"
         # Subtitle generator (used to build overlay snippet and PNG input)
         self.subtitle_gen = SubtitleGenerator(self.config, self.cache_manager)
+        # Face overlay preprocessor/cache
+        self.face_cache = FaceOverlayCache(self.cache_manager)
 
         if self.has_cuda_filters:
             logger.info("CUDA filters available: True (scale_cuda/overlay_cuda)")
@@ -658,26 +661,38 @@ class VideoRenderer:
                         return idx
                     return None
 
-                # Prepare overlay chain; can disable alpha hard-threshold via env
+                # Prepare overlay chain; prefer preprocessed cached PNG, fallback to inline filter
+                preprocessed_inputs: set[int] = set()
+                async def _add_preprocessed_overlay(path: Path, scale_val: float) -> Optional[int]:
+                    try:
+                        if os.environ.get("FACE_CACHE_DISABLE", "0") == "1":
+                            return _add_image_input(path)
+                        thr_env = os.environ.get("FACE_ALPHA_THRESHOLD")
+                        thr = int(thr_env) if (thr_env and thr_env.isdigit()) else 128
+                        cached = await self.face_cache.get_scaled_overlay(path, float(scale_val), thr)
+                        idx = _add_image_input(cached)
+                        if idx is not None:
+                            preprocessed_inputs.add(idx)
+                        return idx
+                    except Exception:
+                        return _add_image_input(path)
+                
                 def _prep_overlay(idx: int, scale_val: float, out_label: str) -> None:
-                    if os.environ.get("DISABLE_ALPHA_HARD_THRESHOLD", "0") == "1":
+                    if idx in preprocessed_inputs:
+                        # Already scaled via Pillow; only ensure rgba passthrough
                         filter_complex_parts.append(
-                            f"[{idx}:v]format=rgba,scale=iw*{scale_val}:ih*{scale_val}[{out_label}]"
+                            f"[{idx}:v]format=rgba[{out_label}]"
                         )
                     else:
-                        # format RGBA → scale → split(src/alpha) → alphaextract → threshold → alphamerge
                         filter_complex_parts.append(
-                            f"[{idx}:v]format=rgba,scale=iw*{scale_val}:ih*{scale_val},"
-                            f"split[o_src_{idx}][o_a_{idx}];"
-                            f"[o_a_{idx}]alphaextract,geq=lum='if(gte(lum,128),255,0)'[o_mask_{idx}];"
-                            f"[o_src_{idx}][o_mask_{idx}]alphamerge[{out_label}]"
+                            f"[{idx}:v]format=rgba,scale=iw*{scale_val}:ih*{scale_val}[{out_label}]"
                         )
 
                 # Eyes: show only 'close' during blink to avoid doubling base open eyes
                 eyes_segments = face_anim.get("eyes") or []
                 eyes_close_expr = _enable_expr(eyes_segments) if eyes_segments else None
                 if eyes_close.exists() and eyes_close_expr:
-                    idx = _add_image_input(eyes_close)
+                    idx = await _add_preprocessed_overlay(eyes_close, float(scale))
                     if idx is not None:
                         label = f"eyes_close_scaled_{idx}"
                         _prep_overlay(idx, float(scale), label)
@@ -696,7 +711,7 @@ class VideoRenderer:
                     open_expr = _enable_expr(open_segments) if open_segments else None
 
                 if mouth_half.exists() and half_expr:
-                    idx = _add_image_input(mouth_half)
+                    idx = await _add_preprocessed_overlay(mouth_half, float(scale))
                     if idx is not None:
                         label = f"mouth_half_scaled_{idx}"
                         _prep_overlay(idx, float(scale), label)
@@ -706,7 +721,7 @@ class VideoRenderer:
                         )
 
                 if mouth_open.exists() and open_expr:
-                    idx = _add_image_input(mouth_open)
+                    idx = await _add_preprocessed_overlay(mouth_open, float(scale))
                     if idx is not None:
                         label = f"mouth_open_scaled_{idx}"
                         _prep_overlay(idx, float(scale), label)
