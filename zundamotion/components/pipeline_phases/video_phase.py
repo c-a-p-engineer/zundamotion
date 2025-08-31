@@ -283,33 +283,70 @@ class VideoPhase:
                     logger.debug(
                         f"Static overlay detection failed on scene {scene_id}: {e}"
                     )
-                try:
-                    bg_config_for_base = {
-                        "type": "video" if is_bg_video else "image",
-                        "path": str(bg_image),
-                    }
-                    scene_base_filename = f"scene_base_{scene_id}"
-                    if static_overlays:
-                        scene_base_path = await self.video_renderer.render_scene_base_composited(
-                            bg_config_for_base,
-                            scene_duration,
-                            scene_base_filename,
-                            static_overlays,
+                # ベース映像生成の可否を判断
+                normalized_bg_path: Optional[Path] = None
+                total_lines_in_scene = len(scene.get("lines", []))
+                min_lines_for_base = int(
+                    self.config.get("video", {}).get("scene_base_min_lines", 6)
+                )
+                should_generate_base = False
+                if static_overlays:
+                    should_generate_base = True
+                elif is_bg_video and total_lines_in_scene >= min_lines_for_base:
+                    # 静的オーバーレイは無いが、行数が多い場合はベース生成の方が有利
+                    should_generate_base = True
+
+                if should_generate_base:
+                    try:
+                        bg_config_for_base = {
+                            "type": "video" if is_bg_video else "image",
+                            "path": str(bg_image),
+                        }
+                        scene_base_filename = f"scene_base_{scene_id}"
+                        if static_overlays:
+                            scene_base_path = await self.video_renderer.render_scene_base_composited(
+                                bg_config_for_base,
+                                scene_duration,
+                                scene_base_filename,
+                                static_overlays,
+                            )
+                            # ベースに取り込んだ静的オーバーレイの種類は per-line で個別に除外処理
+                        else:
+                            scene_base_path = await self.video_renderer.render_scene_base(
+                                bg_config_for_base, scene_duration, scene_base_filename
+                            )
+                        if scene_base_path:
+                            logger.info(
+                                f"Scene {scene_id}: generated base with {len(static_overlays)} static overlay(s) -> {scene_base_path.name}"
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to generate scene base for scene {scene_id}: {e}"
                         )
-                        # ベースに取り込んだ静的オーバーレイの種類は per-line で個別に除外処理
-                    else:
-                        scene_base_path = await self.video_renderer.render_scene_base(
-                            bg_config_for_base, scene_duration, scene_base_filename
-                        )
-                    if scene_base_path:
-                        logger.info(
-                            f"Scene {scene_id}: generated base with {len(static_overlays)} static overlay(s) -> {scene_base_path.name}"
-                        )
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to generate scene base for scene {scene_id}: {e}"
-                    )
-                    # フォールバック: 動画背景なら従来のループ生成を試みる
+                        # フォールバック: 動画背景なら従来のループ生成を試みる
+                        if is_bg_video:
+                            try:
+                                normalized_bg_path = await normalize_media(
+                                    input_path=Path(bg_image),
+                                    video_params=self.video_params,
+                                    audio_params=self.audio_params,
+                                    cache_manager=self.cache_manager,
+                                )
+                                scene_base_path = await self.video_renderer.render_looped_background_video(
+                                    str(normalized_bg_path),
+                                    scene_duration,
+                                    f"scene_bg_{scene_id}",
+                                )
+                                if scene_base_path:
+                                    logger.debug(
+                                        f"Fallback generated looped background -> {scene_base_path.name}"
+                                    )
+                            except Exception as e2:
+                                logger.warning(
+                                    f"Fallback looped BG generation also failed for scene {scene_id}: {e2}"
+                                )
+                else:
+                    # ベース生成をスキップ。動画背景はシーン単位で一度だけ正規化して各行へ伝搬
                     if is_bg_video:
                         try:
                             normalized_bg_path = await normalize_media(
@@ -318,16 +355,18 @@ class VideoPhase:
                                 audio_params=self.audio_params,
                                 cache_manager=self.cache_manager,
                             )
-                            scene_base_path = await self.video_renderer.render_looped_background_video(
-                                str(normalized_bg_path), scene_duration, f"scene_bg_{scene_id}"
+                            logger.info(
+                                "Scene %s: skipping base generation (static_overlays=%d, lines=%d < threshold=%d). Using pre-normalized background.",
+                                scene_id,
+                                len(static_overlays),
+                                total_lines_in_scene,
+                                min_lines_for_base,
                             )
-                            if scene_base_path:
-                                logger.debug(
-                                    f"Fallback generated looped background -> {scene_base_path.name}"
-                                )
-                        except Exception as e2:
+                        except Exception as e:
                             logger.warning(
-                                f"Fallback looped BG generation also failed for scene {scene_id}: {e2}"
+                                "Scene %s: background pre-normalization failed (%s). Proceeding as-is without base.",
+                                scene_id,
+                                e,
                             )
 
                 # 先に各行の開始時刻を決定
@@ -365,11 +404,23 @@ class VideoPhase:
                         else:
                             # フォールバック（従来動作）: ベースなしで個別処理
                             if is_bg_video:
-                                background_config = {
-                                    "type": "video",
-                                    "path": str(bg_image),
-                                    "start_time": start_time_by_idx[idx],
-                                }
+                                # シーン単位で正規化済みなら二重スケールを回避
+                                if normalized_bg_path is not None and Path(
+                                    normalized_bg_path
+                                ).exists():
+                                    background_config = {
+                                        "type": "video",
+                                        "path": str(normalized_bg_path),
+                                        "start_time": start_time_by_idx[idx],
+                                        "normalized": True,
+                                        "pre_scaled": True,
+                                    }
+                                else:
+                                    background_config = {
+                                        "type": "video",
+                                        "path": str(bg_image),
+                                        "start_time": start_time_by_idx[idx],
+                                    }
                             else:
                                 background_config = {
                                     "type": "image",

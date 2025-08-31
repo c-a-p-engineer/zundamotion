@@ -195,3 +195,12 @@ CLI主なオプション（main.py実装）:
   - `FFMPEG_FILTER_THREADS` / `FFMPEG_FILTER_COMPLEX_THREADS`: FFmpegのフィルタスレッド数を明示的に上書き。未指定時は上記ヒューリスティクスを採用。
 - CPUフィルタ経路では `clip_workers × filter_threads` の過剰化を避けるため、`filter_threads = max(1, nproc // clip_workers)` を目安に設定してください（既定ロジックが自動調整）。
 - ログには各フェーズの所要時間が `--- Finished: <Phase>.run. Duration: X.YZ seconds ---` として出力されます。ボトルネック抽出は `logs/YYYYMMDD_*.log` を参照してください。
+
+### 6.10. シーンベース生成スキップ（static overlays = 0）
+
+- 静的オーバーレイが存在しないシーンでは、ベース映像（背景のみのループ書き出し）を原則スキップします。
+- 背景が動画の場合は、シーン開始時に一度だけ正規化（`normalize_media`）し、そのパスを各行の `background_config` に `normalized=True`/`pre_scaled=True` として伝搬します。
+  - 行側の `filter_complex` から二重スケールを除去し、正規化時のスケーリングと重複しないようにします。
+- 行数が多いシーンでは、ベース生成の方が有利な場合があるため、`video.scene_base_min_lines` 以上の行数であれば（静的オーバーレイが無くても）ベース生成を有効化します。
+  - 既定値: `scene_base_min_lines: 6`
+  - 静的オーバーレイが1つ以上ある場合は、常にベース生成を行い、静的レイヤを事前合成します。
