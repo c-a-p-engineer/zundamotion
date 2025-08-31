@@ -1747,9 +1747,11 @@ async def normalize_media(
         except subprocess.CalledProcessError as e:
             # Detect NVENC-specific failure and fallback to CPU once
             msg = (e.stderr or "") + "\n" + (e.stdout or "")
+            rc = getattr(e, "returncode", None)
             should_fallback = (
                 "exit status 234" in msg
                 or "exit code 234" in msg
+                or rc == 234
                 or "h264_nvenc" in msg
                 or "nvenc" in msg.lower()
                 or "No NVENC capable devices found" in msg

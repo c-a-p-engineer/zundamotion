@@ -658,16 +658,20 @@ class VideoRenderer:
                         return idx
                     return None
 
-                # Prepare overlay chain with alpha hard-threshold to avoid edge double stacking
+                # Prepare overlay chain; can disable alpha hard-threshold via env
                 def _prep_overlay(idx: int, scale_val: float, out_label: str) -> None:
-                    # format RGBA → scale → split(src/alpha) → alphaextract → threshold → alphamerge
-                    # Note: use a binary alpha (>=128 → 255 else 0) to reduce semi-transparency fringes
-                    filter_complex_parts.append(
-                        f"[{idx}:v]format=rgba,scale=iw*{scale_val}:ih*{scale_val},"
-                        f"split[o_src_{idx}][o_a_{idx}];"
-                        f"[o_a_{idx}]alphaextract,geq=lum='if(gte(lum,128),255,0)'[o_mask_{idx}];"
-                        f"[o_src_{idx}][o_mask_{idx}]alphamerge[{out_label}]"
-                    )
+                    if os.environ.get("DISABLE_ALPHA_HARD_THRESHOLD", "0") == "1":
+                        filter_complex_parts.append(
+                            f"[{idx}:v]format=rgba,scale=iw*{scale_val}:ih*{scale_val}[{out_label}]"
+                        )
+                    else:
+                        # format RGBA → scale → split(src/alpha) → alphaextract → threshold → alphamerge
+                        filter_complex_parts.append(
+                            f"[{idx}:v]format=rgba,scale=iw*{scale_val}:ih*{scale_val},"
+                            f"split[o_src_{idx}][o_a_{idx}];"
+                            f"[o_a_{idx}]alphaextract,geq=lum='if(gte(lum,128),255,0)'[o_mask_{idx}];"
+                            f"[o_src_{idx}][o_mask_{idx}]alphamerge[{out_label}]"
+                        )
 
                 # Eyes: show only 'close' during blink to avoid doubling base open eyes
                 eyes_segments = face_anim.get("eyes") or []
@@ -828,13 +832,15 @@ class VideoRenderer:
                 pass
         except subprocess.CalledProcessError as e:
             logger.error("ffmpeg failed for %s", output_filename)
-            logger.debug("FFmpeg STDERR:\n%s", (e.stderr or "").strip())
-            logger.debug("FFmpeg STDOUT:\n%s", (e.stdout or "").strip())
+            logger.error("FFmpeg STDERR:\n%s", (e.stderr or "").strip())
+            logger.error("FFmpeg STDOUT:\n%s", (e.stdout or "").strip())
             # NVENC/CUDA 系の失敗時は一度だけ CPU でリトライ
             msg = (e.stderr or "") + "\n" + (e.stdout or "")
+            rc = getattr(e, "returncode", None)
             should_fallback = (
                 ("exit status 234" in msg)
                 or ("exit code 234" in msg)
+                or (rc == 234)
                 or ("exit status 218" in msg)
                 or ("exit code 218" in msg)
                 or ("h264_nvenc" in msg)
@@ -859,10 +865,13 @@ class VideoRenderer:
                 prev_hw = os.environ.get("DISABLE_HWENC")
                 prev_ft = os.environ.get("FFMPEG_FILTER_THREADS")
                 prev_fct = os.environ.get("FFMPEG_FILTER_COMPLEX_THREADS")
+                prev_ath = os.environ.get("DISABLE_ALPHA_HARD_THRESHOLD")
                 os.environ["DISABLE_HWENC"] = "1"
                 # 安定化のためフィルタグラフ並列を最小化
                 os.environ["FFMPEG_FILTER_THREADS"] = "1"
                 os.environ["FFMPEG_FILTER_COMPLEX_THREADS"] = "1"
+                # Disable alpha hard-threshold path on retry in case of filter incompatibility
+                os.environ["DISABLE_ALPHA_HARD_THRESHOLD"] = "1"
                 try:
                     return await self.render_clip(
                         audio_path=audio_path,
@@ -890,6 +899,10 @@ class VideoRenderer:
                         os.environ.pop("FFMPEG_FILTER_COMPLEX_THREADS", None)
                     else:
                         os.environ["FFMPEG_FILTER_COMPLEX_THREADS"] = prev_fct
+                    if prev_ath is None:
+                        os.environ.pop("DISABLE_ALPHA_HARD_THRESHOLD", None)
+                    else:
+                        os.environ["DISABLE_ALPHA_HARD_THRESHOLD"] = prev_ath
             raise
         except Exception as e:
             logger.error("Unexpected exception during ffmpeg: %s", e)
