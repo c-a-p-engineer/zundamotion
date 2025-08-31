@@ -43,6 +43,15 @@ class VideoPhase:
         # クリップ並列実行ワーカー数を決定
         # 実効フィルタ経路がCPUの場合は、NVENC でもCPU向けヒューリスティクスを適用する
         self.clip_workers = self._determine_clip_workers(jobs, self.hw_kind)
+        # Auto-tune (profile first N clips then adjust caps/clip_workers)
+        vcfg = self.config.get("video", {}) if isinstance(self.config, dict) else {}
+        try:
+            self.profile_limit = int(vcfg.get("profile_first_clips", 4))
+        except Exception:
+            self.profile_limit = 4
+        self.auto_tune_enabled = bool(vcfg.get("auto_tune", True))
+        self._profile_samples: List[Dict[str, Any]] = []
+        self._retuned = False
 
     @staticmethod
     def _determine_clip_workers(jobs: str, hw_kind: Optional[str]) -> int:
@@ -407,11 +416,13 @@ class VideoPhase:
                 # 並列レンダリング用のタスクを構築
                 import asyncio
 
+                # If auto-tune has retuned clip_workers, new sem will reflect it
                 sem = asyncio.Semaphore(self.clip_workers)
                 results: List[Optional[Path]] = [None] * len(lines)
 
                 async def process_one(idx: int, line: Dict[str, Any]):
                     async with sem:
+                        import time as _time
                         line_id = f"{scene_id}_{idx}"
                         line_data = line_data_map[line_id]
                         duration = line_data["duration"]
@@ -598,17 +609,84 @@ class VideoPhase:
                                 )
                             return clip_path
 
+                        _t0 = _time.time()
                         clip_path = await self.cache_manager.get_or_create(
                             key_data=video_cache_data,
                             file_name=line_id,
                             extension="mp4",
                             creator_func=clip_creator_func,
                         )
+                        # Collect lightweight samples for auto-tune
+                        try:
+                            if (
+                                self.auto_tune_enabled
+                                and len(self._profile_samples) < self.profile_limit
+                            ):
+                                # Heuristic: subtitle or visible characters or image insert implies CPU overlay
+                                has_subtitle = bool((line_data.get("text") or "").strip())
+                                any_chars = any(
+                                    (c or {}).get("visible", False)
+                                    for c in (line.get("characters", []) or [])
+                                )
+                                ins = line_config.get("insert") or {}
+                                ins_path = str(ins.get("path", ""))
+                                ins_is_image = ins_path.lower().endswith(
+                                    (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+                                )
+                                cpu_overlay = has_subtitle or any_chars or ins_is_image
+                                elapsed = _time.time() - _t0
+                                self._profile_samples.append(
+                                    {
+                                        "cpu_overlay": cpu_overlay,
+                                        "elapsed": elapsed,
+                                    }
+                                )
+                        except Exception:
+                            pass
                         results[idx - 1] = clip_path
 
                 tasks = [process_one(idx, line) for idx, line in lines]
                 # 並列実行
                 await asyncio.gather(*tasks)
+
+                # After first scene (or once enough samples), auto-tune for subsequent scenes
+                if (
+                    self.auto_tune_enabled
+                    and not self._retuned
+                    and len(self._profile_samples) >= self.profile_limit
+                ):
+                    try:
+                        cpu_ratio = (
+                            sum(1 for s in self._profile_samples if s.get("cpu_overlay"))
+                            / float(len(self._profile_samples) or 1)
+                        )
+                        import os as _os
+                        # Be conservative on CPU overlays
+                        if cpu_ratio >= 0.5:
+                            # Tighten filter caps and lower concurrency
+                            _os.environ.setdefault("FFMPEG_FILTER_THREADS_CAP", "2")
+                            _os.environ.setdefault(
+                                "FFMPEG_FILTER_COMPLEX_THREADS_CAP", "2"
+                            )
+                            # Prefer at most 2 workers when NVENC + CPU overlays dominate
+                            prev_workers = self.clip_workers
+                            self.clip_workers = max(1, min(prev_workers, 2))
+                            logger.info(
+                                "[AutoTune] cpu_ratio=%.2f -> caps(ft,fct)=2, clip_workers %s -> %s",
+                                cpu_ratio,
+                                prev_workers,
+                                self.clip_workers,
+                            )
+                        else:
+                            logger.info(
+                                "[AutoTune] cpu_ratio=%.2f -> keeping current concurrency",
+                                cpu_ratio,
+                            )
+                        # Disable profiling overhead after retune
+                        _os.environ["FFMPEG_PROFILE_MODE"] = "0"
+                        self._retuned = True
+                    except Exception:
+                        pass
 
                 # 順序維持で集約
                 scene_line_clips: List[Path] = [p for p in results if p is not None]

@@ -242,6 +242,10 @@ CLI主なオプション（main.py実装）:
   - `FFMPEG_FILTER_THREADS_CAP` / `FFMPEG_FILTER_COMPLEX_THREADS_CAP`: フィルタスレッドの上限をキャップ。既定はCPUフィルタ経路で各4、GPU経路では1。
 - CPUフィルタ経路では過剰並列を避けるため、`clip_workers` と合わせて保守的に設定されます。
 
+補足（自動チューニング）:
+- `video.auto_tune: true` の場合、先頭Nクリップ（`video.profile_first_clips`, 既定4）を計測し、CPU overlay が支配的と判定された場合は `FFMPEG_FILTER_THREADS_CAP`/`FFMPEG_FILTER_COMPLEX_THREADS_CAP` を保守的な値（2）に設定し、`clip_workers` を抑制します（NVENC時は最大2）。
+- 計測後は `FFMPEG_PROFILE_MODE` を無効化してオーバーヘッドを回避します。
+
 ### 6.13. 一時ディレクトリ（RAMディスク優先）
 
 - 空き容量が十分な場合、`/dev/shm`（RAMディスク）を `temp_dir` として優先利用します（`USE_RAMDISK=1` 既定）。

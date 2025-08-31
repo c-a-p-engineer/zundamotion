@@ -494,6 +494,9 @@ video:
   - `FFMPEG_PROFILE_MODE=1` で `-benchmark -stats` を付与し、FFmpegの所要・スループットを収集できます。
   - `FFMPEG_THREADS` で `-threads` を明示上書き可能。
   - CPUフィルタ経路では `-filter_threads`/`-filter_complex_threads` を保守的にキャップ（既定=4）。`FFMPEG_FILTER_THREADS_CAP`/`FFMPEG_FILTER_COMPLEX_THREADS_CAP` で上限を調整できます。
+- 自動チューニング（初期クリップ計測）:
+  - `video.auto_tune: true` で初回数クリップ（既定4）を計測し、CPU overlay が支配的なら `filter_threads` の上限と `clip_workers` を保守的に調整します。
+  - `video.profile_first_clips: 4` で計測クリップ数を変更可能。
 - 一時ディレクトリ（RAMディスク）: `USE_RAMDISK=1`（既定）で空き容量が十分なら `/dev/shm` を一時ディレクトリに使用し、I/Oを高速化します。
 - 正規化の再実行抑止: 正規化出力に `<name>.meta.json` を隣接保存し、同一 `target_spec` の入力は再正規化をスキップします。
 - no-cache時の重複抑止: `--no-cache` でも同一キー生成はプロセス内でin-flight集約し、同一ラン内の重複生成を避けます。生成物は `temp_dir` のEphemeralとして再利用されます。
@@ -503,6 +506,8 @@ video:
 ```yaml
 video:
   gpu_overlay_experimental: true
+  auto_tune: true
+  profile_first_clips: 4
 ```
 
 
