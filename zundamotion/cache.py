@@ -367,6 +367,12 @@ class CacheManager:
                     temp_output_path = (
                         base_dir / f"temp_{file_name}_{cache_key}.{extension}"
                     )
+                    # 既に同一キーの一時生成物が存在する場合は再生成せずに再利用
+                    if temp_output_path.exists():
+                        logger.info(
+                            f"Cache disabled: Reusing existing ephemeral output for key {cache_key[:8]} -> {temp_output_path.name}"
+                        )
+                        return temp_output_path
                     logger.info(
                         f"Cache disabled. Generating temporary file: (Ephemeral) {temp_output_path}"
                     )

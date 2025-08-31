@@ -313,14 +313,16 @@ class VideoRenderer:
             ]
             if not insert_is_image:
                 try:
-                    normalized_insert = await normalize_media(
-                        input_path=insert_path,
-                        video_params=self.video_params,
-                        audio_params=self.audio_params,
-                        cache_manager=self.cache_manager,
-                        ffmpeg_path=self.ffmpeg_path,
-                    )
-                    insert_path = normalized_insert
+                    # 事前正規化済みフラグがあればスキップ
+                    if not bool(insert_config.get("normalized", False)):
+                        normalized_insert = await normalize_media(
+                            input_path=insert_path,
+                            video_params=self.video_params,
+                            audio_params=self.audio_params,
+                            cache_manager=self.cache_manager,
+                            ffmpeg_path=self.ffmpeg_path,
+                        )
+                        insert_path = normalized_insert
                 except Exception as e:
                     logger.warning(
                         "Could not inspect/normalize insert video %s: %s. Using as-is.",

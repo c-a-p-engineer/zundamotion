@@ -199,6 +199,7 @@ class VideoPhase:
                 static_overlays: List[Dict[str, Any]] = []
                 static_char_keys: set = set()
                 static_insert_in_base = False
+                scene_level_insert_video: Optional[Path] = None
                 try:
                     talk_lines = [
                         l
@@ -259,6 +260,7 @@ class VideoPhase:
                             )
                             if same_insert_all:
                                 insert_path = Path(first_insert.get("path", ""))
+                                # 画像はベースへ取り込み、動画はシーン単位で事前正規化のみ行う
                                 if insert_path.suffix.lower() in [
                                     ".png",
                                     ".jpg",
@@ -279,6 +281,29 @@ class VideoPhase:
                                         }
                                     )
                                     static_insert_in_base = True
+                                elif insert_path.suffix.lower() in [
+                                    ".mp4",
+                                    ".mov",
+                                    ".webm",
+                                    ".avi",
+                                    ".mkv",
+                                ] and insert_path.exists():
+                                    try:
+                                        # シーン内で共通の挿入動画を一度だけ正規化
+                                        normalized_insert = await normalize_media(
+                                            input_path=insert_path,
+                                            video_params=self.video_params,
+                                            audio_params=self.audio_params,
+                                            cache_manager=self.cache_manager,
+                                        )
+                                        scene_level_insert_video = normalized_insert
+                                        logger.info(
+                                            f"Scene {scene_id}: pre-normalized common insert video -> {normalized_insert.name}"
+                                        )
+                                    except Exception as e:
+                                        logger.warning(
+                                            f"Scene {scene_id}: failed to pre-normalize common insert video {insert_path.name}: {e}"
+                                        )
                 except Exception as e:
                     logger.debug(
                         f"Static overlay detection failed on scene {scene_id}: {e}"
@@ -502,7 +527,24 @@ class VideoPhase:
                         else:
                             effective_characters = original_characters
 
-                        effective_insert = None if static_insert_in_base else line_config.get("insert")
+                        # ベースに取り込まれていない共通挿入“動画”があれば、事前正規化済みのパスを各行へ伝搬
+                        if static_insert_in_base:
+                            effective_insert = None
+                        else:
+                            raw_insert = line_config.get("insert")
+                            if (
+                                scene_level_insert_video is not None
+                                and raw_insert
+                                and Path(raw_insert.get("path", "")).exists()
+                            ):
+                                effective_insert = {
+                                    **raw_insert,
+                                    "path": str(scene_level_insert_video),
+                                    "normalized": True,
+                                    "pre_scaled": True,
+                                }
+                            else:
+                                effective_insert = raw_insert
 
                         video_cache_data = {
                             "type": "talk",
