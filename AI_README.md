@@ -175,3 +175,4 @@ CLI主なオプション（main.py実装）:
 - CUDAフィルタを利用しNVENCでエンコードする場合、filter_complex内での`hwdownload`を回避し、GPU内で合成→NVENCへ直接渡します（GPU⇄CPU往復を削減）。
 - 実行時にCUDA経路でエラーが発生したクリップは、1回だけCPUフィルタで自動リトライします。
  - 初回のCUDAフィルタ失敗（スモーク失敗 or 実行失敗）を検知した場合、プロセス内のグローバルフラグで以降の全クリップをCPUフィルタへバックオフします（NVENCの利用可否は別途維持）。`zundamotion/utils/ffmpeg_utils.py` の `set_hw_filter_mode('cpu'|'cuda'|'auto')` により明示的な制御も可能です。
+ - CPUフィルタ経路が有効な場合（グローバルが`cpu`）、NVENCでのエンコード有無に関わらず、`clip_workers` と `-filter_threads`/`-filter_complex_threads` はCPU向けヒューリスティクス（例: `max(2, cpu_count//2)`）に自動調整します。

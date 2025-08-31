@@ -2,9 +2,32 @@
 
 本ファイルは、現状コード・ログの観察結果に基づく改善タスクと将来機能を、優先度順に整理したものです。
 
-参照ログ: `logs/20250829_173010_825.log`, `logs/20250829_183927_171.log`, `logs/20250830_024543_667.log`, `logs/20250830_035010_363.log`, `logs/20250830_042408_264.log`
+参照ログ: `logs/20250830_155656_544.log`
 
 ## P0（必須・最優先）
+
+
+### 01. CPUフィルタ時の並列度最適化（NVENCでもCPU扱い）
+
+- タイトル: CUDAフィルタ無効（CPUフィルタ経路）時は `clip_workers` をCPU向けに拡大
+- 詳細:
+    - 最新ログでは CUDA フィルタのスモークテストが失敗し、プロセス全体が CPU フィルタへフォールバック（`set_hw_filter_mode('cpu')`）。この場合でも `hw_kind=nvenc` のため `clip_workers` が最大2に制限され、CPUフィルタが律速なのに並列度が不足している。
+    - 対応として、実効フィルタ経路がCPUの場合（`get_hw_filter_mode() == 'cpu'` または `use_cuda_filters=False`）は、`hw_kind` に関わらず CPU パスのヒューリスティクス（例: `max(2, cpu_count//2)`）で決定する。
+    - 併せて `-filter_threads`/`-filter_complex_threads` もCPUパスの推奨値に合わせる。
+- 背景（今回ログ）: `logs/20250830_155656_544.log` で `clip_workers=2`、`VideoPhase=111.72s` が支配的。CPUフィルタ並列の不足が疑われる。
+- ゴール: CPUフィルタ経路でのスループット改善（目標: VideoPhase 30–50%短縮）。
+- 実装イメージ: `VideoPhase._determine_clip_workers` に実効フィルタ経路の判定を加味。`VideoRenderer._thread_flags` でも `get_hw_filter_mode()` を参照してCPU既定を適用。
+
+### 02. 静的オーバーレイ無しのシーンでベース映像生成をスキップ＋二重スケール回避
+
+- タイトル: `static_overlays=0` のシーンはベース映像（背景のみのループ書き出し）を省略し、行単位処理へ直行
+- 詳細:
+    - 現状は静的オーバーレイが無くても毎シーンでベース映像（`render_scene_base`→`render_looped_background_video`）を書き出しており、1シーンあたり ~10–15s 程度の固定コストが発生している。
+    - 代替として、背景が正規化済み（`normalize_media` 経由）なら `pre_scaled=True` を `background_config` に付与し、行側の `filter_complex` から `scale=` を外して二重スケールを避ける。
+    - 行数が多い場合のブレークイーブンは設定で調整（しきい値 N 行以上でのみベース生成）。初期値は N=6 など。
+- 背景（今回ログ）: 各シーンで「generated base with 0 static overlay(s)」が出力されており、恩恵が薄いケースで固定コストが発生。
+- ゴール: ベース生成の不要コスト削減と行側の二重スケール抑止。
+- 実装イメージ: `video_phase.py` で `static_overlays` が空のときはベース生成をスキップ。`video.py/render_clip` 内で正規化済み入力に `pre_scaled` を伝播。
 
 
 ### 03. 背景・挿入メディアの事前正規化・再利用（シーン単位）
@@ -78,6 +101,16 @@
 - 検証: 次回ログで欠落・混入が解消されていること。
 
 ## P1（重要・中期）
+
+### 27. CUDA不可時のGPUフィルタ代替（OpenCL/Vulkan/QSV overlay の検討）
+
+- タイトル: CUDAフィルタ未対応/失敗環境でのGPU合成代替パスを用意
+- 詳細:
+    - `overlay_cuda/scale_cuda` が使えない環境向けに、`overlay_opencl` や `overlay_vulkan`（ビルド有効時）、`overlay_qsv` の存在確認とスモークテストを追加。成功時はCPUフィルタではなく当該GPUフィルタを採用。
+    - 字幕や立ち絵のアルファ合成要件に応じ、各フィルタのサポート状況を調査し、可能な範囲で適用（不可なら自動でCPU）。
+- 背景: `logs/20250830_155656_544.log` で CUDA フィルタのスモークテストが exit 218 で失敗、以降CPU合成となり VideoPhase が支配的に。
+- ゴール: CUDA非対応環境でもGPU合成経路を確保し、CPU負荷を軽減。
+- 実装イメージ: `ffmpeg_utils.has_*_filters()` を追加し、`VideoRenderer` のフィルタ選択に反映。軽量スモークテストとプロセス内キャッシュはCUDAと同様に実装。
 
 ### 07. `--no-cache` 時の挙動とログ文言の明確化
 
@@ -172,3 +205,10 @@
 - `VideoPhase` は 205.31s と支配的。17:32:37 台で `scene_bg_intro.mp4` について `[Cache] Normalized miss` が多数発生（重複正規化の疑い）。
 - `assets/bg/countdown.mp4` の正規化は NVENC で 9s 程度（正常）。
 - シーン結合（-c copy）は成功しているが ~39s 要しており、I/O 最適化余地あり。
+
+- 直近ログ: `logs/20250830_155656_544.log`
+  - `AudioPhase` は 15.17s（問題小）。
+  - `VideoPhase` は 111.72s と支配的。開始直後に CUDA フィルタのスモークテストが失敗→CPUフィルタへフォールバック。`clip_workers=2` でCPUフィルタが飽和し切れていない可能性。
+  - シーンベース映像は「0 static overlay(s)」のまま生成され、固定コストが発生。`pre_scaled` 伝播による二重スケール回避で置換可能。
+  - 背景正規化は NVENC で短時間に完了（例: `sample_video.mp4` ~1.26s、`countdown.mp4` ~5.05s）。
+  - BGMPhase 3.40s、FinalizePhase 0.78s と軽微。最終結合は `-c copy` 成功。
