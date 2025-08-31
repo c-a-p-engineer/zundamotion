@@ -26,6 +26,13 @@
 
 ## P0（必須・最優先）
 
+### 01. フェイス差分PNGの事前スケール＆マスク前計算（品質＋速度）
+
+- 背景: 口/目の差分PNGを毎回 `scale` → `alphaextract/alphamerge` しており、CPU overlayの負荷と縁の太りに影響。
+- 対応: キャラ名・scale ごとに Pillow で事前スケールした PNG と2値アルファ（マスク）を CacheManager に保存し、FFmpegでは単純 overlay のみ行う。
+- ゴール: CPUフィルタ負荷の低減（VideoPhase短縮）と縁の安定化（品質向上）。
+- 実装: `face_overlay_cache.py`（新規）に get_or_create 実装→`video.py` から参照。
+
 ### 02. スレッド/並列度の自動適応（計測ループの導入）
 
 - タイトル: プロファイル結果に基づく `filter_threads`/`filter_complex_threads` と `clip_workers` の自動調整
@@ -74,6 +81,62 @@
 <!-- 07. ログ整形の乱れ修正（対応済み） -->
 
 ## P1（重要・中期）
+
+### 30. 複数キャラ・レイアウト・動き（基盤と最小実装）
+
+- 概要: 複数キャラの同時表示、入退場、移動/拡大縮小/回転/不透明度、表情切替の最小セットを実現。
+- スキーマ拡張（YAML）:
+  - `scene.characters[]`: {name, visible, slot(left|center|right|bottom|custom), x, y, scale, rotate, z, mirror, expression}
+  - `line.actions[]`: {t, target(name|all|speaker), visible, transition(fade|slide|pop), duration, move:{x,y}, scale, rotate, opacity, ease(in|out|inOut|linear), expression}
+  - 時間`t`は行先頭相対秒。省略時は行開始で適用。
+- 自動レイアウト: slotごとの既定座標・マージンと重なり回避（最前面キャラを優先）。`custom`は x/y をそのまま使用。
+- 入退場: visible=true/false + transition + duration + ease を enable式でffmpeg overlayに反映。
+- 2Dトランスフォーム: move/scale/rotate/opacity のキーフレーム（2点補間）→ 簡易tweenを生成。
+- 表情切替: `expression` を PNG 切替（fallback: default）。
+- Zオーダー: 行ごとに z を昇順で並べ直し（手前が後段 overlay）。
+- 話者強調（最小）: speaker に軽シャープ/彩度UP、非話者を-10%減光（有効/無効フラグ）。
+- 依存/整合: P0-01 の「顔パーツ事前スケール」キャッシュと連携。ベース合成（静的レイヤ）の検出と両立。
+
+### 31. アクションエンジン拡張（キーフレーム/ease/テンプレ）
+
+- 概要: 2点以外のキーフレーム連結、ease種追加（quad/cubic/back/bounce）、テンプレの導入。
+- スキーマ: `line.actions[].keyframes=[{t,x,y,scale,rotate,opacity,ease}]` を許容。`preset: 'enter_left'|'exit_right'|'pop'` 等で簡便指定。
+- 実装: 小さなtweenユーティリティで enable式や式値を生成。logに導出パラメタをDEBUG出力。
+
+### 32. ミラー/影/深度（描画品質）
+
+- ミラー: `mirror:true` で左右反転（hflip）。表情PNGの向き依存は fallback（あれば `*_mirrored.png`）。
+- 影: ドロップシャドウ（ガウスぼかし＋黒）、床落ち影（楕円PNGのスケール）。強度/オフセットをparams化。
+- 深度: zに応じて微ぼかし/彩度を変化させ奥行きを演出（オプション）。
+
+### 33. カメラ/ショット（Ken Burns + フォロー）
+
+- 概要: シーン/行にカメラキーフレーム（x,y,scale）を付与。話者フォローモードで自動寄り。
+- スキーマ: `scene.camera.keyframes[]` と `line.actions[].camera.keyframes[]` を許容。`follow:'speaker'|<name>`。
+- 実装: ベース映像に対する crop/scale/overlay で疑似カメラ。既存の字幕・キャラ overlay と両立するよう順序を整理。
+
+### 34. 名前枠/ローワーサード/ネームプレート
+
+- 概要: 話者名と枠のプリセット。左右/上下のオート配置。
+- スキーマ: `line.nameplate:{style:'default', position:'auto'|'left'|'right', offset:{x,y}}`、色/角丸/影をparams化。
+- 実装: テンプレPNG + テキスト合成（Pillow）→ overlay。タイミングは行全体 or アクションt。
+
+### 35. パララックス/パーティクル（強化）
+
+- 概要: 背景/中景/前景のレイヤ速度差、雨/雪/紙吹雪を前景に追加。
+- スキーマ: `scene.layers[]:{path, speed_x, speed_y, loop}`。`scene.particles:{type:'snow'|'rain'|'confetti', amount, speed}`。
+- 実装: ループ動画/画像のoverlay。速度は enable式で座標を時間関数に。
+### 28. アルファ2値化の設定化とプレフライト（堅牢性）
+
+- 背景: `alphaextract+geq` を用いた2値化が環境差で失敗する場合がある。現在は環境変数で自動OFFリトライ。
+- 対応: YAML設定（`video.face_overlay.alpha_hard_threshold: {enabled, threshold}`）に昇格。起動時に短いフィルタグラフでプレフライトし、失敗時は自動的に無効化＋ログ。
+- ゴール: 予期せぬ 234 の再発防止・原因の明示。
+- 実装: `ffmpeg_utils` にスモークを追加し、`VideoRenderer.create` で反映。
+
+### 29. AutoTune の永続化と条件見直し
+
+- 背景: クリップ少数のシーンでは profile結果が不安定。実行毎の学習結果が失われる。
+- 対応: 直近の最適caps/clip_workersを `cache/` に保存し、次回実行の既定に適用。CPU overlay 支配の判定閾値を 0.5→0.6 に要評価。
 
 ### 27. CUDA不可時のGPUフィルタ代替（OpenCL/Vulkan/QSV overlay の検討）
 
