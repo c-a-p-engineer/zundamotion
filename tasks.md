@@ -28,17 +28,6 @@
 - `assets/bg/countdown.mp4` の正規化が失敗後に同一ラン内で再実行されており、同一ターゲットへの「正規化済み一時ファイル再利用」が効いていない（02:50:12→02:50:28 台）。失敗時にもプロセス内メモ（dict）で「対象→一時正規化パス」を保持し、再試行では再正規化せずに既存の出力を参照する。
 
 
-### 04. シーン間トランジション適用（YAML→Finalize 配線）
-
-- タイトル: `scene.transition` の検証済み設定を最終結合に反映（映像xfade＋音声acrossfade）
-- 詳細:
-    - 既に `script_loader` で `transition` を検証、`ffmpeg_utils.apply_transition()` も実装済だが、最終結合に未配線。
-    - `FinalizePhase.run` で隣接シーンを順に処理し、先行シーンの `transition` を適用して一時ファイルを生成→新しい配列へ格納。
-    - 生成済みのトランジション付きクリップ群に対して `-c copy` 連結を試行し、失敗時のみ再エンコードへフォールバック。
-- ゴール: YAMLのトランジション定義が映像・音声に反映され、カットが滑らかになる。
-- 実装イメージ: `components/pipeline_phases/finalize_phase.py` に適用ループを追加。`apply_transition()` に `VideoParams/AudioParams` を渡す。
-
-
 ### 05. 口パク/目パチ（最小版・音量しきい値）
 
 - タイトル: ゆっくり的な口パク・まばたきの簡易実装（差分PNG切替）

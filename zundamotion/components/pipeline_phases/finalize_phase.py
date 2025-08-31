@@ -13,6 +13,7 @@ from zundamotion.utils.ffmpeg_utils import (
     AudioParams,
     VideoParams,
     _threading_flags,
+    apply_transition,
     compare_media_params,
     concat_videos_copy,
     get_audio_duration,
@@ -59,8 +60,58 @@ class FinalizePhase:
         if not scene_video_paths:
             raise PipelineError("No video clips to finalize.")
 
+        # 1) シーン間トランジションの適用（先行シーンの transition を次シーンとの境界に適用）
+        processed_paths: List[Path] = list(scene_video_paths)
+        if len(processed_paths) >= 2:
+            logger.info("FinalizePhase: Applying scene transitions where defined...")
+            merged: List[Path] = []
+            current: Path = processed_paths[0]
+            for i in range(len(processed_paths) - 1):
+                next_path = processed_paths[i + 1]
+                scene = scenes[i] if i < len(scenes) else {}
+                transition_cfg = scene.get("transition") if isinstance(scene, dict) else None
+
+                if transition_cfg:
+                    try:
+                        t_type = str(transition_cfg.get("type", "fade"))
+                        t_dur = float(transition_cfg.get("duration", 1.0))
+                    except Exception:
+                        t_type = "fade"
+                        t_dur = 1.0
+
+                    # offset = 現在クリップの末尾から duration 秒前
+                    try:
+                        cur_dur = await get_media_duration(str(current))
+                    except Exception:
+                        cur_dur = 0.0
+                    offset = max(0.0, cur_dur - t_dur)
+
+                    out_path = self.temp_dir / f"transition_{i:03d}_{i+1:03d}.mp4"
+                    logger.info(
+                        f"FinalizePhase: Applying transition '{t_type}' (d={t_dur}s, offset={offset:.2f}s) between {current.name} -> {Path(next_path).name}"
+                    )
+                    await apply_transition(
+                        str(current),
+                        str(next_path),
+                        str(out_path),
+                        t_type,
+                        t_dur,
+                        offset,
+                        self.video_params,
+                        self.audio_params,
+                    )
+                    current = out_path
+                else:
+                    # トランジション未指定なら、これまでの current を確定し次へ
+                    merged.append(current)
+                    current = next_path
+
+            # ループ終了後の最後の current を確定
+            merged.append(current)
+            processed_paths = merged
+
         output_video_path = self.temp_dir / "final_output.mp4"
-        input_video_str_paths = [str(p.resolve()) for p in scene_video_paths]
+        input_video_str_paths = [str(p.resolve()) for p in processed_paths]
 
         if await compare_media_params(input_video_str_paths):
             logger.info(
@@ -83,7 +134,7 @@ class FinalizePhase:
                     raise PipelineError(
                         "FinalizePhase: --final-copy-only is enabled, but -c copy concat failed."
                     )
-                await self._reencode_concat(scene_video_paths, output_video_path)
+                await self._reencode_concat(processed_paths, output_video_path)
         else:
             # パラメータ不一致時の詳細ログ
             logger.warning("FinalizePhase: Video parameters mismatch.")
@@ -106,7 +157,7 @@ class FinalizePhase:
                     "FinalizePhase: --final-copy-only is enabled, but video parameters mismatch."
                 )
             logger.warning("FinalizePhase: Falling back to re-encode concat.")
-            await self._reencode_concat(scene_video_paths, output_video_path)
+            await self._reencode_concat(processed_paths, output_video_path)
 
         final_video_duration = await get_media_duration(str(output_video_path))
         logger.info(
