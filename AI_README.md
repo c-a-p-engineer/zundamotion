@@ -245,6 +245,7 @@ CLI主なオプション（main.py実装）:
 補足（自動チューニング）:
 - `video.auto_tune: true` の場合、先頭Nクリップ（`video.profile_first_clips`, 既定4）を計測し、CPU overlay が支配的と判定された場合は `FFMPEG_FILTER_THREADS_CAP`/`FFMPEG_FILTER_COMPLEX_THREADS_CAP` を保守的な値（2）に設定し、`clip_workers` を抑制します（NVENC時は最大2）。
 - 計測後は `FFMPEG_PROFILE_MODE` を無効化してオーバーヘッドを回避します。
+- 併せて、CPU overlay が支配的なケースでは `set_hw_filter_mode('cpu')` を適用し、プロセス全体でCPUフィルタ経路に統一します（NVENCによるエンコードは継続）。
 
 ### 6.13. 一時ディレクトリ（RAMディスク優先）
 

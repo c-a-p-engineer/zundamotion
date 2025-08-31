@@ -12,6 +12,7 @@ from zundamotion.components.video import VideoRenderer
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
 from zundamotion.utils.ffmpeg_utils import get_hw_encoder_kind_for_video_params  # 追加
+from zundamotion.utils.ffmpeg_utils import set_hw_filter_mode  # Auto-tuneでのバックオフに使用
 from zundamotion.utils.ffmpeg_utils import AudioParams, VideoParams, normalize_media
 from zundamotion.utils.logger import logger, time_log
 
@@ -668,6 +669,14 @@ class VideoPhase:
                             _os.environ.setdefault(
                                 "FFMPEG_FILTER_COMPLEX_THREADS_CAP", "2"
                             )
+                            # CPU overlay 優勢時はGPUフィルタを全体でオフにしてスレッド最適化を適用
+                            try:
+                                set_hw_filter_mode("cpu")
+                                logger.info(
+                                    "[AutoTune] Set HW filter mode to 'cpu' due to CPU overlay dominance."
+                                )
+                            except Exception:
+                                pass
                             # Prefer at most 2 workers when NVENC + CPU overlays dominate
                             prev_workers = self.clip_workers
                             self.clip_workers = max(1, min(prev_workers, 2))

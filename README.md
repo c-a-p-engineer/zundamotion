@@ -497,6 +497,7 @@ video:
 - 自動チューニング（初期クリップ計測）:
   - `video.auto_tune: true` で初回数クリップ（既定4）を計測し、CPU overlay が支配的なら `filter_threads` の上限と `clip_workers` を保守的に調整します。
   - `video.profile_first_clips: 4` で計測クリップ数を変更可能。
+  - CPU overlay が支配的な場合は、フィルタ経路をCPUに統一（`set_hw_filter_mode('cpu')`）し、以降の安定性と一貫性を優先します（NVENCエンコードは継続）。
 - 一時ディレクトリ（RAMディスク）: `USE_RAMDISK=1`（既定）で空き容量が十分なら `/dev/shm` を一時ディレクトリに使用し、I/Oを高速化します。
 - 正規化の再実行抑止: 正規化出力に `<name>.meta.json` を隣接保存し、同一 `target_spec` の入力は再正規化をスキップします。
 - no-cache時の重複抑止: `--no-cache` でも同一キー生成はプロセス内でin-flight集約し、同一ラン内の重複生成を避けます。生成物は `temp_dir` のEphemeralとして再利用されます。
