@@ -155,6 +155,8 @@ CLI主なオプション（main.py実装）:
 - 適切なログレベル (DEBUG, INFO, WARNING, ERROR, CRITICAL) を使い分けます。
 - 開発中はDEBUGレベル、本番環境ではINFOレベル以上を推奨します。
 - 重要なイベント、エラー、デバッグ情報は必ずログに記録します。
+- 進捗表示（tqdm）と干渉しないよう、ログ出力は QueueHandler/QueueListener + `tqdm.write` 互換ハンドラで単一路化されています。標準出力への `print` は避け、必ず `logger` を利用してください。
+- タイムスタンプは `YYYY-MM-DD HH:MM:SS.mmm`（ミリ秒3桁固定）で出力されます（JSON/KV/プレーン共通）。
 
 ### 6.5. テスト
 

@@ -1,5 +1,6 @@
 import json
 import logging
+import queue
 import os
 import sys
 import time
@@ -7,6 +8,9 @@ import inspect
 from datetime import datetime
 from functools import wraps
 from typing import Any, Dict, Optional
+from logging.handlers import QueueHandler, QueueListener
+
+from tqdm import tqdm
 
 
 class JsonFormatter(logging.Formatter):
@@ -16,7 +20,8 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record):
         log_record = {
-            "timestamp": self.formatTime(record, self.datefmt),
+            # Ensure fixed 3-digit milliseconds
+            "timestamp": f"{self.formatTime(record, self.datefmt)}.{int(record.msecs):03d}",
             "level": record.levelname,
             "name": record.name,
             "message": record.getMessage(),
@@ -43,7 +48,23 @@ class KVFormatter(logging.Formatter):
         kv_pairs = getattr(record, "kv_pairs", None)
         if kv_pairs:
             kv_string = "".join([f"[{k}={v}]" for k, v in kv_pairs.items()])
-        return f"{self.formatTime(record, self.datefmt)} - {record.levelname} - {kv_string} {record.getMessage()}"
+        # Ensure fixed 3-digit milliseconds in timestamp
+        ts = self.formatTime(record, self.datefmt)
+        return f"{ts}.{int(record.msecs):03d} - {record.levelname} - {kv_string} {record.getMessage()}"
+
+
+class TqdmLoggingHandler(logging.Handler):
+    """A logging handler that writes via tqdm.write to avoid breaking progress bars."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            # tqdm.write ensures new line handling that preserves active bars
+            tqdm.write(msg)
+        except Exception:  # pragma: no cover (best-effort logging)
+            # Fallback to plain stdout to avoid losing logs
+            sys.stdout.write(getattr(record, "getMessage", lambda: str(record))())
+            sys.stdout.write("\n")
 
 
 class ProgressLogger:
@@ -75,7 +96,9 @@ class ProgressLogger:
 
 
 def setup_logging(
-    log_json: bool = False, debug_mode: bool = False, log_kv: bool = False
+    log_json: bool = False,
+    debug_mode: bool = False,
+    log_kv: bool = False,
 ):
     """
     Sets up the logging configuration.
@@ -103,18 +126,22 @@ def setup_logging(
     else:
         logger.setLevel(logging.INFO)  # Default level
 
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Common formatters (fixed 3-digit milliseconds)
+    datefmt = "%Y-%m-%d %H:%M:%S"
     if log_json:
-        console_handler.setFormatter(JsonFormatter())
+        console_formatter: logging.Formatter = JsonFormatter(datefmt=datefmt)
+        file_formatter: logging.Formatter = JsonFormatter(datefmt=datefmt)
     elif log_kv:
-        console_handler.setFormatter(KVFormatter())
+        console_formatter = KVFormatter(datefmt=datefmt)
+        file_formatter = KVFormatter(datefmt=datefmt)
     else:
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+        fmt = "%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s"
+        console_formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
+        file_formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
+
+    # Handlers to be managed by QueueListener
+    console_handler = TqdmLoggingHandler()
+    console_handler.setFormatter(console_formatter)
 
     # File handler
     log_dir = "./logs"
@@ -123,16 +150,18 @@ def setup_logging(
     file_handler = logging.FileHandler(
         os.path.join(log_dir, log_filename), encoding="utf-8"
     )
-    if log_json:
-        file_handler.setFormatter(JsonFormatter())
-    elif log_kv:
-        file_handler.setFormatter(KVFormatter())
-    else:
-        file_formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        file_handler.setFormatter(file_formatter)
-    logger.addHandler(file_handler)
+    file_handler.setFormatter(file_formatter)
+
+    # Queue-based logging to avoid handler contention and ensure ordering
+    q: "queue.Queue[logging.LogRecord]" = queue.Queue(-1)
+    qh = QueueHandler(q)
+    logger.addHandler(qh)
+    logger.propagate = False
+
+    listener = QueueListener(q, console_handler, file_handler, respect_handler_level=True)
+    listener.start()
+    # Attach listener to logger for potential teardown if needed
+    logger._queue_listener = listener  # type: ignore[attr-defined]
 
     # Suppress other loggers if not in debug mode
     if not debug_mode:  # debug_mode が False の場合のみ抑制
@@ -142,14 +171,12 @@ def setup_logging(
     # Set root logger to the same level as zundamotion logger
     logging.root.setLevel(logger.level)
 
-    # Ensure the 'progress' logger also uses the main handler
+    # Ensure the 'progress' logger writes via tqdm as well
     progress_logger = logging.getLogger("progress")
     progress_logger.setLevel(logging.INFO)
     if not progress_logger.handlers:
         progress_logger.addHandler(console_handler)
-        progress_logger.propagate = (
-            False  # Prevent it from sending to root logger again
-        )
+        progress_logger.propagate = False
 
     return logger
 
