@@ -658,37 +658,31 @@ class VideoRenderer:
                         return idx
                     return None
 
-                # Eyes: baseline open shown when not in close segment; close shown during blink
+                # Prepare overlay chain with alpha hard-threshold to avoid edge double stacking
+                def _prep_overlay(idx: int, scale_val: float, out_label: str) -> None:
+                    # format RGBA → scale → split(src/alpha) → alphaextract → threshold → alphamerge
+                    # Note: use a binary alpha (>=128 → 255 else 0) to reduce semi-transparency fringes
+                    filter_complex_parts.append(
+                        f"[{idx}:v]format=rgba,scale=iw*{scale_val}:ih*{scale_val},"
+                        f"split[o_src_{idx}][o_a_{idx}];"
+                        f"[o_a_{idx}]alphaextract,geq=lum='if(gte(lum,128),255,0)'[o_mask_{idx}];"
+                        f"[o_src_{idx}][o_mask_{idx}]alphamerge[{out_label}]"
+                    )
+
+                # Eyes: show only 'close' during blink to avoid doubling base open eyes
                 eyes_segments = face_anim.get("eyes") or []
                 eyes_close_expr = _enable_expr(eyes_segments) if eyes_segments else None
-                if eyes_open.exists():
-                    idx = _add_image_input(eyes_open)
-                    if idx is not None:
-                        label = f"eyes_open_scaled_{idx}"
-                        filter_complex_parts.append(
-                            f"[{idx}:v]scale=iw*{scale}:ih*{scale}[{label}]"
-                        )
-                        overlay_streams.append(f"[{label}]")
-                        if eyes_close_expr:
-                            overlay_filters.append(
-                                f"overlay=x={x_fix}:y={y_fix}:enable='not({eyes_close_expr})'"
-                            )
-                        else:
-                            overlay_filters.append(f"overlay=x={x_fix}:y={y_fix}")
-
                 if eyes_close.exists() and eyes_close_expr:
                     idx = _add_image_input(eyes_close)
                     if idx is not None:
                         label = f"eyes_close_scaled_{idx}"
-                        filter_complex_parts.append(
-                            f"[{idx}:v]scale=iw*{scale}:ih*{scale}[{label}]"
-                        )
+                        _prep_overlay(idx, float(scale), label)
                         overlay_streams.append(f"[{label}]")
                         overlay_filters.append(
                             f"overlay=x={x_fix}:y={y_fix}:enable='{eyes_close_expr}'"
                         )
 
-                # Mouth: show exactly one of close/half/open at a time（重複重ねを避ける）
+                # Mouth: overlay only 'half'/'open' states; avoid baseline 'close' to prevent doubling
                 mouth_segments = face_anim.get("mouth") or []
                 half_expr = open_expr = None
                 if isinstance(mouth_segments, list) and mouth_segments:
@@ -697,34 +691,11 @@ class VideoRenderer:
                     half_expr = _enable_expr(half_segments) if half_segments else None
                     open_expr = _enable_expr(open_segments) if open_segments else None
 
-                # Close baseline enabled only when neither half nor open
-                if mouth_close.exists():
-                    idx = _add_image_input(mouth_close)
-                    if idx is not None:
-                        label = f"mouth_close_scaled_{idx}"
-                        filter_complex_parts.append(
-                            f"[{idx}:v]scale=iw*{scale}:ih*{scale}[{label}]"
-                        )
-                        overlay_streams.append(f"[{label}]")
-                        if half_expr or open_expr:
-                            comb = None
-                            if half_expr and open_expr:
-                                comb = f"({half_expr})+({open_expr})"
-                            else:
-                                comb = half_expr or open_expr
-                            overlay_filters.append(
-                                f"overlay=x={x_fix}:y={y_fix}:enable='not({comb})'"
-                            )
-                        else:
-                            overlay_filters.append(f"overlay=x={x_fix}:y={y_fix}")
-
                 if mouth_half.exists() and half_expr:
                     idx = _add_image_input(mouth_half)
                     if idx is not None:
                         label = f"mouth_half_scaled_{idx}"
-                        filter_complex_parts.append(
-                            f"[{idx}:v]scale=iw*{scale}:ih*{scale}[{label}]"
-                        )
+                        _prep_overlay(idx, float(scale), label)
                         overlay_streams.append(f"[{label}]")
                         overlay_filters.append(
                             f"overlay=x={x_fix}:y={y_fix}:enable='{half_expr}'"
@@ -734,9 +705,7 @@ class VideoRenderer:
                     idx = _add_image_input(mouth_open)
                     if idx is not None:
                         label = f"mouth_open_scaled_{idx}"
-                        filter_complex_parts.append(
-                            f"[{idx}:v]scale=iw*{scale}:ih*{scale}[{label}]"
-                        )
+                        _prep_overlay(idx, float(scale), label)
                         overlay_streams.append(f"[{label}]")
                         overlay_filters.append(
                             f"overlay=x={x_fix}:y={y_fix}:enable='{open_expr}'"
