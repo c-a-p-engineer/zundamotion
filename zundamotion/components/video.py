@@ -54,6 +54,8 @@ class VideoRenderer:
         self.video_params = video_params or VideoParams()
         self.audio_params = audio_params or AudioParams()
         self.has_cuda_filters = has_cuda_filters
+        # GPU overlay backend: 'cuda' | 'opencl' | None (cpu)
+        self.gpu_overlay_backend: Optional[str] = None
         # 並列クリップ数（VideoPhase 側の決定を受け取る）
         self.clip_workers = max(1, int(clip_workers)) if clip_workers else 1
         # Experimental flag: allow GPU overlays even with RGBA inputs
@@ -70,7 +72,7 @@ class VideoRenderer:
         if self.has_cuda_filters:
             logger.info("CUDA filters available: True (scale_cuda/overlay_cuda)")
         else:
-            logger.info("CUDA filters available: False (using CPU filters)")
+            logger.info("CUDA filters available: False (using CPU or alt GPU filters)")
         logger.info(
             "VideoRenderer initialized: hw_kind=%s, clip_workers=%s, hw_filter_mode=%s",
             self.hw_kind,
@@ -96,6 +98,15 @@ class VideoRenderer:
         has_cuda_filters_val = (
             has_cuda_filters_listed and (await smoke_test_cuda_filters(ffmpeg_path))
         )
+        # Try OpenCL as alternative backend when CUDA is not available/disabled
+        from ..utils.ffmpeg_utils import has_opencl_filters, smoke_test_opencl_filters
+        opencl_ok = False
+        if not has_cuda_filters_val and get_hw_filter_mode() != "cpu":
+            try:
+                if await has_opencl_filters(ffmpeg_path):
+                    opencl_ok = await smoke_test_opencl_filters(ffmpeg_path)
+            except Exception:
+                opencl_ok = False
         # GPUスケールフィルタの優先名を決定
         scale_filter = await get_preferred_cuda_scale_filter(ffmpeg_path)
         # Respect global HW filter mode (process-wide backoff)
@@ -116,6 +127,18 @@ class VideoRenderer:
             inst.scale_filter = scale_filter or "scale_cuda"
         except Exception:
             inst.scale_filter = "scale_cuda"
+        # Decide overlay backend
+        if get_hw_filter_mode() != "cpu":
+            if has_cuda_filters_val and hw_kind == "nvenc":
+                inst.gpu_overlay_backend = "cuda"
+            elif opencl_ok:
+                inst.gpu_overlay_backend = "opencl"
+        logger.info(
+            "[Filters] GPU overlay backend=%s (cuda=%s, opencl_ok=%s)",
+            inst.gpu_overlay_backend or "none",
+            has_cuda_filters_val,
+            opencl_ok,
+        )
         return inst
 
     # --------------------------
@@ -370,6 +393,7 @@ class VideoRenderer:
 
         # 4) Characters (optional)
         character_indices: Dict[int, int] = {}
+        char_effective_scale: Dict[int, float] = {}
         # record character overlay placement for later face animation overlays
         char_overlay_placement: Dict[str, Dict[str, str]] = {}
         any_character_visible = False
@@ -394,9 +418,36 @@ class VideoRenderer:
                         char_expression,
                     )
                     continue
-            character_indices[i] = len(input_layers)
-            cmd.extend(["-loop", "1", "-i", str(char_image_path.resolve())])
-            input_layers.append({"type": "video", "index": len(input_layers)})
+            # Pre-scale character image via Pillow cache when enabled
+            effective_scale = 1.0
+            try:
+                scale_cfg = float(char_config.get("scale", 1.0))
+            except Exception:
+                scale_cfg = 1.0
+            use_char_cache = os.environ.get("CHAR_CACHE_DISABLE", "0") != "1"
+            if use_char_cache and abs(scale_cfg - 1.0) > 1e-6:
+                try:
+                    thr_env = os.environ.get("CHAR_ALPHA_THRESHOLD")
+                    thr = int(thr_env) if (thr_env and thr_env.isdigit()) else 128
+                    scaled_path = await self.face_cache.get_scaled_overlay(
+                        char_image_path, float(scale_cfg), thr
+                    )
+                    character_indices[i] = len(input_layers)
+                    cmd.extend(["-loop", "1", "-i", str(scaled_path.resolve())])
+                    input_layers.append({"type": "video", "index": len(input_layers)})
+                    effective_scale = 1.0  # already applied by cache
+                except Exception:
+                    character_indices[i] = len(input_layers)
+                    cmd.extend(["-loop", "1", "-i", str(char_image_path.resolve())])
+                    input_layers.append({"type": "video", "index": len(input_layers)})
+                    effective_scale = scale_cfg
+            else:
+                character_indices[i] = len(input_layers)
+                cmd.extend(["-loop", "1", "-i", str(char_image_path.resolve())])
+                input_layers.append({"type": "video", "index": len(input_layers)})
+                effective_scale = scale_cfg
+            # Keep the per-index effective scale for later filter decisions
+            char_effective_scale[i] = float(effective_scale)
 
         # ---- ここで GPU フィルタ使用可否を判定 --------------------------------
         # RGBAを含むオーバーレイ（字幕PNG/立ち絵/挿入画像）が1つでもあれば CPU 合成へ（実験フラグで緩和）
@@ -443,12 +494,19 @@ class VideoRenderer:
                 filter_complex_parts.append(
                     f"[hw_bg_in]{self.scale_filter}={width}:{height},fps={fps}[bg]"
                 )
+            elif self.gpu_overlay_backend == "opencl" and not _force_cpu and get_hw_filter_mode() != "cpu":
+                # OpenCL: 背景のスケールはCPUで行い、その後にGPUへアップロードして合成に回す
+                filter_complex_parts.append(
+                    f"[0:v]scale={width}:{height}:flags=lanczos,fps={fps}[bg]"
+                )
+                filter_complex_parts.append("[bg]format=rgba,hwupload[bg_gpu]")
+                current_video_stream = "[bg_gpu]"
             else:
                 filter_complex_parts.append(
                     f"[0:v]scale={width}:{height}:flags=lanczos,fps={fps}[bg]"
                 )
-
-        current_video_stream = "[bg]"
+        if not (self.gpu_overlay_backend == "opencl" and not _force_cpu and get_hw_filter_mode() != "cpu"):
+            current_video_stream = "[bg]"
         overlay_streams: List[str] = []
         overlay_filters: List[str] = []
 
@@ -481,6 +539,16 @@ class VideoRenderer:
                     )
                 overlay_streams.append("[insert_scaled]")
                 overlay_filters.append(f"overlay_cuda=x={x_expr}:y={y_expr}")
+            elif self.gpu_overlay_backend == "opencl" and not _force_cpu and get_hw_filter_mode() != "cpu":
+                # スケールはCPUで前処理 → OpenCL へアップロードして overlay_opencl
+                filter_complex_parts.append(
+                    f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[insert_scaled]"
+                )
+                filter_complex_parts.append(
+                    f"[insert_scaled]format=rgba,hwupload[insert_gpu]"
+                )
+                overlay_streams.append("[insert_gpu]")
+                overlay_filters.append(f"overlay_opencl=x={x_expr}:y={y_expr}")
             else:
                 filter_complex_parts.append(
                     f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[insert_scaled]"
@@ -489,11 +557,20 @@ class VideoRenderer:
                 overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
 
         # 立ち絵 overlay
+        # For character pre-scaling via Pillow cache (values filled above)
+        preproc_alpha_thr = 128
+        try:
+            thr_env = os.environ.get("CHAR_ALPHA_THRESHOLD")
+            if thr_env and thr_env.isdigit():
+                preproc_alpha_thr = int(thr_env)
+        except Exception:
+            preproc_alpha_thr = 128
+
         for i, char_config in enumerate(characters_config):
             if not char_config.get("visible", False) or i not in character_indices:
                 continue
             ffmpeg_index = character_indices[i]
-            scale = float(char_config.get("scale", 1.0))
+            scale = float(char_effective_scale.get(i, float(char_config.get("scale", 1.0))))
             anchor = char_config.get("anchor", "bottom_center")
             pos = char_config.get("position", {"x": "0", "y": "0"})
             x_expr, y_expr = calculate_overlay_position(
@@ -513,10 +590,47 @@ class VideoRenderer:
                 )
                 overlay_streams.append(f"[char_scaled_{i}]")
                 overlay_filters.append(f"overlay_cuda=x={x_expr}:y={y_expr}")
+            elif self.gpu_overlay_backend == "opencl" and not _force_cpu and get_hw_filter_mode() != "cpu":
+                # 前段で Pillow による事前スケールが有効な場合、scale は 1.0 に縮退
+                if os.environ.get("CHAR_CACHE_DISABLE", "0") != "1":
+                    try:
+                        from .face_overlay_cache import FaceOverlayCache
+
+                        cache = self.face_cache  # same cache instance
+                        # 事前スケール済み PNG を別入力として差し替え（ffmpeg_index の実入力を置換）
+                        # ここではフィルタでのスケールを行わず、GPU に上げて overlay のみ実施
+                        # 既存 ffmpeg_index はそのまま使用し、format=rgba,hwupload を適用
+                        filter_complex_parts.append(
+                            f"[{ffmpeg_index}:v]format=rgba,hwupload[char_gpu_{i}]"
+                        )
+                        overlay_streams.append(f"[char_gpu_{i}]")
+                        overlay_filters.append(
+                            f"overlay_opencl=x={x_expr}:y={y_expr}"
+                        )
+                        char_effective_scale[i] = 1.0
+                    except Exception:
+                        # フォールバック: CPU スケール→GPUへ
+                        filter_complex_parts.append(
+                            f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[char_scaled_{i}]"
+                        )
+                        filter_complex_parts.append(
+                            f"[char_scaled_{i}]format=rgba,hwupload[char_gpu_{i}]"
+                        )
+                        overlay_streams.append(f"[char_gpu_{i}]")
+                        overlay_filters.append(
+                            f"overlay_opencl=x={x_expr}:y={y_expr}"
+                        )
+                        char_effective_scale[i] = 1.0
             else:
-                filter_complex_parts.append(
-                    f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[char_scaled_{i}]"
-                )
+                # CPU 経路: 事前スケールが有効なら scale を省いて format のみ
+                if os.environ.get("CHAR_CACHE_DISABLE", "0") != "1" and abs(scale - 1.0) < 1e-6:
+                    filter_complex_parts.append(
+                        f"[{ffmpeg_index}:v]format=rgba[char_scaled_{i}]"
+                    )
+                else:
+                    filter_complex_parts.append(
+                        f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[char_scaled_{i}]"
+                    )
                 overlay_streams.append(f"[char_scaled_{i}]")
                 overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
 
@@ -732,6 +846,12 @@ class VideoRenderer:
 
         # オーバーレイを連結
         if overlay_streams:
+            # OpenCL 使用時は overlay フィルタ名を置換
+            if self.gpu_overlay_backend == "opencl" and not _force_cpu and get_hw_filter_mode() != "cpu":
+                overlay_filters = [
+                    (f.replace("overlay=", "overlay_opencl=") if f.startswith("overlay=") else f)
+                    for f in overlay_filters
+                ]
             chain = current_video_stream
             for i, stream in enumerate(overlay_streams):
                 chain += f"{stream}{overlay_filters[i]}"
@@ -740,7 +860,14 @@ class VideoRenderer:
                 else:
                     chain += "[final_v_overlays]"
             filter_complex_parts.append(chain)
-            current_video_stream = "[final_v_overlays]"
+            # OpenCL で作成したフレームは CPU へ戻す
+            if self.gpu_overlay_backend == "opencl" and not _force_cpu and get_hw_filter_mode() != "cpu":
+                filter_complex_parts.append(
+                    "[final_v_overlays]hwdownload,format=yuv420p[final_v_overlays_cpu]"
+                )
+                current_video_stream = "[final_v_overlays_cpu]"
+            else:
+                current_video_stream = "[final_v_overlays]"
         else:
             current_video_stream = "[bg]"
 

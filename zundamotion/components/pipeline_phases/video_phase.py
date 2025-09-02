@@ -121,6 +121,24 @@ class VideoPhase:
         # jobs/hw_kind から先に clip_workers を算出して VideoRenderer に伝搬
         pre_clip_workers = cls._determine_clip_workers(jobs, hw_kind)
 
+        # AutoTune hint: early backoff
+        hint_path = cache_manager.cache_dir / "autotune_hint.json"
+        try:
+            import json as _json
+            if hint_path.exists():
+                with open(hint_path, "r", encoding="utf-8") as _f:
+                    _hint = _json.load(_f)
+                decided = str(_hint.get("decided_mode", "auto")).lower()
+                if decided in {"cpu", "cuda", "auto"}:
+                    if decided == "cpu":
+                        try:
+                            set_hw_filter_mode("cpu")
+                            logger.info("[AutoTune] Loaded hint: forcing HW filter mode to 'cpu'.")
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
         video_renderer = await VideoRenderer.create(
             config,
             temp_dir,
@@ -704,6 +722,23 @@ class VideoPhase:
                         # Disable profiling overhead after retune
                         _os.environ["FFMPEG_PROFILE_MODE"] = "0"
                         self._retuned = True
+                        # Persist hint for next runs
+                        try:
+                            import json as _json
+                            from zundamotion.utils.ffmpeg_utils import get_ffmpeg_version
+                            hint = {
+                                "cpu_ratio": cpu_ratio,
+                                "decided_mode": "cpu" if cpu_ratio >= 0.5 else "auto",
+                                "clip_workers": self.clip_workers,
+                                "ffmpeg": await get_ffmpeg_version(),
+                                "hw_kind": self.hw_kind,
+                            }
+                            hint_path = self.cache_manager.cache_dir / "autotune_hint.json"
+                            with open(hint_path, "w", encoding="utf-8") as f:
+                                _json.dump(hint, f, ensure_ascii=False)
+                            logger.info("[AutoTune] Saved hint to %s", hint_path)
+                        except Exception:
+                            pass
                     except Exception:
                         pass
 

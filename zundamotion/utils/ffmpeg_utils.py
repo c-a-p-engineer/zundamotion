@@ -627,6 +627,77 @@ async def smoke_test_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
     if _cuda_smoke_result is not None:
         return _cuda_smoke_result
 
+
+# ------------------------------
+# OpenCL overlay support (fallback)
+# ------------------------------
+_opencl_smoke_result: Optional[bool] = None
+_opencl_smoke_lock = asyncio.Lock()
+
+
+async def has_opencl_filters(ffmpeg_path: str = "ffmpeg") -> bool:
+    """Check presence of overlay_opencl and scale_opencl filters."""
+    try:
+        filters = await _list_ffmpeg_filters(ffmpeg_path)
+        return ("overlay_opencl" in filters) and ("scale_opencl" in filters or "hwupload" in filters)
+    except Exception:
+        return False
+
+
+async def smoke_test_opencl_filters(ffmpeg_path: str = "ffmpeg") -> bool:
+    """
+    Try a tiny OpenCL overlay graph using colors and hwupload with derive_device=opencl.
+    Cache the result per-process to avoid repeated probing.
+    """
+    global _opencl_smoke_result
+    if _opencl_smoke_result is not None:
+        return _opencl_smoke_result
+    async with _opencl_smoke_lock:
+        if _opencl_smoke_result is not None:
+            return _opencl_smoke_result
+        # Build a conservative filtergraph: hwupload both inputs to OpenCL, scale overlay, overlay_opencl, then hwdownload.
+        fc = (
+            "[0:v]format=rgba,hwupload[bg];"
+            "[1:v]format=rgba,hwupload,scale_opencl=32:32[ov];"
+            "[bg][ov]overlay_opencl=x=16:y=16,hwdownload,format=rgba[out]"
+        )
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=64x64:d=0.1",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=white:s=32x32:d=0.1",
+            "-filter_complex",
+            fc,
+            "-map",
+            "[out]",
+            "-f",
+            "null",
+            "-",
+        ]
+        try:
+            await _run_ffmpeg_async(cmd)
+            _opencl_smoke_result = True
+            return _opencl_smoke_result
+        except subprocess.CalledProcessError as e:  # pragma: no cover - environment dependent
+            logger.debug(
+                "OpenCL smoke test failed (exit=%s). STDERR=%s",
+                getattr(e, "returncode", None),
+                (e.stderr or "").strip(),
+            )
+            _opencl_smoke_result = False
+            return _opencl_smoke_result
+        except Exception as e:  # pragma: no cover - generic guard
+            logger.debug("OpenCL smoke test failed: %s", e)
+            _opencl_smoke_result = False
+            return _opencl_smoke_result
+
     async with _cuda_smoke_lock:
         if _cuda_smoke_result is not None:
             return _cuda_smoke_result
