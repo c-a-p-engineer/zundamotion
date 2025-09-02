@@ -652,8 +652,13 @@ class VideoRenderer:
                     vw, vh = self.video_params.width, self.video_params.height
                     sx = _to_num(pos.get("x", "0"))
                     sy = _to_num(pos.get("y", "0"))
-                    cw = w0 * float(scale)
-                    ch = h0 * float(scale)
+                    # Use original config scale for face overlay reference, not effective (pre-scaled) scale
+                    try:
+                        scale_orig = float(char_config.get("scale", 1.0))
+                    except Exception:
+                        scale_orig = float(scale)
+                    cw = w0 * float(scale_orig)
+                    ch = h0 * float(scale_orig)
                     a = str(anchor)
                     if a == "top_left":
                         xn, yn = sx, sy
@@ -678,7 +683,8 @@ class VideoRenderer:
                 char_overlay_placement[str(char_name)] = {
                     "x_expr": x_expr,
                     "y_expr": y_expr,
-                    "scale": str(scale),
+                    "scale_orig": str(scale_orig),
+                    "scale_eff": str(scale),
                     "x_num": str(int(round(xn))),
                     "y_num": str(int(round(yn))),
                 }
@@ -730,7 +736,7 @@ class VideoRenderer:
                     placement = None
 
             if placement:
-                scale = placement["scale"]
+                scale = placement.get("scale_orig") or placement.get("scale") or "1.0"
                 # Use numeric top-left position for stability (independent of each overlay's w/h)
                 x_fix = placement.get("x_num") or placement.get("x_expr") or "0"
                 y_fix = placement.get("y_num") or placement.get("y_expr") or "0"
