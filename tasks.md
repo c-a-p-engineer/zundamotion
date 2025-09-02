@@ -9,46 +9,6 @@
 - シーン結合は `-f concat -c copy` で成功。I/O スループットは ~80MB/s 程度（ログ追加済み）。
 - 主なボトルネックは VideoPhase（CPU overlay）。
 
-## P0（必須・最優先）
-
-### 01. CUDA 非対応時の GPU overlay 代替
-- 機能: CUDA フィルタ不可時に `overlay_opencl`/`overlay_vulkan`/`overlay_qsv` 等へ自動切替。
-- 背景: ログで CUDA フィルタのスモークテストが失敗（exit 218）し CPU overlay が支配。GPU 合成経路の代替を確保したい。
-- ゴール: CUDA 非対応環境でも GPU 合成を維持し、VideoPhase の時間を大幅短縮（目標: CPU overlay 比で 30% 以上短縮）。
-- 実装案: 
-  - `zundamotion/utils/ffmpeg_utils.py` に `has_opencl_filters/has_vulkan_filters/has_qsv_overlay` と各スモークテスト関数を追加（存在検出→極小フレームでの試行）。
-  - `VideoRenderer.create` で CUDA 不可 or `HW_FILTER_MODE=cpu` 時に、上記候補を優先度順に選択して `self.has_cuda_filters` 相当のフラグ群に反映（新規: `gpu_overlay_backend={cuda|opencl|vulkan|qsv|none}`）。
-  - `render_clip` のフィルタグラフ生成で `overlay_cuda/scale_cuda` の代わりに各 backend を切替（RGBA サポートの可否に留意。不可なら自動で CPU）。
-  - 環境変数/設定 `video.gpu_overlay_backend` で強制指定可。結果を INFO ログ出力。
-- 確認方法: 
-  - ログに `[Filters] GPU overlay backend=opencl` 等が出力されること。
-  - サンプル台本で VideoPhase 時間を計測し、CPU overlay より短縮していること。
-  - CUDA が使える環境では従来通り CUDA を優先、使えない環境で他 backend に自動切替されること。
-
-### 02. キャラ画像の事前スケール/キャッシュ（overlay 負荷の削減）
-- 機能: 立ち絵 PNG を Pillow で事前スケールして PNG 化、スケール済み画像をキャッシュ再利用。
-- 背景: CPU overlay 経路で `scale` がボトルネック。Face 用の事前スケールは導入済みだが、キャラ全体には未適用。
-- ゴール: 立ち絵 overlay の filter_complex から `scale` を排除し合成のみへ縮退（VideoPhase p95 を短縮）。
-- 実装案:
-  - `zundamotion/components/char_overlay_cache.py`（新規）: `get_scaled_overlay(path: Path, scale: float, alpha_thr: int=128)` を提供。内部は Pillow でリサイズ+α門値処理、CacheManager 経由で永続/ephemeral キャッシュ。
-  - `VideoRenderer.render_clip` のキャラ処理で、既存の `scale` フィルタを `format=rgba` のみに置換（pre-scaled 入力を使用）。
-  - 既存 `FaceOverlayCache` を流用/統合して重複実装を回避。環境変数 `CHAR_CACHE_DISABLE=1` で無効化可能。
-- 確認方法:
-  - ログに `CharOverlayCache hit/miss` が出力され、2回目以降は hit が増えること。
-  - FFmpeg の `filter_complex` からキャラの `scale=...` が消えていること（DEBUG ログで確認）。
-  - 処理時間・CPU 使用率が低下すること（同一台本の比較）。
-
-### 03. AutoTune の永続化と早期バックオフ
-- 機能: AutoTune 結果（CPU overlay 比率など）をヒントとして永続化し、次回起動時に早期適用。
-- 背景: 現状は先頭 N クリップの計測後にバックオフ。毎回のウォームアップ時間が発生。
-- ゴール: 次回以降の初期クリップから適切な `HW_FILTER_MODE`/スレッド上限/並列度を適用し、無駄な試行を削減。
-- 実装案:
-  - `cache/autotune_hint.json`（または `logs/` 配下）に `{cpu_ratio, decided_mode, clip_workers, ts, ffmpeg_ver, gpu_name}` を保存（TTL/バージョン付与）。
-  - `VideoPhase.create` で読み込み、条件一致時に `set_hw_filter_mode` と `clip_workers` を先行設定。適用結果を INFO ログ出力。
-  - 不一致（GPU/FFmpeg/解像度変更等）の場合は無効化し、再学習して更新。
-- 確認方法:
-  - 2回目以降の実行ログで `[AutoTune] Loaded hint ...` と早期適用の出力があること。
-  - 先頭 N クリップの計測ログが抑制され、全体時間が短縮されること。
 
 ## P1（重要・中期）
 
@@ -64,16 +24,6 @@
   - 既存サンプル台本で AudioPhase 時間が短縮されること。HTTP 429/5xx が発生しないこと。
   - 出力のファイル数・順序・内容が直列処理と一致すること。
 
-### 02. FinalizePhase の `--final-copy-only` CLI 配線
-- 機能: `-c copy` 失敗時にフォールバック再エンコードを禁止してエラー終了する CLI オプションを提供。
-- 背景: 厳格な運用（再エンコード禁止）や診断のため、明示的に失敗させたいニーズあり。
-- ゴール: `--final-copy-only` 指定時、パラメータ不一致や concat 失敗で即エラー化（非指定時は従来通りフォールバック）。
-- 実装案:
-  - `main.py` に `--final-copy-only` を追加 → `run_generation` → `GenerationPipeline` → `FinalizePhase(final_copy_only=True)` まで配線。
-  - `AI_README.md`/`README.md` の CLI オプション表を更新。
-- 確認方法:
-  - 人為的にパラメータ不一致のファイルを混在させ、`--final-copy-only` でエラー終了することを確認。
-  - 非指定時は従来通りフォールバックで完了することを確認。
 
 ### 03. 字幕フォントのフェイルセーフ
 - 機能: 指定フォント不在時、システム系統フォントへ自動フォールバックし警告ログを出す。
