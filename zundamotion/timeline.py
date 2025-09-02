@@ -1,3 +1,5 @@
+"""Utilities for recording timeline events and exporting them in various formats."""
+
 import csv
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,6 +15,8 @@ def format_timestamp(seconds: float) -> str:
 
 
 class Timeline:
+    """In-memory representation of video events used for reporting and subtitles."""
+
     def __init__(self):
         self.events: List[Dict[str, Any]] = []
         self.current_time: float = 0.0
