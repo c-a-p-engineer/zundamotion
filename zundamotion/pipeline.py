@@ -29,6 +29,7 @@ class GenerationPipeline:
         audio_params: Optional[AudioParams] = None,
         hw_encoder: str = "auto",
         quality: str = "balanced",
+        final_copy_only: bool = False,
     ):
         self.config = config
         self.no_cache = no_cache
@@ -36,6 +37,7 @@ class GenerationPipeline:
         self.jobs = jobs
         self.hw_encoder = hw_encoder
         self.quality = quality
+        self.final_copy_only = final_copy_only
         self.cache_manager = CacheManager(
             cache_dir=Path(self.config.get("system", {}).get("cache_dir", "cache")),
             no_cache=self.no_cache,
@@ -177,6 +179,7 @@ class GenerationPipeline:
                 self.audio_params,
                 self.hw_encoder,
                 self.quality,
+                final_copy_only=self.final_copy_only,
             )
             final_video_path = await self._run_phase(
                 "FinalizePhase",
@@ -319,6 +322,7 @@ async def run_generation(
     no_subtitle_file: bool = False,
     hw_encoder: str = "auto",
     quality: str = "balanced",
+    final_copy_only: bool = False,
 ):
     """
     High-level function to run the entire generation process.
@@ -357,5 +361,6 @@ async def run_generation(
         audio_params=AudioParams(),  # デフォルトのAudioParamsを渡す
         hw_encoder=hw_encoder,
         quality=quality,
+        final_copy_only=final_copy_only,
     )
     await pipeline.run(output_path)

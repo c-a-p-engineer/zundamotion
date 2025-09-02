@@ -100,6 +100,11 @@ async def main():  # Make main function async
         choices=["speed", "balanced", "quality"],
         help="Encoding quality preset.",
     )
+    parser.add_argument(
+        "--final-copy-only",
+        action="store_true",
+        help="Force final concat to use -c copy only; fail if re-encode would be required.",
+    )
 
     args = parser.parse_args()
 
@@ -129,6 +134,7 @@ async def main():  # Make main function async
             args.no_subtitle_file,
             args.hw_encoder,
             args.quality,
+            final_copy_only=args.final_copy_only,
         )
         logger.kv_info(
             "Video generation completed successfully.",
