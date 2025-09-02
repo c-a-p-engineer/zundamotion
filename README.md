@@ -380,6 +380,11 @@ python -m zundamotion.main scripts/sample.yaml --hw-encoder gpu
 python -m zundamotion.main scripts/sample.yaml --quality quality
 ```
 
+最終的な連結を`-c copy`のみに強制し、再エンコードが必要な場合は失敗させたい場合は、`--final-copy-only`オプションを使用します。
+```bash
+python -m zundamotion.main scripts/sample.yaml --final-copy-only
+```
+
 タイムライン出力を有効にするには、`--timeline`オプションを使用します。フォーマットを指定しない場合、デフォルトでMarkdown形式で出力されます。
 ```bash
 python -m zundamotion.main scripts/sample.yaml --timeline
