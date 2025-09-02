@@ -1,4 +1,4 @@
-import asyncio  # 追加
+import asyncio
 import shutil
 import os
 import statistics
@@ -19,6 +19,8 @@ from .utils.logger import KVLogger, logger, time_log
 
 
 class GenerationPipeline:
+    """Orchestrates audio, video, and post-processing phases for a script."""
+
     def __init__(
         self,
         config: Dict[str, Any],
@@ -54,6 +56,7 @@ class GenerationPipeline:
         }
 
     async def _run_phase(self, phase_name: str, func, *args, **kwargs):
+        """Execute a pipeline phase and record its duration."""
         start_time = time.time()
         if isinstance(logger, KVLogger):
             logger.kv_info(
@@ -275,6 +278,7 @@ class GenerationPipeline:
                 logger.info("--- Video Generation Pipeline Completed ---")
 
     def _log_final_summary(self):
+        """Log aggregated statistics after the pipeline completes."""
         if isinstance(logger, KVLogger):
             summary_kv = {"Event": "PipelineSummary"}
             summary_kv["TotalDuration"] = f"{self.stats['total_duration']:.2f}s"

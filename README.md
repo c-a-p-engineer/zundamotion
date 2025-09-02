@@ -62,6 +62,9 @@ lines:
 - **主要ライブラリ**:
     - `PyYAML`: YAML設定ファイルの読み込みと解析
     - `requests`: VOICEVOX APIとのHTTP通信
+    - `httpx` / `tenacity`: VOICEVOX API呼び出しの非同期通信とリトライ制御
+    - `pysubs2`: 字幕ファイルの生成
+    - `Pillow`: 画像処理・背景透過
 - **外部ツール**:
     - `FFmpeg`: 動画および音声の処理、結合、レンダリング
     - `VOICEVOX`: 音声合成エンジン (ローカルで実行されている必要があります)

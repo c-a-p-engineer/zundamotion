@@ -33,6 +33,15 @@ SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 
 
 def list_images(input_dir: str, recursive: bool) -> Iterable[str]:
+    """Yield image file paths from *input_dir*.
+
+    Args:
+        input_dir: Directory to search for images.
+        recursive: Whether to traverse subdirectories recursively.
+
+    Yields:
+        Paths to files with supported extensions.
+    """
     if recursive:
         for root, _dirs, files in os.walk(input_dir):
             for f in files:
@@ -47,10 +56,12 @@ def list_images(input_dir: str, recursive: bool) -> Iterable[str]:
 
 
 def ensure_dir(path: str) -> None:
+    """Create *path* if it does not already exist."""
     os.makedirs(path, exist_ok=True)
 
 
 def compute_output_path(input_path: str, root_in: str, root_out: str) -> str:
+    """Determine the output file path for an input image."""
     base_no_ext = os.path.splitext(os.path.basename(input_path))[0]
     rel_dir = os.path.relpath(os.path.dirname(input_path), root_in)
     if rel_dir == os.curdir:
@@ -61,6 +72,7 @@ def compute_output_path(input_path: str, root_in: str, root_out: str) -> str:
 
 
 def remove_bg_with_session(img: Image.Image, session) -> Image.Image:
+    """Remove the background from *img* using a prepared *session*."""
     # rembg accepts bytes or PIL.Image, returns bytes or PIL.Image depending on input
     out = remove(img, session=session)
     # When input is PIL.Image, output is PIL.Image
@@ -73,6 +85,7 @@ def remove_bg_with_session(img: Image.Image, session) -> Image.Image:
 
 
 def process_image(path: str, session, in_root: str, out_root: str, overwrite: bool) -> tuple[bool, str]:
+    """Apply background removal to a single image and save the result."""
     try:
         with Image.open(path) as im:
             # Convert to RGBA early for consistency
@@ -89,6 +102,7 @@ def process_image(path: str, session, in_root: str, out_root: str, overwrite: bo
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Command-line interface for batch background removal."""
     parser = argparse.ArgumentParser(
         description="Remove backgrounds with AI (rembg) and save as PNGs",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
