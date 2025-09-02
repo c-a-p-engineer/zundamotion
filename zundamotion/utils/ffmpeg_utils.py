@@ -13,6 +13,7 @@ FFmpeg 7 対応のユーティリティ群（全文置き換え用）
 from __future__ import annotations  # 循環参照を避けるため追加
 
 import asyncio
+import time
 import json
 import os
 import platform  # is_nvenc_available で利用
@@ -1139,6 +1140,13 @@ async def concat_videos_copy(
         h = "ffconcat"
     out_dir = os.path.dirname(os.path.abspath(output_path)) or "."
     list_file_path = os.path.join(out_dir, f".ffconcat_{h}.txt")
+    # 事前に簡易I/Oメトリクスを収集（合計サイズ）
+    total_bytes = 0
+    for p in input_paths:
+        try:
+            total_bytes += os.path.getsize(p)
+        except Exception:
+            pass
     with open(list_file_path, "w", encoding="utf-8") as f:
         for path in input_paths:
             f.write(f"file '{os.path.abspath(path)}'\n")
@@ -1162,12 +1170,22 @@ async def concat_videos_copy(
         output_path,
     ])
 
+    # 実行時間を計測
+    t0 = time.time()
     try:
         proc = await _run_ffmpeg_async(cmd)  # await を追加
         logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
         logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
+        elapsed = time.time() - t0
+        mb = total_bytes / (1024 * 1024) if total_bytes else 0.0
+        thr = (mb / elapsed) if elapsed > 0 else 0.0
         logger.info(
-            f"Successfully concatenated videos without re-encoding to {output_path}"
+            "[ConcatCopy] inputs=%d, size=%.1fMB, time=%.2fs, throughput=%.1fMB/s -> %s",
+            len(input_paths),
+            mb,
+            elapsed,
+            thr,
+            output_path,
         )
     except subprocess.CalledProcessError as e:
         logger.error(f"Error concatenating videos with -c copy: {e}")
