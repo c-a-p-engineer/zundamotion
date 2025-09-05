@@ -356,6 +356,7 @@ class VideoRenderer:
         insert_audio_index = -1
         insert_is_image = False
         insert_path: Optional[Path] = None
+        chroma_key_color: Optional[str] = None
         if insert_config:
             insert_path = Path(insert_config["path"])
             insert_is_image = insert_path.suffix.lower() in [
@@ -365,6 +366,10 @@ class VideoRenderer:
                 ".bmp",
                 ".webp",
             ]
+            ck_val = insert_config.get("chroma_key")
+            if ck_val is not None:
+                chroma_key_color = "#000000" if ck_val is True else str(ck_val)
+                _force_cpu = True
             if not insert_is_image:
                 try:
                     # 事前正規化済みフラグがあればスキップ
@@ -550,10 +555,17 @@ class VideoRenderer:
                 overlay_streams.append("[insert_gpu]")
                 overlay_filters.append(f"overlay_opencl=x={x_expr}:y={y_expr}")
             else:
-                filter_complex_parts.append(
-                    f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[insert_scaled]"
-                )
-                overlay_streams.append("[insert_scaled]")
+                if chroma_key_color:
+                    hex_color = chroma_key_color.lstrip("#")
+                    filter_complex_parts.append(
+                        f"[{insert_ffmpeg_index}:v]format=rgba,scale=iw*{scale}:ih*{scale},chromakey=0x{hex_color}:0.1:0[insert_ck]"
+                    )
+                    overlay_streams.append("[insert_ck]")
+                else:
+                    filter_complex_parts.append(
+                        f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[insert_scaled]"
+                    )
+                    overlay_streams.append("[insert_scaled]")
                 overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
 
         # 立ち絵 overlay

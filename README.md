@@ -236,6 +236,7 @@ python remove_bg_ai.py --input ./in --output ./out --force-gpu
 ## 🎬 画像・動画の挿入
 
 セリフ中に、指定した画像や動画を画面に挿入することができます。これにより、参考資料を提示したり、視覚的なエフェクトを追加したりすることが可能です。
+挿入動画では `chroma_key` で特定色を透明化するクロマキー合成が行えます（デフォルトは黒）。
 
 ```yaml
 lines:
@@ -248,10 +249,11 @@ lines:
       anchor: "bottom_right"          # アンカーポイント (オプション)
       position: {"x": "-20", "y": "-20"} # 位置オフセット (オプション)
 
-  - text: "（動画を再生するのだ！）"
+  - text: "（桜の動画を重ねるのだ！）"
     speaker_id: 3
     insert:
-      path: "assets/bg/countdown.mp4" # 挿入する動画
+      path: "assets/overlay/sakura_bg_black.mp4" # 挿入する動画
+      chroma_key: "#000000"        # 指定色を透過させる
       scale: 0.8
       anchor: "middle_center"
       position: {"x": "20", "y": "20"}
@@ -264,6 +266,7 @@ lines:
 - `anchor`: 配置の基準点。キャラクター配置と同様のアンカーポイントが利用可能です。
 - `position`: アンカーポイントからの相対的な位置オフセット（x, y座標）。
 - `volume`: 挿入する動画の音量（0.0から1.0の範囲）。画像の場合は無視されます。
+- `chroma_key`: 挿入動画で透過させる色。省略時は無効で、`true` を指定すると黒が透過色になります。
 
 ---
 

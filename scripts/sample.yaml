@@ -38,6 +38,25 @@ subtitle:
   max_chars_per_line: 16 
 
 scenes:
+  - id: chroma_sample
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "桜の動画を重ねるテストなのだ。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            visible: true
+            anchor: "bottom_center"
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
+        insert:
+          path: "assets/overlay/sakura_bg_black.mp4"
+          chroma_key: "#000000"
+          scale: 0.5
+          anchor: "top_right"
+          position: {"x": "-50", "y": "50"}
+
   - id: subtitle_zundamon
     bg: "assets/bg/room.png"
     lines:
