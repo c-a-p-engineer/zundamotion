@@ -454,6 +454,14 @@ def load_script_and_config(
             final_config.get("defaults", {}), script_data["defaults"]
         )
 
+    # Allow selected top-level sections in script to override global config
+    # e.g., subtitle settings (reading_display), video params, bgm defaults, etc.
+    for top_key in ("video", "subtitle", "bgm", "background", "system"):
+        if top_key in script_data and isinstance(script_data[top_key], dict):
+            final_config[top_key] = merge_configs(
+                final_config.get(top_key, {}), script_data[top_key]
+            )
+
     # Extract defaults for easier access
     global_defaults = final_config.get("defaults", {})
     character_defaults = global_defaults.get("characters", {})

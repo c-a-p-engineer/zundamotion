@@ -36,6 +36,8 @@ subtitle:
   outline: "black"
   wrap_mode: chars 
   max_chars_per_line: 16 
+  # インライン読みを字幕に括弧付きで表示する（none|paren）
+  reading_display: paren
 
 scenes:
   - id: subtitle_zundamon
@@ -238,6 +240,33 @@ scenes:
       - text: "このチャンネルでは、便利なスクリプトや動画制作のコツを紹介するのよ。"
         speaker_id: 6 # 明示的にVOICEVOX ID 6 を指定
         speaker_name: "metan" # 話しているキャラクターの名前
+
+  # 読み分けデモ（インライン/行オプション）
+  - id: reading_demo
+    bg: "assets/bg/room.png"
+    lines:
+      - speaker_name: "zundamon"
+        # インライン読みマークアップ: [表示|読み] と 波括弧: 表示{読み}
+        text: "それ[本気|ホンキ]？[本気|マジ]？ 本気{マジ}でいく？"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            visible: true
+            anchor: "bottom_center"
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
+
+      - speaker_name: "zundamon"
+        # 行全体の読みを差し替える例（インライン無しでもOK）
+        text: "本気です！"
+        reading: "マジです！"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            visible: true
+            anchor: "bottom_center"
+            position: {"x": "0", "y": "0"}
+            scale: 0.8
         characters: # キャラクター設定リスト
           - name: "metan"
             expression: "normal" # voice_style: normal を expression: normal に変更

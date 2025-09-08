@@ -43,6 +43,10 @@ subtitle:
   line_spacing_offset_per_line: 64 # Additional vertical offset per line for multi-line text (e.g., same as font_size)
   x: "(w-text_w)/2"
   y: "h-100-text_h/2" # Center text block 100px from bottom, adjusting for total text height
+  # 読みの表示方法（インラインマークアップ時）: none | paren
+  #   none  -> [本気|マジ] は「本気」、本気{マジ} も「本気」
+  #   paren -> [本気|マジ] は「本気（マジ）」、本気{マジ} も「本気（マジ）」
+  reading_display: none
 
 # Voice settings (VOICEVOX defaults)
 voice:

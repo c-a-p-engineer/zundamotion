@@ -251,7 +251,18 @@ CLI主なオプション（main.py実装）:
 - 計測後は `FFMPEG_PROFILE_MODE` を無効化してオーバーヘッドを回避します。
 - 併せて、CPU overlay が支配的なケースでは `set_hw_filter_mode('cpu')` を適用し、プロセス全体でCPUフィルタ経路に統一します（NVENCによるエンコードは継続）。
 
-### 6.13. 一時ディレクトリ（RAMディスク優先）
+### 6.13. テキスト/字幕/音声（表示と読みの分離）
+
+- セリフの `text` は字幕とタイムラインの表示に使用。
+- 音声の読みを差し替えたい場合は、行に `reading`（または `read`）を指定（例: `text: "本気"`, `reading: "マジ"`）。
+- 字幕だけ個別に差し替えたい場合は `subtitle_text` を指定（無指定時は `text`）。
+
+実装ポイント:
+- AudioPhase で `reading` を優先して TTS 入力に使用。`text` は表示（字幕/タイムライン）に使用。
+- line_data_map には `text`（表示用）と `tts_text`（音声用）の双方を格納。
+- SubtitlePNG は `text`/`subtitle_text` に基づいて生成される（VideoPhase 側の集約で適用）。
+
+### 6.14. 一時ディレクトリ（RAMディスク優先）
 
 - 空き容量が十分な場合、`/dev/shm`（RAMディスク）を `temp_dir` として優先利用します（`USE_RAMDISK=1` 既定）。
 - `--no-cache` 時は生成物を `temp_dir`（Ephemeral）に出力し、同一キーの重複生成をプロセス内で抑止します（in-flight集約＋既存ファイル再利用）。

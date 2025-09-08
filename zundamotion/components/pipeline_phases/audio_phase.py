@@ -11,6 +11,7 @@ from zundamotion.components.audio import AudioGenerator
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
 from zundamotion.utils.ffmpeg_utils import AudioParams, get_audio_duration
+from zundamotion.utils.text_processing import parse_reading_markup
 from zundamotion.utils.logger import logger, time_log
 from zundamotion.utils.face_anim import (
     compute_mouth_timeline,
@@ -84,7 +85,28 @@ class AudioPhase:
                         pbar.update(1)
                         continue
 
-                    text = line["text"]
+                    # テキスト（表示用）/読み（音声用）の分離
+                    original_text = str(line.get("text", ""))
+                    # Apply inline reading markup if explicit reading is not provided
+                    subtitle_reading_display = str(
+                        (self.config.get("subtitle", {}) or {}).get(
+                            "reading_display", "none"
+                        )
+                    ).lower()
+                    if line.get("reading") or line.get("read"):
+                        read_text = str(line.get("reading") or line.get("read") or original_text)
+                        # display text may still contain markup for visual purpose; parse for display only
+                        disp_from_markup, _ = parse_reading_markup(
+                            original_text, subtitle_reading_display
+                        )
+                        display_text = str(line.get("subtitle_text") or disp_from_markup)
+                    else:
+                        disp_from_markup, tts_from_markup = parse_reading_markup(
+                            original_text, subtitle_reading_display
+                        )
+                        read_text = tts_from_markup
+                        display_text = str(line.get("subtitle_text") or disp_from_markup)
+                    text = display_text
                     pbar.set_description(
                         f"Audio Generation (Scene '{scene_id}', Line {idx}: '{text[:30]}...')"
                     )
@@ -94,7 +116,7 @@ class AudioPhase:
                         audio_path,
                         speaker_id,
                         generated_text,
-                    ) = await self.audio_gen.generate_audio(text, line, line_id)
+                    ) = await self.audio_gen.generate_audio(read_text, line, line_id)
 
                     if not audio_path:
                         raise PipelineError(
@@ -109,7 +131,7 @@ class AudioPhase:
 
                     # Cache the generated audio file
                     audio_cache_data = {
-                        "text": text,
+                        "text": read_text,
                         "line_config": line,
                         "voice_config": self.config.get("voice", {}),
                     }
@@ -153,7 +175,7 @@ class AudioPhase:
 
                     character_name = line.get("speaker_name", "Unknown")
                     timeline.add_event(
-                        f'{character_name}: "{text}"', duration, text=text
+                        f'{character_name}: "{display_text}"', duration, text=display_text
                     )
 
                     # ------------------------------
@@ -220,7 +242,8 @@ class AudioPhase:
                         "type": "talk",
                         "audio_path": audio_path,
                         "duration": duration,
-                        "text": text,
+                        "text": display_text,
+                        "tts_text": read_text,
                         "line_config": line,
                         "face_anim": face_anim,
                     }
