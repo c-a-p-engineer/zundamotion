@@ -14,6 +14,7 @@ from zundamotion.utils.ffmpeg_utils import get_hw_encoder_kind_for_video_params 
 from zundamotion.utils.ffmpeg_utils import set_hw_filter_mode  # Auto-tuneでのバックオフに使用
 from zundamotion.utils.ffmpeg_utils import AudioParams, VideoParams, normalize_media
 from zundamotion.utils.logger import logger, time_log
+from zundamotion.components.subtitle_png import SubtitlePNGRenderer
 
 
 class VideoPhase:
@@ -26,6 +27,7 @@ class VideoPhase:
         hw_kind: Optional[str],
         video_params: VideoParams,
         audio_params: AudioParams,
+        clip_workers: Optional[int] = None,
     ):
         self.config = config
         self.temp_dir = temp_dir
@@ -39,9 +41,12 @@ class VideoPhase:
             "video_extensions",
             [".mp4", ".mov", ".webm", ".avi", ".mkv"],
         )
-        # クリップ並列実行ワーカー数を決定
-        # 実効フィルタ経路がCPUの場合は、NVENC でもCPU向けヒューリスティクスを適用する
-        self.clip_workers = self._determine_clip_workers(jobs, self.hw_kind)
+        # クリップ並列実行ワーカー数を決定（createで決めた値があればそれを優先）
+        if isinstance(clip_workers, int) and clip_workers >= 1:
+            self.clip_workers = clip_workers
+        else:
+            # 実効フィルタ経路がCPUの場合は、NVENC でもCPU向けヒューリスティクスを適用する
+            self.clip_workers = self._determine_clip_workers(jobs, self.hw_kind)
         # Auto-tune (profile first N clips then adjust caps/clip_workers)
         vcfg = self.config.get("video", {}) if isinstance(self.config, dict) else {}
         try:
@@ -51,6 +56,8 @@ class VideoPhase:
         self.auto_tune_enabled = bool(vcfg.get("auto_tune", True))
         self._profile_samples: List[Dict[str, Any]] = []
         self._retuned = False
+        # Detailed per-line clip timing samples for diagnostics
+        self._clip_samples_all: List[Dict[str, Any]] = []
 
     @staticmethod
     def _determine_clip_workers(jobs: str, hw_kind: Optional[str]) -> int:
@@ -65,18 +72,25 @@ class VideoPhase:
 
             if jobs is None:
                 base = max(1, (os.cpu_count() or 2) // 2)
+                # CPUフィルタ経路では初期から過剰並列を抑制
+                if cpu_filters_effective:
+                    return min(2, max(1, base))
                 if hw_kind == "nvenc" and not cpu_filters_effective:
                     return min(2, max(1, base))
                 return base
             j = jobs.strip().lower()
             if j in ("0", "auto"):
                 base = max(2, (os.cpu_count() or 2) // 2)
+                if cpu_filters_effective:
+                    return min(2, max(1, base))
                 if hw_kind == "nvenc" and not cpu_filters_effective:
                     return min(2, max(1, base))
                 return base
             val = int(j)
             if val <= 0:
                 base = max(2, (os.cpu_count() or 2) // 2)
+                if cpu_filters_effective:
+                    return min(2, max(1, base))
                 if hw_kind == "nvenc" and not cpu_filters_effective:
                     return min(2, max(1, base))
                 return base
@@ -116,10 +130,7 @@ class VideoPhase:
             codec=config.get("video", {}).get("audio_codec", "libmp3lame"),
             bitrate_kbps=config.get("video", {}).get("audio_bitrate_kbps", 192),
         )
-        # jobs/hw_kind から先に clip_workers を算出して VideoRenderer に伝搬
-        pre_clip_workers = cls._determine_clip_workers(jobs, hw_kind)
-
-        # AutoTune hint: early backoff
+        # AutoTune hint: early backoff（clip_workers 決定前に適用）
         hint_path = cache_manager.cache_dir / "autotune_hint.json"
         try:
             import json as _json
@@ -137,6 +148,9 @@ class VideoPhase:
         except Exception:
             pass
 
+        # jobs/hw_kind から clip_workers を算出して VideoRenderer に伝搬
+        pre_clip_workers = cls._determine_clip_workers(jobs, hw_kind)
+
         video_renderer = await VideoRenderer.create(
             config,
             temp_dir,
@@ -148,7 +162,14 @@ class VideoPhase:
             clip_workers=pre_clip_workers,
         )
         instance = cls(
-            config, temp_dir, cache_manager, jobs, hw_kind, video_params, audio_params
+            config,
+            temp_dir,
+            cache_manager,
+            jobs,
+            hw_kind,
+            video_params,
+            audio_params,
+            clip_workers=pre_clip_workers,
         )
         instance.video_renderer = video_renderer
         return instance
@@ -219,6 +240,35 @@ class VideoPhase:
                     line_data_map[f"{scene_id}_{idx + 1}"]["duration"]
                     for idx, line in enumerate(scene.get("lines", []))
                 )
+
+                # Optional: Pre-cache subtitle PNGs to reduce jitter during rendering
+                try:
+                    if bool(self.config.get("video", {}).get("precache_subtitles", False)):
+                        renderer = SubtitlePNGRenderer(self.cache_manager)
+                        precache_tasks = []
+                        for idx, line in enumerate(scene.get("lines", []), start=1):
+                            line_id = f"{scene_id}_{idx}"
+                            data = line_data_map.get(line_id)
+                            if not data:
+                                continue
+                            text = (data.get("text") or "").strip()
+                            if not text:
+                                continue
+                            style = (self.config.get("subtitle", {}) or {}).copy()
+                            lc = data.get("line_config") or {}
+                            if "subtitle" in lc and isinstance(lc["subtitle"], dict):
+                                style.update(lc["subtitle"])  # line overrides
+                            precache_tasks.append(renderer.render(text, style))
+                        if precache_tasks:
+                            import asyncio as _asyncio
+                            await _asyncio.gather(*precache_tasks, return_exceptions=True)
+                            logger.info(
+                                "Precached %d subtitle PNG(s) for scene '%s'",
+                                len(precache_tasks),
+                                scene_id,
+                            )
+                except Exception as e:
+                    logger.debug("Subtitle precache skipped (scene=%s): %s", scene_id, e)
 
                 # シーンベース映像（背景のみ）を事前生成（動画/静止画どちらでも）
                 scene_base_path: Optional[Path] = None
@@ -706,6 +756,21 @@ class VideoPhase:
                                         "elapsed": elapsed,
                                     }
                                 )
+                            # Also record full diagnostic sample (independent of profiling caps)
+                            try:
+                                self._clip_samples_all.append(
+                                    {
+                                        "scene": scene_id,
+                                        "line": idx,
+                                        "elapsed": elapsed,
+                                        "subtitle": has_subtitle,
+                                        "chars": any_chars,
+                                        "insert_img": ins_is_image,
+                                        "is_bg_video": is_bg_video,
+                                    }
+                                )
+                            except Exception:
+                                pass
                         except Exception:
                             pass
                         results[idx - 1] = clip_path
@@ -744,6 +809,11 @@ class VideoPhase:
                             # Prefer at most 2 workers when NVENC + CPU overlays dominate
                             prev_workers = self.clip_workers
                             self.clip_workers = max(1, min(prev_workers, 2))
+                            # Propagate new concurrency to the renderer for consistent thread logging
+                            try:
+                                self.video_renderer.clip_workers = self.clip_workers
+                            except Exception:
+                                pass
                             logger.info(
                                 "[AutoTune] cpu_ratio=%.2f -> caps(ft,fct)=2, clip_workers %s -> %s",
                                 cpu_ratio,
@@ -827,4 +897,41 @@ class VideoPhase:
         end_time = time.time()  # End timing
         duration = end_time - start_time
         logger.info(f"VideoPhase completed in {duration:.2f} seconds.")
+        # Diagnostics: Top-N slowest line clips across all scenes
+        try:
+            if self._clip_samples_all:
+                topn = sorted(
+                    self._clip_samples_all,
+                    key=lambda s: float(s.get("elapsed", 0.0)),
+                    reverse=True,
+                )[:5]
+                logger.info("[Diagnostics] Slowest line clips (top 5):")
+                for s in topn:
+                    logger.info(
+                        "  Scene=%s Line=%s Elapsed=%.2fs subtitle=%s chars=%s insert_img=%s bg_video=%s",
+                        s.get("scene"),
+                        s.get("line"),
+                        float(s.get("elapsed", 0.0)),
+                        bool(s.get("subtitle")),
+                        bool(s.get("chars")),
+                        bool(s.get("insert_img")),
+                        bool(s.get("is_bg_video")),
+                    )
+        except Exception:
+            pass
+
+        # Summarize filter path usage counters from renderer if present
+        try:
+            stats = getattr(self.video_renderer, "path_counters", None)
+            if isinstance(stats, dict):
+                logger.info(
+                    "[Diagnostics] Filter path usage: cuda_overlay=%s, opencl_overlay=%s, gpu_scale_only=%s, cpu=%s",
+                    stats.get("cuda_overlay", 0),
+                    stats.get("opencl_overlay", 0),
+                    stats.get("gpu_scale_only", 0),
+                    stats.get("cpu", 0),
+                )
+        except Exception:
+            pass
+
         return all_clips

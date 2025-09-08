@@ -198,6 +198,8 @@ CLI主なオプション（main.py実装）:
 - スモークは複数候補のフィルタグラフ（NV12+NV12／RGBAオーバレイ）を順に試行し、偽陰性を低減します。
 - `scale_cuda` が列挙されない環境で `scale_npp` が存在する場合、GPUパスでは `scale_npp` を優先的に使用します（自動選択）。
 - 字幕PNGはRGBAレイヤのため、既定ではCPU overlayを使用します（`video.gpu_overlay_experimental` をtrueにするとGPUを試行）。
+- RGBAオーバーレイでCPU合成となる場合でも、背景スケーリングのみGPUで先行してからCPUへ戻すハイブリッド最適化が可能です（`video.gpu_scale_with_cpu_overlay: true` 既定有効）。
+ - 字幕PNGのプリキャッシュ（`video.precache_subtitles: true`）で、行ごとの字幕PNGをシーン開始時に並列生成し、VideoPhase中のばらつきを抑制します。
 
 補足（運用トグル／チューニング）:
 - 環境変数で挙動を制御できます。
@@ -205,6 +207,8 @@ CLI主なオプション（main.py実装）:
   - `FFMPEG_FILTER_THREADS` / `FFMPEG_FILTER_COMPLEX_THREADS`: FFmpegのフィルタスレッド数を明示的に上書き。未指定時は上記ヒューリスティクスを採用。
 - CPUフィルタ経路では `clip_workers × filter_threads` の過剰化を避けるため、`filter_threads = max(1, nproc // clip_workers)` を目安に設定してください（既定ロジックが自動調整）。
 - ログには各フェーズの所要時間が `--- Finished: <Phase>.run. Duration: X.YZ seconds ---` として出力されます。ボトルネック抽出は `logs/YYYYMMDD_*.log` を参照してください。
+- 追加計測: VideoPhase終了時に「最も遅い行クリップTop5」と「フィルタ経路の使用回数（cuda/opencl/gpu_scale_only/cpu）」をINFOで出力します。
+ - CPUフィルタモード起動時は初期 `clip_workers<=2` に抑え、AutoTune前の過剰並列を回避します。
 
 ### 6.10. シーンベース生成スキップ（static overlays = 0）
 

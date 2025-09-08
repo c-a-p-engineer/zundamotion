@@ -623,6 +623,24 @@ async def get_preferred_cuda_scale_filter(ffmpeg_path: str = "ffmpeg") -> str:
     return chosen
 
 
+async def has_gpu_scale_filters(ffmpeg_path: str = "ffmpeg") -> bool:
+    """
+    Return True if GPU-side scaling filters are available, even when
+    overlay_cuda is not. Used to enable the hybrid path: GPU scale + CPU overlay.
+
+    Conditions:
+      - hwupload_cuda exists, and
+      - either scale_cuda or scale_npp exists.
+    """
+    try:
+        filters = await _list_ffmpeg_filters(ffmpeg_path)
+        has_upload = "hwupload_cuda" in filters
+        has_scale = ("scale_cuda" in filters) or ("scale_npp" in filters)
+        return has_upload and has_scale
+    except Exception:
+        return False
+
+
 async def _dump_cuda_diag_once(ffmpeg_path: str = "ffmpeg") -> None:
     """On first CUDA smoke failure, dump environment/build info at INFO level."""
     global _cuda_diag_dumped

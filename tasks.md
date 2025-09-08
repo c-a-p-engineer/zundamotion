@@ -2,52 +2,35 @@
 
 本ファイルは、最新ログを踏まえた改善タスクのみを掲載します（完了済みは削除）。
 
-参照ログ: `logs/20250908_065024_175.log`, `logs/20250902_022808_840.log`, `logs/20250902_023125_440.log`, `logs/20250831_172922_025.log`
+参照ログ: `logs/20250908_081408_745.log`, `logs/20250908_074624_481.log`, `logs/20250908_073444_688.log`
 
-最新観測サマリ（2025-09-08 実行）:
-- 総所要: 152.68s。内訳: AudioPhase 12.03s (8%) / VideoPhase 117.49s (77%) / BGMPhase 2.61s / FinalizePhase 18.59s。
-- GPUエンコードはNVENCを利用できているが、GPUフィルタは無効（`GPU overlay backend=none (cuda=False, opencl_ok=False)`）。スケール/オーバーレイはCPU経路。
-- 初期は `clip_workers=6, filter_threads=4` で開始→AutoTuneにより `clip_workers=2, filter_*_threads=2` に抑制。初期過剰並列でスロースタートの形。
-- 重いクリップ例: `subtitle_zundamon_*` が 16.8–20.5s/本、`outro_4` が 14.08s。字幕や前景のRGBA合成が重い。
-- 結合/コピーは高速（例: `ConcatCopy throughput=80–126MB/s`）。BGM/トランジションも相対的に軽い。
+最新観測サマリ（2025-09-08 実行・直近）:
+- 総所要: 151.92s。内訳: AudioPhase ~14.0s / VideoPhase 117.10s / BGMPhase 2.51s / FinalizePhase 19.45s。
+- GPUエンコードはNVENCを利用。HWフィルタはCPU固定ヒント→CPU経路（`GPU overlay backend=none (scale_only=True)` だがCPUモードのため未使用）。
+- 起動直後から `clip_workers=2`（CPUモード初期抑制が有効）、AutoTune後は `filter_threads` が 4→2 に調整。
+- Top5重いクリップが 9.36/7.55/6.91/5.40s まで短縮（ベース生成/正規化の効果）。
+- 一方で全体 VideoPhase は ~117s レベルで頭打ち（CPU overlay 支配）。
 
 
-## P1（品質向上を最優先しつつ大幅高速化）
+## P1（品質向上・高速化）
 
-### 01. 並列度の初期化不整合の是正とオートチューニング前倒し（品質）
-- 背景: ログ上「VideoRenderer initialized: clip_workers=2」→「VideoPhase started: clip_workers=6」と不整合。直後にAutoTuneで 6→2 へ減衰。
-- 目的: 実行開始直後から一貫した並列度で安定動作。無駄な過負荷・スロースタートを回避。
-- 方針: 初期化時の `clip_workers` 決定を単一点に集約し、GPU/CPU経路と `nproc` に応じたヒューリスティクスを適用。`filter_threads`/`filter_complex_threads` も同一箇所で決定し、ログに最終値を1度だけ明示。
-- 成果確認: 先頭Nクリップの処理時間とCPU使用率のばらつきが縮小し、AutoTuneによる大幅な再設定が発生しない。
+### 01. GPUスケール専用スモークとCPUモード時の限定解禁（高速化・大）
+- 背景: `scale_cuda|scale_npp` が使える環境でも、CPUモードに固定されるとハイブリッド（GPUスケールのみ）が無効のまま。過去に218で失敗したため保守的に抑止中。
+- 目的: 実行スモーク（hwupload_cuda→scale_*→hwdownload）に通った環境では、CPUモードでも安全に「GPUスケールのみ」を許可。
+- 方針: `smoke_test_cuda_scale_only()` を追加し、成功時のみ `video.gpu_scale_with_cpu_overlay` を有効化。失敗時は自動でCPU固定を継続。
+- 成果確認: `Filter path usage` の `gpu_scale_only` が増加し、VideoPhase が有意に短縮。
 
-### 02. パイプライン計測の拡充（品質）
-- 背景: フェーズ合計は出ているが、シーン別/クリップ別のp50/p95やGPU/CPU経路の内訳が見えにくい。
-- 目的: ボトルネック特定を容易化。
-- 方針: Scene/Clipごとの所要と上位重いクリップTop-N、GPU/CPUフィルタ経路、スレッド/ワーカー設定、AutoTune決定理由をPipeline Summaryへ集計出力。
-- 成果確認: 最新ログだけで原因特定と改善効果の定量比較が可能。
+### 02. AutoTuneヒントの無効化条件と再評価（品質・中）
+- 背景: `autotune_hint.json` によりCPU固定が持ち越され、GPU環境に切替後もCPU継続のリスク。
+- 目的: 環境変化（GPU有無/ffmpegビルド/ドライバ）を検知してヒントを無効化し再評価。
+- 方針: ヒントに `cuda_smoke_ok`/GPU枚数/ドライバ版のハッシュを保持。乖離時はヒントを無視してGPU経路を再スモーク。
+- 成果確認: GPU利用可能時に自動で `HW_FILTER_MODE=auto` 相当の再評価が働く。
 
-### 03. GPUフィルタ経路（overlay_cuda/scale_{cuda|npp})の実装強化と自動選択（高速化・大）
-- 背景: 現状はNVENCのみ利用、フィルタはCPU。RGBA合成が支配的でVideoPhaseが77%。
-- 目的: スケール/オーバーレイをGPU内で完結しCPU負荷を大幅削減。`hwupload_cuda`→`scale_*`→`overlay_*`→NVENCへ直結、`hwdownload`回避。
-- 方針: 起動時スモークテスト（filters列挙で `overlay_cuda` か `scale_npp` を検出）。CUDA失敗時はOpenCL→CPUへ段階フォールバック。環境変数 `HW_FILTER_MODE` で固定可能に。
-- 成果確認: `subtitle_zundamon_*` 等の1クリップ当たり所要が 30–60% 以上短縮。VideoPhase総時間の大幅短縮。
-
-### 04. 静的レイヤのシーン前合成（品質/高速化・中）
-- 背景: ログ上 `face_overlay_*` の一時生成は再利用されているが、初段の `subtitle_zundamon_*` が依然重い。
-- 目的: 行ごとのfilter_complexを簡素化し、重複演算を削減。
-- 方針: シーン開始時に背景＋静的前景をベース映像へ事前合成（既設ロジックの適用保証）。適用/未適用と静的レイヤ数をログ化。
-- 成果確認: 行クリップ側のフィルタグラフ短縮により、初段クリップ群の所要が顕著に改善。
-
-### 05. 字幕PNGの先行生成・プロセスプール化（高速化・中）
-- 背景: 字幕生成は速いが待ち合わせが点在。行数増で効く。
-- 目的: VideoPhase の待機削減。
-- 方針: `--precache-subtitles` で全行のPNGを先行生成（プロセスプール）。生成統計（p50/p95）をログに出力。
-- 成果確認: プレビュー/本番双方でVideoPhaseの待ちが減る。
-
-### 06. 字幕フォントのフェイルセーフ（品質）
-- 背景: 端末差でフォント不在時に失敗リスク。
-- 方針: フォント解決にフォールバックチェーンを導入し、発生時に警告ログで通知。
-- 成果確認: 不在フォントでもレンダが続行し、視認性が保たれる。
+### 03. CPUフィルタ時の既定スレッドCAP最適化（高速化・小）
+- 背景: CPUモード初期は `filter_threads` CAP=4→AutoTuneで2へ。初期から2にすると安定（本ログでもAutoTune適用後は2）。
+- 目的: 先頭クリップの過負荷回避と安定化を強める。
+- 方針: `get_hw_filter_mode()='cpu'` かつ `clip_workers<=2` のとき、既定CAPを2に設定（環境変数未指定時）。
+- 成果確認: 先頭クリップの所要とCPU使用率がさらに安定。
 
 
 ## P2（改善・将来・機能追加）

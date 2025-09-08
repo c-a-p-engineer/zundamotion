@@ -664,6 +664,8 @@ video:
 
 - GPUオーバーレイ方針: 字幕はPNG（RGBA）で合成するため、既定ではCPU overlayを使用します。RGBAを含まない場合はGPU（overlay_cuda/scale_cuda or scale_npp）を利用します。実験的にGPUで字幕を重ねたい場合は設定で `video.gpu_overlay_experimental: true` を有効化してください。
 - CUDA診断とフォールバック: CUDAフィルタのスモーク/実行時に失敗した場合、初回のみ `ffmpeg -buildconf` / `ffmpeg -filters` / `nvidia-smi -L` / `nvcc --version` をINFOで自動出力し、CPUフィルタにフォールバックします。`scale_cuda` が無い環境では自動で `scale_npp` を使用します。
+- ハイブリッドGPUスケール: RGBAオーバーレイでCPU合成となる場合でも、背景のスケーリングのみGPUで実施してからCPUへ戻す最適化が可能です（`video.gpu_scale_with_cpu_overlay: true` 既定有効）。
+ - 字幕PNGプリキャッシュ: `video.precache_subtitles: true` でシーン内の字幕PNGを事前生成（プロセスプール並列）。VideoPhase中の待ち・ばらつきを低減します。
 - スレッドとプロファイル:
   - `FFMPEG_PROFILE_MODE=1` で `-benchmark -stats` を付与し、FFmpegの所要・スループットを収集できます。
   - `FFMPEG_THREADS` で `-threads` を明示上書き可能。
@@ -672,6 +674,7 @@ video:
   - `video.auto_tune: true` で初回数クリップ（既定4）を計測し、CPU overlay が支配的なら `filter_threads` の上限と `clip_workers` を保守的に調整します。
   - `video.profile_first_clips: 4` で計測クリップ数を変更可能。
   - CPU overlay が支配的な場合は、フィルタ経路をCPUに統一（`set_hw_filter_mode('cpu')`）し、以降の安定性と一貫性を優先します（NVENCエンコードは継続）。
+  - CPUフィルタモード時は初期並列を抑制（`clip_workers<=2`）して先頭クリップの過負荷を回避します。
 - 一時ディレクトリ（RAMディスク）: `USE_RAMDISK=1`（既定）で空き容量が十分なら `/dev/shm` を一時ディレクトリに使用し、I/Oを高速化します。
 - 正規化の再実行抑止: 正規化出力に `<name>.meta.json` を隣接保存し、同一 `target_spec` の入力は再正規化をスキップします。
 - no-cache時の重複抑止: `--no-cache` でも同一キー生成はプロセス内でin-flight集約し、同一ラン内の重複生成を避けます。生成物は `temp_dir` のEphemeralとして再利用されます。
@@ -683,6 +686,7 @@ video:
   gpu_overlay_experimental: true
   auto_tune: true
   profile_first_clips: 4
+  precache_subtitles: true
 ```
 
 
