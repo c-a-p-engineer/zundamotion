@@ -408,18 +408,31 @@ class VideoRenderer:
             if not char_name:
                 logger.warning("Skipping character with missing name.")
                 continue
-            char_image_path = Path(
-                f"assets/characters/{char_name}/{char_expression}.png"
-            )
-            if not char_image_path.exists():
-                char_image_path = Path(f"assets/characters/{char_name}/default.png")
-                if not char_image_path.exists():
-                    logger.warning(
-                        "Character image not found for %s/%s (and default). Skipping.",
-                        char_name,
-                        char_expression,
-                    )
-                    continue
+            # Resolve character base image with new expression-first layout and legacy fallbacks
+            def _resolve_char_base_image(name: str, expr: str) -> Optional[Path]:
+                base_dir = Path(f"assets/characters/{name}")
+                candidates = [
+                    base_dir / expr / "base.png",           # new: <name>/<expr>/base.png
+                    base_dir / f"{expr}.png",                # legacy: <name>/<expr>.png
+                    base_dir / "default" / "base.png",       # new default: <name>/default/base.png
+                    base_dir / "default.png",                # legacy default: <name>/default.png
+                ]
+                for c in candidates:
+                    try:
+                        if c.exists():
+                            return c
+                    except Exception:
+                        pass
+                return None
+
+            char_image_path = _resolve_char_base_image(str(char_name), str(char_expression))
+            if not char_image_path:
+                logger.warning(
+                    "Character image not found for %s/%s (and default). Skipping.",
+                    char_name,
+                    char_expression,
+                )
+                continue
             # Pre-scale character image via Pillow cache when enabled
             effective_scale = 1.0
             try:
@@ -689,6 +702,7 @@ class VideoRenderer:
                     "scale_eff": str(scale),
                     "x_num": str(int(round(xn))),
                     "y_num": str(int(round(yn))),
+                    "expression": str(char_expression),
                 }
             except Exception:
                 pass
@@ -732,6 +746,7 @@ class VideoRenderer:
                                 "x_expr": x_expr,
                                 "y_expr": y_expr,
                                 "scale": str(scale),
+                                "expression": str(ch.get("expression", "default")),
                             }
                             break
                 except Exception:
@@ -745,14 +760,43 @@ class VideoRenderer:
 
                 # Asset discovery
                 base_dir = Path(f"assets/characters/{target_name}")
-                mouth_dir = base_dir / "mouth"
-                eyes_dir = base_dir / "eyes"
+                expr = str(placement.get("expression") or "default")
+                expr_dir = base_dir / expr
+                # Prefer expression-local mouth/eyes, then legacy common directories,
+                # then legacy style mouth/<expr> and eyes/<expr> as a last resort.
+                mouth_dir_candidates = [
+                    expr_dir / "mouth",
+                    base_dir / "mouth",
+                    base_dir / "mouth" / expr,
+                ]
+                eyes_dir_candidates = [
+                    expr_dir / "eyes",
+                    base_dir / "eyes",
+                    base_dir / "eyes" / expr,
+                ]
+                def _first_dir(dirs: List[Path]) -> Path:
+                    for d in dirs:
+                        try:
+                            if d.exists() and d.is_dir():
+                                return d
+                        except Exception:
+                            pass
+                    # fallback to base_dir to build non-existing files below (exists checks later)
+                    return base_dir
+                mouth_dir = _first_dir(mouth_dir_candidates)
+                eyes_dir = _first_dir(eyes_dir_candidates)
 
-                mouth_close = mouth_dir / "close.png"
-                mouth_half = mouth_dir / "half.png"
-                mouth_open = mouth_dir / "open.png"
-                eyes_open = eyes_dir / "open.png"
-                eyes_close = eyes_dir / "close.png"
+                # File candidates: expression-local first, then common directory
+                def _pick_file(expr_dir: Path, common_dir: Path, fname: str) -> Path:
+                    cand1 = expr_dir / fname
+                    cand2 = common_dir / fname
+                    return cand1 if cand1.exists() else cand2
+
+                mouth_close = _pick_file(expr_dir / "mouth", base_dir / "mouth", "close.png")
+                mouth_half = _pick_file(expr_dir / "mouth", base_dir / "mouth", "half.png")
+                mouth_open = _pick_file(expr_dir / "mouth", base_dir / "mouth", "open.png")
+                eyes_open = _pick_file(expr_dir / "eyes", base_dir / "eyes", "open.png")
+                eyes_close = _pick_file(expr_dir / "eyes", base_dir / "eyes", "close.png")
 
                 # Debug info
                 try:

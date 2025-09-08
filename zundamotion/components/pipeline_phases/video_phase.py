@@ -263,8 +263,27 @@ class VideoPhase:
                                     str(pos.get("x", "0")),
                                     str(pos.get("y", "0")),
                                 )
+                                # Resolve base image with new expression-first layout and legacy fallbacks
+                                base_dir = Path(f"assets/characters/{name}")
+                                candidates = [
+                                    base_dir / expr / "base.png",           # new: <name>/<expr>/base.png
+                                    base_dir / f"{expr}.png",                # legacy: <name>/{expr}.png
+                                    base_dir / "default" / "base.png",       # new default: <name>/default/base.png
+                                    base_dir / "default.png",                # legacy default: <name>/default.png
+                                ]
+                                chosen = None
+                                for c in candidates:
+                                    try:
+                                        if c.exists():
+                                            chosen = c
+                                            break
+                                    except Exception:
+                                        pass
+                                if chosen is None:
+                                    # If nothing exists, skip this character for scene-base
+                                    continue
                                 entries[key] = {
-                                    "path": f"assets/characters/{name}/{expr}.png",
+                                    "path": str(chosen),
                                     "scale": scale,
                                     "anchor": anchor,
                                     "position": {"x": pos.get("x", "0"), "y": pos.get("y", "0")},
@@ -280,12 +299,16 @@ class VideoPhase:
                                 ov = per_line_char_maps[0][key]
                                 p = Path(ov["path"])  # expr 固定のはず
                                 if not p.exists():
-                                    # default フォールバック
+                                    # default フォールバック（新/旧いずれか）
                                     name, _expr, _s, _a, _x, _y = key
-                                    alt = Path(f"assets/characters/{name}/default.png")
-                                    if not alt.exists():
+                                    alt1 = Path(f"assets/characters/{name}/default/base.png")
+                                    alt2 = Path(f"assets/characters/{name}/default.png")
+                                    if alt1.exists():
+                                        ov = {**ov, "path": str(alt1)}
+                                    elif alt2.exists():
+                                        ov = {**ov, "path": str(alt2)}
+                                    else:
                                         continue
-                                    ov = {**ov, "path": str(alt)}
                                 static_overlays.append(ov)
                                 static_char_keys.add(key)
 

@@ -707,3 +707,61 @@ VOICEVOXの利用に関しては、キャラクターごとに商用利用の可
 | `ffprobe not found`                           | Dockerfile に `apt install ffmpeg` を追加                 |
 | `No module named 'zundamotion'`               | `PYTHONPATH=.` を指定 or `python -m zundamotion.xxx` で実行 |
 | `Validation Error: ...`                       | YAML台本の構文、素材パス、またはパラメータ値を確認してください。エラーメッセージに行番号と列番号が示されます。 |
+
+## キャラクターアセット構成（表情ディレクトリ対応）
+
+本プロジェクトは、表情ごとのディレクトリ構成を優先して素材を探索します。従来のフラット配置（`<expr>.png`、`mouth/`・`eyes/`直下）もフォールバックで引き続き利用可能です。
+
+探索順（ベース立ち絵）
+
+1) `assets/characters/<name>/<expr>/base.png`
+2) 互換: `assets/characters/<name>/<expr>.png`
+3) `assets/characters/<name>/default/base.png`
+4) 互換: `assets/characters/<name>/default.png`
+
+探索順（口/目の差分）
+
+- 口: `assets/characters/<name>/<expr>/mouth/{close,half,open}.png` → `assets/characters/<name>/mouth/{...}` → 互換: `assets/characters/<name>/mouth/<expr>/{...}`
+- 目: `assets/characters/<name>/<expr>/eyes/{open,close}.png` → `assets/characters/<name>/eyes/{...}` → 互換: `assets/characters/<name>/eyes/<expr>/{...}`
+
+推奨ディレクトリ例
+
+```
+assets/
+  characters/
+    zundamon/
+      default/
+        base.png
+        mouth/
+          close.png
+          half.png
+          open.png
+        eyes/
+          open.png
+          close.png
+      smile/
+        base.png
+        mouth/
+          close.png
+          half.png
+          open.png
+        eyes/
+          open.png
+          close.png
+```
+
+運用ルール
+
+- キャンバスサイズと原点（左上）を全ファイルで統一してください（ズレ防止）。
+- `expression` 名は小文字英字で台本の `characters[].expression` と一致させることを推奨します。
+- 最低限必要: `default/base.png` と `default/mouth/{close,half,open}.png`, `default/eyes/{open,close}.png`
+
+移行について（このリポジトリの既存素材）
+
+- `assets/characters/zundamon/default/base.png` を作成し、既存の `default.png` を反映しました。
+- `assets/characters/zundamon/default/mouth/*` と `default/eyes/*` を既存の `mouth/*`, `eyes/*` からコピーして配置しました（互換のため元ファイルも残しています）。
+- `assets/characters/metan/default/base.png` を作成し、既存の `default.png` を反映しました（従来ファイルは互換のため残しています）。
+
+注意
+
+- 古い命名（例: `default!.png` など記号入り）は今後の運用で避けてください。必要に応じて `default/base.png` へ置き換えてください。
