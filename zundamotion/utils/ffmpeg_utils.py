@@ -13,6 +13,7 @@ FFmpeg 7 対応のユーティリティ群（全文置き換え用）
 from __future__ import annotations  # 循環参照を避けるため追加
 
 import asyncio
+import contextlib
 import time
 import json
 import os
@@ -205,28 +206,91 @@ def get_nproc_value() -> str:
         return "1"
 
 
-async def _run_ffmpeg_async(args: List[str]) -> subprocess.CompletedProcess:
-    """ffmpeg/ffprobeを非同期で呼び出して CompletedProcess を返す（例外は上位で処理）。"""
+async def _run_ffmpeg_async(args: List[str], *, timeout: Optional[float] = None) -> subprocess.CompletedProcess:
+    """Run ffmpeg/ffprobe asynchronously with better logging and cancellation handling.
+
+    - Logs the command and PID
+    - Optional timeout (env FFMPEG_RUN_TIMEOUT_SEC used by default for ffmpeg)
+    - Cleans up subprocess on timeout/cancellation and re-raises
+    """
     try:
-        logger.debug(f"Running FFmpeg command: {' '.join(args)}")
+        exe = str(args[0]) if args else "ffmpeg"
+        base = os.path.basename(exe)
+        # Use default timeout only for ffmpeg, not ffprobe (can be overridden)
+        if timeout is None and base.startswith("ffmpeg"):
+            try:
+                env_to = float(os.getenv("FFMPEG_RUN_TIMEOUT_SEC", "0") or 0)
+                timeout = env_to if env_to > 0 else None
+            except Exception:
+                timeout = None
+
+        # Command logging (promote to INFO when FFMPEG_LOG_CMD=1)
+        cmd_str = " ".join(map(str, args))
+        if os.getenv("FFMPEG_LOG_CMD", "0") == "1":
+            logger.info(f"Running command: {cmd_str}")
+        else:
+            logger.debug(f"Running command: {cmd_str}")
+
+        t0 = time.monotonic()
         process = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate()
+        logger.debug(f"Spawned PID={process.pid} for {base}")
+
+        try:
+            if timeout is not None and timeout > 0:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            else:
+                stdout, stderr = await process.communicate()
+        except asyncio.TimeoutError:
+            # Graceful terminate then hard-kill
+            grace = 5.0
+            try:
+                grace = float(os.getenv("FFMPEG_KILL_GRACE_SEC", "5"))
+            except Exception:
+                grace = 5.0
+            logger.error(
+                f"Command timed out after {timeout:.1f}s (PID={process.pid}). Sending terminate..."
+            )
+            with contextlib.suppress(Exception):
+                process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=max(0.1, grace))
+            except asyncio.TimeoutError:
+                logger.error(f"Process did not terminate in {grace:.1f}s; killing PID={process.pid}...")
+                with contextlib.suppress(Exception):
+                    process.kill()
+                await process.wait()
+            raise subprocess.TimeoutExpired(args, timeout)
+        except asyncio.CancelledError:
+            # Propagate cancellation but ensure subprocess is cleaned up
+            logger.warning(f"Task cancelled while running {base} (PID={process.pid}); terminating...")
+            with contextlib.suppress(Exception):
+                process.terminate()
+            with contextlib.suppress(asyncio.TimeoutError, Exception):
+                await asyncio.wait_for(process.wait(), timeout=3.0)
+            with contextlib.suppress(Exception):
+                process.kill()
+            raise
+
         stdout_str = stdout.decode(errors="ignore")
         stderr_str = stderr.decode(errors="ignore")
 
-        if process.returncode != 0:
-            logger.error(f"FFmpeg command failed with exit code {process.returncode}")
-            logger.debug(f"Command: {' '.join(map(str, args))}")  # コマンドはDEBUGに
+        rc = process.returncode if process.returncode is not None else 0
+        dt = time.monotonic() - t0
+        logger.debug(f"Command finished rc={rc} in {dt:.2f}s (PID={process.pid})")
+
+        if rc != 0:
+            logger.error(f"FFmpeg command failed with exit code {rc}")
+            logger.debug(f"Command: {cmd_str}")  # コマンドはDEBUGに
             if stdout_str:
                 logger.debug(f"FFmpeg stdout:\n{stdout_str}")  # stdoutはDEBUGに
             if stderr_str:
                 logger.debug(f"FFmpeg stderr:\n{stderr_str}")  # stderrはDEBUGに
             raise subprocess.CalledProcessError(
-                process.returncode if process.returncode is not None else 0,
+                rc,
                 args,
                 output=stdout_str,
                 stderr=stderr_str,
@@ -236,12 +300,12 @@ async def _run_ffmpeg_async(args: List[str]) -> subprocess.CompletedProcess:
             logger.debug(f"FFmpeg stderr (on success):\n{stderr_str}")
 
         return subprocess.CompletedProcess(
-            args, process.returncode, stdout_str, stderr_str
+            args, rc, stdout_str, stderr_str
         )
 
     except FileNotFoundError:
         logger.error(
-            f"FFmpeg or FFprobe command not found. Please ensure it's installed and in your PATH."
+            "FFmpeg or FFprobe command not found. Please ensure it's installed and in your PATH."
         )
         raise
     except Exception as e:

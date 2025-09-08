@@ -40,6 +40,151 @@ def merge_configs(base: Dict, override: Dict) -> Dict:
     return merged
 
 
+def _validate_fg_overlays(container: Dict[str, Any], container_id: str) -> None:
+    """Validate foreground overlay configuration for a scene or line.
+
+    Parameters
+    ----------
+    container: Dict[str, Any]
+        Dictionary potentially containing ``fg_overlays``.
+    container_id: str
+        Identifier used in error messages (e.g., "scene 'id'" or "scene 'id', line 2").
+
+    Raises
+    ------
+    ValidationError
+        If any foreground overlay entry is invalid.
+    """
+
+    fg_overlays = container.get("fg_overlays")
+    if fg_overlays is None:
+        return
+
+    if not isinstance(fg_overlays, list):
+        raise ValidationError(
+            f"Foreground overlays for {container_id} must be a list."
+        )
+
+    for fg_idx, fg in enumerate(fg_overlays):
+        if not isinstance(fg, dict):
+            raise ValidationError(
+                f"Foreground overlay at {container_id}, index {fg_idx} must be a dictionary."
+            )
+
+        fg_id = fg.get("id", f"fg_{fg_idx}")
+        src = fg.get("src")
+        if not src or not isinstance(src, str):
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' in {container_id} must have a string 'src' path."
+            )
+        src_path = Path(src)
+        if not src_path.exists() or not src_path.is_file():
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' source file '{src}' not found for {container_id}."
+            )
+
+        mode = fg.get("mode")
+        if mode not in {"overlay", "blend", "chroma"}:
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' in {container_id} has invalid mode '{mode}'."
+            )
+
+        if mode == "blend":
+            blend_mode = fg.get("blend_mode")
+            if blend_mode not in {"screen", "add", "multiply", "lighten"}:
+                raise ValidationError(
+                    f"Foreground overlay '{fg_id}' in {container_id} requires a valid 'blend_mode'."
+                )
+
+        if mode == "chroma":
+            chroma = fg.get("chroma")
+            if not isinstance(chroma, dict):
+                raise ValidationError(
+                    f"Foreground overlay '{fg_id}' in {container_id} must have a 'chroma' dictionary."
+                )
+            key_color = chroma.get("key_color")
+            if not isinstance(key_color, str) or not key_color.startswith("#"):
+                raise ValidationError(
+                    f"Foreground overlay '{fg_id}' in {container_id} has invalid chroma key_color '{key_color}'."
+                )
+            similarity = chroma.get("similarity", 0.1)
+            blend = chroma.get("blend", 0.0)
+            if not isinstance(similarity, (int, float)) or not (0.0 <= similarity <= 1.0):
+                raise ValidationError(
+                    f"Foreground overlay '{fg_id}' in {container_id} chroma similarity must be between 0.0 and 1.0."
+                )
+            if not isinstance(blend, (int, float)) or not (0.0 <= blend <= 1.0):
+                raise ValidationError(
+                    f"Foreground overlay '{fg_id}' in {container_id} chroma blend must be between 0.0 and 1.0."
+                )
+
+        opacity = fg.get("opacity")
+        if opacity is not None and (
+            not isinstance(opacity, (int, float)) or not (0.0 <= opacity <= 1.0)
+        ):
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' in {container_id} opacity must be between 0.0 and 1.0."
+            )
+
+        position = fg.get("position", {})
+        if not isinstance(position, dict):
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' in {container_id} position must be a dictionary."
+            )
+        for axis in ("x", "y"):
+            val = position.get(axis, 0)
+            if not isinstance(val, (int, float)):
+                raise ValidationError(
+                    f"Foreground overlay '{fg_id}' in {container_id} position '{axis}' must be a number."
+                )
+
+        scale = fg.get("scale", {})
+        if not isinstance(scale, dict):
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' in {container_id} scale must be a dictionary."
+            )
+        for dim in ("w", "h"):
+            val = scale.get(dim)
+            if val is not None and (not isinstance(val, (int, float)) or val <= 0):
+                raise ValidationError(
+                    f"Foreground overlay '{fg_id}' in {container_id} scale '{dim}' must be a positive number."
+                )
+        keep_aspect = scale.get("keep_aspect")
+        if keep_aspect is not None and not isinstance(keep_aspect, bool):
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' in {container_id} scale 'keep_aspect' must be a boolean."
+            )
+
+        timing = fg.get("timing", {})
+        if not isinstance(timing, dict):
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' in {container_id} timing must be a dictionary."
+            )
+        start = timing.get("start", 0.0)
+        if not isinstance(start, (int, float)) or start < 0:
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' in {container_id} timing start must be non-negative."
+            )
+        duration = timing.get("duration")
+        if duration is not None and (
+            not isinstance(duration, (int, float)) or duration <= 0
+        ):
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' in {container_id} timing duration must be positive."
+            )
+        loop = timing.get("loop")
+        if loop is not None and not isinstance(loop, bool):
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' in {container_id} timing loop must be a boolean."
+            )
+
+        fps = fg.get("fps")
+        if fps is not None and (not isinstance(fps, int) or fps <= 0):
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' in {container_id} fps must be a positive integer."
+            )
+
+
 def _validate_config(config: Dict[str, Any]):
     """
     Validates the loaded configuration and script data.
@@ -146,6 +291,9 @@ def _validate_config(config: Dict[str, Any]):
                         f"BGM volume for scene '{scene_id}' must be between 0.0 and 1.0, but got {bgm_volume}."
                     )
 
+        # Validate foreground overlays
+        _validate_fg_overlays(scene, scene_id)
+
         # Validate assets defined in the top-level 'assets' section
         top_level_assets = config.get("assets", {})
         for asset_key, asset_path_str in top_level_assets.items():
@@ -164,6 +312,8 @@ def _validate_config(config: Dict[str, Any]):
                 raise ValidationError(
                     f"Line at scene '{scene_id}', index {line_idx} must be a dictionary."
                 )
+
+            _validate_fg_overlays(line, f"scene '{scene_id}', line {line_idx}")
 
             # 'text' or 'wait' key must exist
             if "text" not in line and "wait" not in line:

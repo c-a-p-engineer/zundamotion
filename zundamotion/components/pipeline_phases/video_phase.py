@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional
 from tqdm import tqdm
 
 from zundamotion.cache import CacheManager
-from zundamotion.components.subtitle import SubtitleGenerator
 from zundamotion.components.video import VideoRenderer
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
@@ -32,7 +31,6 @@ class VideoPhase:
         self.temp_dir = temp_dir
         self.cache_manager = cache_manager
         self.jobs = jobs
-        self.subtitle_gen = SubtitleGenerator(self.config, self.cache_manager)
         self.hw_kind = hw_kind
         self.video_params = video_params
         self.audio_params = audio_params
@@ -162,6 +160,7 @@ class VideoPhase:
             "lines": scene.get("lines", []),
             "bg": scene.get("bg"),
             "bgm": scene.get("bgm"),
+            "fg_overlays": scene.get("fg_overlays"),
             "voice_config": self.config.get("voice", {}),
             "video_config": self.config.get("video", {}),
             "subtitle_config": self.config.get("subtitle", {}),
@@ -448,6 +447,7 @@ class VideoPhase:
                 # If auto-tune has retuned clip_workers, new sem will reflect it
                 sem = asyncio.Semaphore(self.clip_workers)
                 results: List[Optional[Path]] = [None] * len(lines)
+                subtitle_entries: List[Dict[str, Any]] = []
 
                 async def process_one(idx: int, line: Dict[str, Any]):
                     async with sem:
@@ -529,6 +529,11 @@ class VideoPhase:
                                 extension="mp4",
                                 creator_func=wait_creator_func,
                             )
+                            fg_overlays = line.get("fg_overlays")
+                            if fg_overlays:
+                                clip_path = await self.video_renderer.apply_foreground_overlays(
+                                    clip_path, fg_overlays
+                                )
                             results[idx - 1] = clip_path
                             return
 
@@ -595,13 +600,10 @@ class VideoPhase:
                                 audio_cache_key_data
                             ),
                             "duration": duration,
-                            "subtitle_text": text,
-                            "subtitle_style_override": line_config.get("subtitle"),
                             "bg_image_path": bg_image,
                             "is_bg_video": is_bg_video,
                             "start_time": start_time_by_idx[idx],
                             "video_config": self.config.get("video", {}),
-                            "subtitle_config": self.config.get("subtitle", {}),
                             "bgm_config": self.config.get("bgm", {}),
                             "insert_config": effective_insert,
                             "static_chars_in_base": bool(static_char_keys),
@@ -627,8 +629,6 @@ class VideoPhase:
                                 background_config=background_config,
                                 characters_config=effective_characters,
                                 output_filename=output_path.stem,
-                                subtitle_text=text,
-                                subtitle_line_config=line_config,
                                 insert_config=effective_insert,
                                 face_anim=face_anim,
                             )
@@ -644,6 +644,19 @@ class VideoPhase:
                             file_name=line_id,
                             extension="mp4",
                             creator_func=clip_creator_func,
+                        )
+                        fg_overlays = line.get("fg_overlays")
+                        if fg_overlays:
+                            clip_path = await self.video_renderer.apply_foreground_overlays(
+                                clip_path, fg_overlays
+                            )
+                        subtitle_entries.append(
+                            {
+                                "text": text,
+                                "line_config": line_config,
+                                "duration": duration,
+                                "start": start_time_by_idx[idx],
+                            }
                         )
                         # Collect lightweight samples for auto-tune
                         try:
@@ -751,6 +764,25 @@ class VideoPhase:
                         scene_line_clips, str(scene_output_path)
                     )
                     logger.info(f"Concatenated scene clips -> {scene_output_path.name}")
+
+                    fg_overlays = scene.get("fg_overlays")
+                    if fg_overlays:
+                        scene_output_path = await self.video_renderer.apply_foreground_overlays(
+                            scene_output_path, fg_overlays
+                        )
+                        logger.info(
+                            f"Applied foreground overlays -> {scene_output_path.name}"
+                        )
+
+                    if subtitle_entries:
+                        subtitle_entries.sort(key=lambda s: s["start"])
+                        scene_output_path = await self.video_renderer.apply_subtitle_overlays(
+                            scene_output_path, subtitle_entries
+                        )
+                        logger.info(
+                            f"Applied subtitles -> {scene_output_path.name}"
+                        )
+
                     all_clips.append(scene_output_path)
                     self.cache_manager.cache_file(
                         source_path=scene_output_path,

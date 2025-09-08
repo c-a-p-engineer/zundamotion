@@ -40,6 +40,20 @@ subtitle:
 scenes:
   - id: subtitle_zundamon
     bg: "assets/bg/room.png"
+    fg_overlays:
+      - id: sakura
+        src: "assets/overlay/sakura_bg_black.mp4"
+        mode: chroma
+        chroma:
+          key_color: "#000000"
+          similarity: 0.1
+          blend: 0.0
+        position: {x: 0, y: 0}
+        scale: {w: 1920, h: 1080, keep_aspect: true}
+        timing:
+          start: 0.0
+          duration: 5.0
+          loop: true
     lines:
       - text: "こんにちは！ずんだもんです。この字幕はキャラクターデフォルト色なのだ。"
         speaker_name: "zundamon"
@@ -89,7 +103,7 @@ scenes:
   - id: voice_zundamon
     bg: "assets/bg/room.png"
     lines:
-      - text: "こんにちは！ずんだもんです。これはデフォルト設定で話しているのだ。"
+      - text: "こんにちは！ずんだもんです。これは桜の前景とデフォルト設定で話しているのだ。"
         speaker_name: "zundamon"
         characters:
           - name: "zundamon"
@@ -98,6 +112,18 @@ scenes:
             anchor: "bottom_center"
             position: {"x": "0", "y": "0"}
             scale: 0.8
+        fg_overlays:
+          - id: line_sakura
+            src: "assets/overlay/sakura_bg_black.mp4"
+            mode: chroma
+            chroma:
+              key_color: "#000000"
+              similarity: 0.1
+              blend: 0.0
+            position: {x: 0, y: 0}
+            scale: {w: 1920, h: 1080, keep_aspect: true}
+            timing:
+              loop: true
 
       - text: "このセリフだけ、少しゆっくり話してみるのだ。"
         speaker_name: "zundamon"
