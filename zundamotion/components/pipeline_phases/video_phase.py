@@ -455,6 +455,9 @@ class VideoPhase:
                 elif is_bg_video and total_lines_in_scene >= min_lines_for_base:
                     # 静的オーバーレイは無いが、行数が多い場合はベース生成の方が有利
                     should_generate_base = True
+                elif (not is_bg_video) and total_lines_in_scene >= 2:
+                    # 背景が静止画でも行数が複数ある場合は、背景のスケール/ループを一度だけ行う方が有利
+                    should_generate_base = True
 
                 if should_generate_base:
                     try:
