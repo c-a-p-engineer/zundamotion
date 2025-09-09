@@ -2,17 +2,27 @@
 
 本ファイルは、最新ログを踏まえた改善タスクのみを掲載します（完了済みは削除）。
 
-参照ログ: `logs/20250908_081408_745.log`, `logs/20250908_074624_481.log`, `logs/20250908_073444_688.log`
+参照ログ: `logs/20250909_005958_069.log`, `logs/20250908_081408_745.log`, `logs/20250908_074624_481.log`
 
-最新観測サマリ（2025-09-08 実行・直近）:
-- 総所要: 151.92s。内訳: AudioPhase ~14.0s / VideoPhase 117.10s / BGMPhase 2.51s / FinalizePhase 19.45s。
-- GPUエンコードはNVENCを利用。HWフィルタはCPU固定ヒント→CPU経路（`GPU overlay backend=none (scale_only=True)` だがCPUモードのため未使用）。
-- 起動直後から `clip_workers=2`（CPUモード初期抑制が有効）、AutoTune後は `filter_threads` が 4→2 に調整。
-- Top5重いクリップが 9.36/7.55/6.91/5.40s まで短縮（ベース生成/正規化の効果）。
-- 一方で全体 VideoPhase は ~117s レベルで頭打ち（CPU overlay 支配）。
+最新観測サマリ（2025-09-09 実行・直近）:
+- 総所要: 134.92s。内訳: AudioPhase 12.93s / VideoPhase 105.80s / BGMPhase 2.27s / FinalizePhase 11.85s。
+- GPUエンコードはNVENCを利用。`[Filters] GPU overlay backend=none (cuda=None, opencl_ok=False, scale_only=True, scale_only_smoke_ok=False)`
+  - CUDA overlay スモーク失敗→グローバルCPUモードへバックオフ。
+  - GPUスケール専用スモークも失敗（scale_only_smoke_ok=False）→ハイブリッド経路は未解禁。
+- 起動直後から `clip_workers=2`（CPUモード初期抑制）、AutoTune後に `filter_threads` が 4→2 へ低減。
+- ConcatCopy は高速（~85〜140MB/s）。ボトルネックは VideoPhase（CPU overlay 支配）。
 
 
 ## P1（品質向上・高速化）
+
+### 01. CUDAスケール専用スモークの偽陰性低減（幅広い候補の試行）
+- 背景: 最新ログで `scale_only_smoke_ok=False` のためハイブリッド（GPUスケール+CPU overlay）が無効のまま。
+- 目的: 環境差異による偽陰性を削減し、CPUモード時でも安全にGPUスケールを解禁。
+- 方針: 追加候補を順次試行していずれか成功でOKとする。
+  - 入力/中間のピクセルフォーマット: `rgba` と `nv12` の双方を試す。
+  - スケーラ: `scale_cuda` と `scale_npp` の双方を試す（存在検知ベース）。
+  - グラフ例: `format=nv12,hwupload_cuda,scale_*=...,hwdownload,format=rgba` などを追加。
+- 成果確認: ログで `[Filters] Hybrid path: ... [cpu-mode-override]` が観測され、VideoPhase時間が短縮。
 
 
 ### 02. AutoTuneヒントの無効化条件と再評価（品質・中）
@@ -27,8 +37,19 @@
 - 方針: `get_hw_filter_mode()='cpu'` かつ `clip_workers<=2` のとき、既定CAPを2に設定（環境変数未指定時）。
 - 成果確認: 先頭クリップの所要とCPU使用率がさらに安定。
 
+### 04. シーン内静的レイヤの自動検出と事前合成（高速化・中）
+- 背景: シーン内で同一配置・同一画像のレイヤ（立ち絵等）が複数行で不変な場合、各行でのoverlayコストが重い。
+- 目的: 静的レイヤをシーンベースに事前合成し、各行では字幕＋音声のみの合成に削減。
+- 方針: 行設定の差分を解析し、変化がないレイヤをベース生成時に合成。キャッシュキーに静的レイヤを含める。
+- 成果確認: 行当たりのフィルタグラフが短縮し、VideoPhaseが短縮。
+
 
 ## P2（改善・将来・機能追加）
+
+### 00. OpenCL/他GPUのスケール専用スモーク導入（フォールバック）
+- 目的: CUDA 不可の環境でも OpenCL 等が利用可能なら「GPUスケールのみ」を解禁。
+- 方針: `smoke_test_opencl_scale_only` を追加し、`hwupload` + `scale_opencl` + `hwdownload` をスモーク。
+- 成果確認: CUDA不可かつOpenCL可の環境でハイブリッド経路が有効化。
 
 ### 01. VOICEVOX 音声合成の並列化（スピーカー単位の上限）
 - 背景: 今回ログではAudioPhaseは8%と支配的ではないが、行数が多い脚本で効く改善。
