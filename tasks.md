@@ -14,11 +14,6 @@
 
 ## P1（品質向上・高速化）
 
-### 01. GPUスケール専用スモークとCPUモード時の限定解禁（高速化・大）
-- 背景: `scale_cuda|scale_npp` が使える環境でも、CPUモードに固定されるとハイブリッド（GPUスケールのみ）が無効のまま。過去に218で失敗したため保守的に抑止中。
-- 目的: 実行スモーク（hwupload_cuda→scale_*→hwdownload）に通った環境では、CPUモードでも安全に「GPUスケールのみ」を許可。
-- 方針: `smoke_test_cuda_scale_only()` を追加し、成功時のみ `video.gpu_scale_with_cpu_overlay` を有効化。失敗時は自動でCPU固定を継続。
-- 成果確認: `Filter path usage` の `gpu_scale_only` が増加し、VideoPhase が有意に短縮。
 
 ### 02. AutoTuneヒントの無効化条件と再評価（品質・中）
 - 背景: `autotune_hint.json` によりCPU固定が持ち越され、GPU環境に切替後もCPU継続のリスク。

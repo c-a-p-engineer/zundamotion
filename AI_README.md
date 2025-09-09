@@ -198,6 +198,7 @@ CLI主なオプション（main.py実装）:
 - スモークは複数候補のフィルタグラフ（NV12+NV12／RGBAオーバレイ）を順に試行し、偽陰性を低減します。
 - `scale_cuda` が列挙されない環境で `scale_npp` が存在する場合、GPUパスでは `scale_npp` を優先的に使用します（自動選択）。
 - 字幕PNGはRGBAレイヤのため、既定ではCPU overlayを使用します（`video.gpu_overlay_experimental` をtrueにするとGPUを試行）。
+- CPUモード時でも `smoke_test_cuda_scale_only` のスモークに通った環境では、背景の「GPUスケールのみ + CPU overlay（ハイブリッド）」を限定的に許可します（背景スケールの高速化が目的）。
 - RGBAオーバーレイでCPU合成となる場合でも、背景スケーリングのみGPUで先行してからCPUへ戻すハイブリッド最適化が可能です（`video.gpu_scale_with_cpu_overlay: true` 既定有効）。
  - 字幕PNGのプリキャッシュ（`video.precache_subtitles: true`）で、行ごとの字幕PNGをシーン開始時に並列生成し、VideoPhase中のばらつきを抑制します。
 

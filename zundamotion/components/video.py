@@ -9,23 +9,24 @@ from ..cache import CacheManager
 from ..exceptions import PipelineError  # 追加
 from ..utils.ffmpeg_utils import _run_ffmpeg_async  # 追加
 from ..utils.ffmpeg_utils import (
-    AudioParams,
-    VideoParams,
-    calculate_overlay_position,
-    concat_videos_copy,
-    get_media_info,
-    get_media_duration,
-    has_audio_stream,
-    has_cuda_filters,
-    smoke_test_cuda_filters,
-    normalize_media,
-    get_hw_filter_mode,
-    set_hw_filter_mode,
-    get_preferred_cuda_scale_filter,
-    has_gpu_scale_filters,
-    _dump_cuda_diag_once,
-    get_profile_flags,
-)
+        AudioParams,
+        VideoParams,
+        calculate_overlay_position,
+        concat_videos_copy,
+        get_media_info,
+        get_media_duration,
+        has_audio_stream,
+        has_cuda_filters,
+        smoke_test_cuda_filters,
+        smoke_test_cuda_scale_only,
+        normalize_media,
+        get_hw_filter_mode,
+        set_hw_filter_mode,
+        get_preferred_cuda_scale_filter,
+        has_gpu_scale_filters,
+        _dump_cuda_diag_once,
+        get_profile_flags,
+    )
 from .subtitle import SubtitleGenerator
 from .face_overlay_cache import FaceOverlayCache
 from ..utils.logger import logger
@@ -57,6 +58,8 @@ class VideoRenderer:
         self.audio_params = audio_params or AudioParams()
         self.has_cuda_filters = has_cuda_filters
         self.has_gpu_scale: bool = False
+        # Whether GPU scale-only path is confirmed safe via smoke test
+        self.cuda_scale_only_ok: bool = False
         # GPU overlay backend: 'cuda' | 'opencl' | None (cpu)
         self.gpu_overlay_backend: Optional[str] = None
         # 並列クリップ数（VideoPhase 側の決定を受け取る）
@@ -110,6 +113,11 @@ class VideoRenderer:
         )
         # Scale-only capability (allows hybrid GPU scale in CPU overlay mode)
         has_gpu_scale_val = await has_gpu_scale_filters(ffmpeg_path)
+        # GPU scale-only smoke (for conditional allow under CPU mode)
+        try:
+            scale_only_ok = await smoke_test_cuda_scale_only(ffmpeg_path)
+        except Exception:
+            scale_only_ok = False
         # Try OpenCL as alternative backend when CUDA is not available/disabled
         from ..utils.ffmpeg_utils import has_opencl_filters, smoke_test_opencl_filters
         opencl_ok = False
@@ -146,6 +154,10 @@ class VideoRenderer:
             inst.has_gpu_scale = bool(has_gpu_scale_val)
         except Exception:
             pass
+        try:
+            inst.cuda_scale_only_ok = bool(scale_only_ok)
+        except Exception:
+            pass
         # Decide overlay backend
         if get_hw_filter_mode() != "cpu":
             if has_cuda_filters_val and hw_kind == "nvenc":
@@ -153,11 +165,12 @@ class VideoRenderer:
             elif opencl_ok:
                 inst.gpu_overlay_backend = "opencl"
         logger.info(
-            "[Filters] GPU overlay backend=%s (cuda=%s, opencl_ok=%s, scale_only=%s)",
+            "[Filters] GPU overlay backend=%s (cuda=%s, opencl_ok=%s, scale_only=%s, scale_only_smoke_ok=%s)",
             inst.gpu_overlay_backend or "none",
             has_cuda_filters_val,
             opencl_ok,
             has_gpu_scale_val,
+            scale_only_ok,
         )
         return inst
 
@@ -500,16 +513,21 @@ class VideoRenderer:
             and global_mode != "cpu"
         )
         # Even when alpha overlays exist, allow GPU scaling of background only to reduce CPU work
-        allow_gpu_scale_only = bool(
+        # Config gate for hybrid path
+        allow_gpu_scale_only_cfg = bool(
             self.config.get("video", {}).get("gpu_scale_with_cpu_overlay", True)
         )
+        global_mode = get_hw_filter_mode()
+        # Allow hybrid path in non-CPU mode as before; additionally, if CPU mode
+        # is active due to overlay failures, permit scale-only when the smoke passed.
+        allow_in_cpu_mode = self.cuda_scale_only_ok
         use_gpu_scale_only = (
             (not use_cuda_filters)
             and (self.has_gpu_scale or self.has_cuda_filters)
             and self.hw_kind == "nvenc"
-            and allow_gpu_scale_only
-            and (get_hw_filter_mode() != "cpu")
+            and allow_gpu_scale_only_cfg
             and (not _force_cpu)
+            and ((global_mode != "cpu") or allow_in_cpu_mode)
         )
         if use_cuda_filters:
             logger.info(
@@ -531,7 +549,8 @@ class VideoRenderer:
                     )
                 if use_gpu_scale_only:
                     logger.info(
-                        "[Filters] Hybrid path: GPU scale + CPU overlay (background only)"
+                        "[Filters] Hybrid path: GPU scale + CPU overlay (background only)%s",
+                        " [cpu-mode-override]" if global_mode == "cpu" else "",
                     )
                     try:
                         self.path_counters["gpu_scale_only"] += 1

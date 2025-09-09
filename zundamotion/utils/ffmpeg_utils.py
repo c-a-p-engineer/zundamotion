@@ -641,6 +641,71 @@ async def has_gpu_scale_filters(ffmpeg_path: str = "ffmpeg") -> bool:
         return False
 
 
+# ---------------------------------------------------------
+# CUDA scale-only smoke test (for CPU-mode limited enable)
+# ---------------------------------------------------------
+_cuda_scale_only_smoke_result: Optional[bool] = None
+_cuda_scale_only_smoke_lock = asyncio.Lock()
+
+
+async def smoke_test_cuda_scale_only(ffmpeg_path: str = "ffmpeg") -> bool:
+    """
+    Run a conservative smoke test that ONLY exercises the GPU scaling path
+    (hwupload_cuda -> scale_* -> hwdownload) without overlay_cuda. This is
+    used to selectively allow "GPU scale + CPU overlay" hybrid even when the
+    global HW filter mode is backed off to CPU due to overlay failures.
+
+    The result is cached per-process.
+    """
+    global _cuda_scale_only_smoke_result
+    if _cuda_scale_only_smoke_result is not None:
+        return _cuda_scale_only_smoke_result
+
+    async with _cuda_scale_only_smoke_lock:
+        if _cuda_scale_only_smoke_result is not None:
+            return _cuda_scale_only_smoke_result
+
+        try:
+            filters = await _list_ffmpeg_filters(ffmpeg_path)
+            if not filters:
+                _cuda_scale_only_smoke_result = False
+                return _cuda_scale_only_smoke_result
+            has_upload = "hwupload_cuda" in filters
+            has_scale = ("scale_cuda" in filters) or ("scale_npp" in filters)
+            if not (has_upload and has_scale):
+                _cuda_scale_only_smoke_result = False
+                return _cuda_scale_only_smoke_result
+
+            scale_name = await get_preferred_cuda_scale_filter(ffmpeg_path)
+            # Minimal graph: upload RGBA, scale on GPU, download back to system memory
+            fc = (
+                f"[0:v]format=rgba,hwupload_cuda,{scale_name}=64:64,hwdownload,format=rgba[out]"
+            )
+            cmd = [
+                ffmpeg_path,
+                "-hide_banner",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=48x48:d=0.1",
+                "-filter_complex",
+                fc,
+                "-map",
+                "[out]",
+                "-f",
+                "null",
+                "-",
+            ]
+            await _run_ffmpeg_async(cmd)
+            _cuda_scale_only_smoke_result = True
+            return _cuda_scale_only_smoke_result
+        except Exception as e:  # pragma: no cover - environment dependent
+            logger.debug("CUDA scale-only smoke failed: %s", e)
+            _cuda_scale_only_smoke_result = False
+            return _cuda_scale_only_smoke_result
+
+
 async def _dump_cuda_diag_once(ffmpeg_path: str = "ffmpeg") -> None:
     """On first CUDA smoke failure, dump environment/build info at INFO level."""
     global _cuda_diag_dumped
