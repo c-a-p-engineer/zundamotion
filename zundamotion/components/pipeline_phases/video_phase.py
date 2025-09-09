@@ -10,7 +10,10 @@ from zundamotion.cache import CacheManager
 from zundamotion.components.video import VideoRenderer
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
-from zundamotion.utils.ffmpeg_utils import get_hw_encoder_kind_for_video_params  # 追加
+from zundamotion.utils.ffmpeg_utils import (
+    get_hw_encoder_kind_for_video_params,  # 追加
+    get_ffmpeg_version,
+)
 from zundamotion.utils.ffmpeg_utils import set_hw_filter_mode  # Auto-tuneでのバックオフに使用
 from zundamotion.utils.ffmpeg_utils import AudioParams, VideoParams, normalize_media
 from zundamotion.utils.logger import logger, time_log
@@ -138,8 +141,30 @@ class VideoPhase:
                 with open(hint_path, "r", encoding="utf-8") as _f:
                     _hint = _json.load(_f)
                 decided = str(_hint.get("decided_mode", "auto")).lower()
-                if decided in {"cpu", "cuda", "auto"}:
-                    if decided == "cpu":
+                hint_ffmpeg = str(_hint.get("ffmpeg", ""))
+                hint_hw = str(_hint.get("hw_kind", ""))
+                # 現環境シグネチャ
+                cur_ffmpeg = await get_ffmpeg_version()
+                cur_hw = hw_kind
+                # 乖離チェック: ffmpeg版 or ハードウェア種別が変わっていればヒント無効
+                outdated = False
+                try:
+                    if hint_ffmpeg and cur_ffmpeg and hint_ffmpeg != cur_ffmpeg:
+                        outdated = True
+                    if hint_hw and cur_hw and hint_hw != cur_hw:
+                        outdated = True
+                except Exception:
+                    outdated = False
+                if outdated:
+                    logger.info(
+                        "[AutoTune] Ignoring outdated hint (ffmpeg:%s->%s, hw:%s->%s)",
+                        hint_ffmpeg or "-",
+                        cur_ffmpeg or "-",
+                        hint_hw or "-",
+                        cur_hw or "-",
+                    )
+                else:
+                    if decided in {"cpu", "cuda", "auto"} and decided == "cpu":
                         try:
                             set_hw_filter_mode("cpu")
                             logger.info("[AutoTune] Loaded hint: forcing HW filter mode to 'cpu'.")

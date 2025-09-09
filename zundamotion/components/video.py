@@ -221,9 +221,9 @@ class VideoRenderer:
                 # デフォルト上限（CPUフィルタ時は小さめ）
                 cap = os.environ.get("FFMPEG_FILTER_THREADS_CAP")
                 try:
-                    cap_i = int(cap) if cap and cap.isdigit() else 4
+                    cap_i = int(cap) if cap and cap.isdigit() else 2
                 except Exception:
-                    cap_i = 4
+                    cap_i = 2
                 ft = str(max(1, min(per_filter_threads, cap_i)))
             else:
                 ft = "1" if self.hw_kind == "nvenc" else str(nproc)
@@ -235,9 +235,9 @@ class VideoRenderer:
                 per_filter_threads = max(1, nproc // max(1, self.clip_workers))
                 cap = os.environ.get("FFMPEG_FILTER_COMPLEX_THREADS_CAP")
                 try:
-                    cap_i = int(cap) if cap and cap.isdigit() else 4
+                    cap_i = int(cap) if cap and cap.isdigit() else 2
                 except Exception:
-                    cap_i = 4
+                    cap_i = 2
                 fct = str(max(1, min(per_filter_threads, cap_i)))
             else:
                 fct = "1" if self.hw_kind == "nvenc" else str(nproc)

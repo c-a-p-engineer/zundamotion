@@ -671,36 +671,68 @@ async def smoke_test_cuda_scale_only(ffmpeg_path: str = "ffmpeg") -> bool:
                 _cuda_scale_only_smoke_result = False
                 return _cuda_scale_only_smoke_result
             has_upload = "hwupload_cuda" in filters
-            has_scale = ("scale_cuda" in filters) or ("scale_npp" in filters)
-            if not (has_upload and has_scale):
+            has_scale_cuda = "scale_cuda" in filters
+            has_scale_npp = "scale_npp" in filters
+            if not (has_upload and (has_scale_cuda or has_scale_npp)):
                 _cuda_scale_only_smoke_result = False
                 return _cuda_scale_only_smoke_result
 
-            scale_name = await get_preferred_cuda_scale_filter(ffmpeg_path)
-            # Minimal graph: upload RGBA, scale on GPU, download back to system memory
-            fc = (
-                f"[0:v]format=rgba,hwupload_cuda,{scale_name}=64:64,hwdownload,format=rgba[out]"
+            scale_primary = await get_preferred_cuda_scale_filter(ffmpeg_path)
+            scale_alternatives = []
+            if has_scale_cuda and scale_primary != "scale_cuda":
+                scale_alternatives.append("scale_cuda")
+            if has_scale_npp and scale_primary != "scale_npp":
+                scale_alternatives.append("scale_npp")
+
+            # Build candidate filtergraphs to reduce false negatives across envs
+            candidates = []
+            # RGBA upload -> GPU scale -> download
+            candidates.append(
+                f"[0:v]format=rgba,hwupload_cuda,{scale_primary}=64:64,hwdownload,format=rgba[out]"
             )
-            cmd = [
-                ffmpeg_path,
-                "-hide_banner",
-                "-y",
-                "-f",
-                "lavfi",
-                "-i",
-                "color=c=black:s=48x48:d=0.1",
-                "-filter_complex",
-                fc,
-                "-map",
-                "[out]",
-                "-f",
-                "null",
-                "-",
-            ]
-            await _run_ffmpeg_async(cmd)
-            _cuda_scale_only_smoke_result = True
+            # NV12 upload path
+            candidates.append(
+                f"[0:v]format=nv12,hwupload_cuda,{scale_primary}=64:64,hwdownload,format=rgba[out]"
+            )
+            # Try explicit alternatives if present
+            for alt in scale_alternatives:
+                candidates.append(
+                    f"[0:v]format=rgba,hwupload_cuda,{alt}=64:64,hwdownload,format=rgba[out]"
+                )
+                candidates.append(
+                    f"[0:v]format=nv12,hwupload_cuda,{alt}=64:64,hwdownload,format=rgba[out]"
+                )
+
+            last_err: Optional[BaseException] = None
+            for fc in candidates:
+                cmd = [
+                    ffmpeg_path,
+                    "-hide_banner",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=48x48:d=0.1",
+                    "-filter_complex",
+                    fc,
+                    "-map",
+                    "[out]",
+                    "-f",
+                    "null",
+                    "-",
+                ]
+                try:
+                    await _run_ffmpeg_async(cmd)
+                    _cuda_scale_only_smoke_result = True
+                    return _cuda_scale_only_smoke_result
+                except Exception as e:  # pragma: no cover - environment dependent
+                    last_err = e
+                    logger.debug("CUDA scale-only candidate failed: %s\nFC=%s", e, fc)
+
+            logger.debug("All CUDA scale-only smoke candidates failed: %s", last_err)
+            _cuda_scale_only_smoke_result = False
             return _cuda_scale_only_smoke_result
-        except Exception as e:  # pragma: no cover - environment dependent
+        except Exception as e:  # pragma: no cover - generic guard
             logger.debug("CUDA scale-only smoke failed: %s", e)
             _cuda_scale_only_smoke_result = False
             return _cuda_scale_only_smoke_result
