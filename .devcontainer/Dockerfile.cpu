@@ -64,6 +64,7 @@ RUN echo "/opt/ffmpeg/lib" > /etc/ld.so.conf.d/ffmpeg.conf && ldconfig
 
 # CPU版なので NVENC 確認は不要
 RUN ffmpeg -hide_banner -encoders | grep -E 'libx264|libx265'
+RUN echo "== Filters (OpenCL) snapshot ==" && ffmpeg -hide_banner -filters | grep -E 'overlay_opencl|scale_opencl' || true
 
 # ---------------------------------------------------------
 # ワークスペース

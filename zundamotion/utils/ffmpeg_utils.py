@@ -114,6 +114,12 @@ class VideoParams:
                 opts.extend(["-b:v", f"{self.bitrate_kbps}k"])
             else:
                 opts.extend(["-cq", "23"])  # デフォルト
+            # 追加の高速化（環境変数 NVENC_FAST=1 で有効。既定は GenerationPipeline で有効化）
+            try:
+                if os.getenv("NVENC_FAST", "0") == "1":
+                    opts.extend(["-rc-lookahead", "0", "-bf", "0", "-spatial_aq", "0", "-temporal_aq", "0"])  # 安全な高速化セット
+            except Exception:
+                pass
         elif hw_kind == "qsv":
             opts.extend(["-c:v", "h264_qsv"])
             if self.global_quality is not None:
@@ -877,6 +883,7 @@ async def smoke_test_opencl_filters(ffmpeg_path: str = "ffmpeg") -> bool:
             _opencl_smoke_result = False
             return _opencl_smoke_result
 
+    # The following block was accidentally placed under OpenCL scope; keep CUDA smoke below
     async with _cuda_smoke_lock:
         if _cuda_smoke_result is not None:
             return _cuda_smoke_result
@@ -955,6 +962,101 @@ async def smoke_test_opencl_filters(ffmpeg_path: str = "ffmpeg") -> bool:
             pass
         _cuda_smoke_result = False
         return _cuda_smoke_result
+
+
+# ---------------------------------------------------------
+# OpenCL scale-only smoke test (for CPU-mode limited enable)
+# ---------------------------------------------------------
+_opencl_scale_only_smoke_result: Optional[bool] = None
+_opencl_scale_only_smoke_lock = asyncio.Lock()
+
+
+async def smoke_test_opencl_scale_only(ffmpeg_path: str = "ffmpeg") -> bool:
+    """
+    Conservative smoke test for OpenCL scale-only path (no overlay_opencl):
+    hwupload (derive_device=opencl) -> scale_opencl -> hwdownload.
+
+    Used to allow "GPU scale + CPU overlay" hybrid even when overlay backends are
+    unavailable. Result is cached per-process.
+    """
+    global _opencl_scale_only_smoke_result
+    if _opencl_scale_only_smoke_result is not None:
+        return _opencl_scale_only_smoke_result
+    async with _opencl_scale_only_smoke_lock:
+        if _opencl_scale_only_smoke_result is not None:
+            return _opencl_scale_only_smoke_result
+        try:
+            filters = await _list_ffmpeg_filters(ffmpeg_path)
+            if not filters or "scale_opencl" not in filters or "hwupload" not in filters:
+                _opencl_scale_only_smoke_result = False
+                return _opencl_scale_only_smoke_result
+            # Try a minimal graph: upload -> scale_opencl -> download
+            fcandidates = [
+                # RGBA
+                "[0:v]format=rgba,hwupload,scale_opencl=64:64,hwdownload,format=rgba[out]",
+                # NV12
+                "[0:v]format=nv12,hwupload,scale_opencl=64:64,hwdownload,format=rgba[out]",
+            ]
+            for fc in fcandidates:
+                cmd = [
+                    ffmpeg_path,
+                    "-hide_banner",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=48x48:d=0.1",
+                    "-filter_complex",
+                    fc,
+                    "-map",
+                    "[out]",
+                    "-f",
+                    "null",
+                    "-",
+                ]
+                try:
+                    await _run_ffmpeg_async(cmd)
+                    _opencl_scale_only_smoke_result = True
+                    return _opencl_scale_only_smoke_result
+                except Exception as e:
+                    logger.debug("OpenCL scale-only candidate failed: %s\nFC=%s", e, fc)
+            _opencl_scale_only_smoke_result = False
+            return _opencl_scale_only_smoke_result
+        except Exception as e:
+            logger.debug("OpenCL scale-only smoke failed: %s", e)
+            _opencl_scale_only_smoke_result = False
+            return _opencl_scale_only_smoke_result
+
+
+# ---------------------------------------------------------
+# GPU Filter diagnostics (presence + smokes)
+# ---------------------------------------------------------
+async def get_filter_diagnostics(ffmpeg_path: str = "ffmpeg") -> Dict[str, Any]:
+    """
+    Return a dictionary summarizing GPU filter presence and smoke test results.
+    Keys:
+      present: overlay_cuda, scale_cuda, scale_npp, hwupload_cuda,
+               overlay_opencl, scale_opencl, hwupload
+      smoke:   cuda_filters, cuda_scale_only, opencl_filters, opencl_scale_only
+    """
+    filters = await _list_ffmpeg_filters(ffmpeg_path)
+    present = {
+        "overlay_cuda": "overlay_cuda" in filters,
+        "scale_cuda": "scale_cuda" in filters,
+        "scale_npp": "scale_npp" in filters,
+        "hwupload_cuda": "hwupload_cuda" in filters,
+        "overlay_opencl": "overlay_opencl" in filters,
+        "scale_opencl": "scale_opencl" in filters,
+        "hwupload": "hwupload" in filters,
+    }
+    # Run smokes (they cache results internally)
+    smokes = {
+        "cuda_filters": await smoke_test_cuda_filters(ffmpeg_path),
+        "cuda_scale_only": await smoke_test_cuda_scale_only(ffmpeg_path),
+        "opencl_filters": await smoke_test_opencl_filters(ffmpeg_path),
+        "opencl_scale_only": await smoke_test_opencl_scale_only(ffmpeg_path),
+    }
+    return {"present": present, "smokes": smokes}
 
 
 async def get_hardware_encoder_kind(ffmpeg_path: str = "ffmpeg") -> Optional[str]:

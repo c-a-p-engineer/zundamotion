@@ -696,14 +696,22 @@ video:
 
 - GPUオーバーレイ方針: 字幕はPNG（RGBA）で合成するため、既定ではCPU overlayを使用します。RGBAを含まない場合はGPU（overlay_cuda/scale_cuda or scale_npp）を利用します。実験的にGPUで字幕を重ねたい場合は設定で `video.gpu_overlay_experimental: true` を有効化してください。
 - CUDA診断とフォールバック: CUDAフィルタのスモーク/実行時に失敗した場合、初回のみ `ffmpeg -buildconf` / `ffmpeg -filters` / `nvidia-smi -L` / `nvcc --version` をINFOで自動出力し、CPUフィルタにフォールバックします。`scale_cuda` が無い環境では自動で `scale_npp` を使用します。
-- ハイブリッドGPUスケール: RGBAオーバーレイでCPU合成となる場合でも、背景のスケーリングのみGPUで実施してからCPUへ戻す最適化が可能です（`video.gpu_scale_with_cpu_overlay: true` 既定有効）。
+- ハイブリッドGPUスケール: RGBAオーバーレイでCPU合成となる場合でも、背景のスケーリングのみGPUで実施してからCPUへ戻す最適化が可能です（`video.gpu_scale_with_cpu_overlay: true` 既定有効）。CUDA が使えない環境では OpenCL によるスケール専用（`scale_opencl`）をスモークに通った場合に限り自動で利用します。
+ - CUDAフィルタ有効化（DevContainer）: `.devcontainer/Dockerfile.gpu` は既定でBtbNプリビルドを導入します。環境により `overlay_cuda/scale_cuda` が実行失敗する場合は、`BUILD_FFMPEG_FROM_SOURCE=1` を指定してFFmpegを `--enable-cuda-nvcc --enable-libnpp --enable-nonfree` でビルドしてください（`.devcontainer/.env`）。
+ - 画質プリセット連動のスケーラ最適化: `--quality` に応じてCPUスケーラのフラグを変更します（speed=fast_bilinear, balanced=bicubic, quality=lanczos）。設定から直指定する場合は `video.scale_flags` を利用できます。
  - 字幕PNGプリキャッシュ: `video.precache_subtitles: true` でシーン内の字幕PNGを事前生成（プロセスプール並列）。VideoPhase中の待ち・ばらつきを低減します。
 - スレッドとプロファイル:
   - `FFMPEG_PROFILE_MODE=1` で `-benchmark -stats` を付与し、FFmpegの所要・スループットを収集できます。
   - `FFMPEG_THREADS` で `-threads` を明示上書き可能。
+  - CPUフィルタ経路で `--jobs auto/0` の場合、各クリップFFmpegの `-threads` は `nproc // clip_workers` に自動調整（過剰スレッド化の抑制）。NVENC/GPU 経路では `-threads 0`（自動）。
   - CPUフィルタ経路では `-filter_threads`/`-filter_complex_threads` を保守的にキャップ（既定=4）。`FFMPEG_FILTER_THREADS_CAP`/`FFMPEG_FILTER_COMPLEX_THREADS_CAP` で上限を調整できます。
 - 自動チューニング（初期クリップ計測）:
-  - `video.auto_tune: true` で初回数クリップ（既定4）を計測し、CPU overlay が支配的なら `filter_threads` の上限と `clip_workers` を保守的に調整します。
+  - `video.auto_tune: true` で初回数クリップ（既定4）を計測し、CPU overlay が支配的なら `filter_threads` の上限と `clip_workers` を保守的に調整します。CPUコア数に応じて 2→3/4 ワーカーまで再探索する軽量ヒューリスティクスを追加し、平均/90パーセンタイル時間をログ出力します。
+  - 字幕PNGプリキャッシュ: `video.precache_subtitles: true`（既定）で各シーンの字幕PNGを事前生成。`video.precache_min_lines` を設定すると、`precache_subtitles=false` 時でもシーン行数が閾値以上なら自動有効化。
+  - キャラPNG事前スケール: 立ち絵PNGは Pillow で目標スケールに事前変換しキャッシュ。CPU overlay 時は `scale` フィルタを省略し、`format=rgba` のみで合成（`CHAR_CACHE_DISABLE=1` で無効化）。
+  - 口パクタイムラインのキャッシュ: 音声WAVとパラメータ（fps/閾値）に基づきJSONをキャッシュ（`cache/`）。`--no-cache` 時はラン内Ephemeralを再利用。
+  - CPUモードでも OpenCL overlay を許可（既定有効）: `video.allow_opencl_overlay_in_cpu_mode: true` かつスモーク合格時に `overlay_opencl` を使用。
+  - FPSフィルタの最適化: speedプリセットでは背景スケール時の `fps=` フィルタを省略（`video.apply_fps_filter: false`）し、出力側の `-r` によるCFR固定に任せます。
   - `video.profile_first_clips: 4` で計測クリップ数を変更可能。
   - CPU overlay が支配的な場合は、フィルタ経路をCPUに統一（`set_hw_filter_mode('cpu')`）し、以降の安定性と一貫性を優先します（NVENCエンコードは継続）。
   - CPUフィルタモード時は初期並列を抑制（`clip_workers<=2`）して先頭クリップの過負荷を回避します。
@@ -711,6 +719,8 @@ video:
 - 正規化の再実行抑止: 正規化出力に `<name>.meta.json` を隣接保存し、同一 `target_spec` の入力は再正規化をスキップします。
 - no-cache時の重複抑止: `--no-cache` でも同一キー生成はプロセス内でin-flight集約し、同一ラン内の重複生成を避けます。生成物は `temp_dir` のEphemeralとして再利用されます。
 - concat最適化: `-f concat -c copy` のリストファイルは出力ディレクトリに配置し、I/O局所性を改善しています。
+
+- フィルタ診断ログ: 起動時に `overlay_cuda/scale_cuda/scale_npp/overlay_opencl/scale_opencl` 等の存在とスモークテスト結果（CUDA/OpenCL/scale-only）を INFO ログにサマリ表示します。
 
 設定例（GPUで字幕のGPUオーバーレイを試す）:
 ```yaml

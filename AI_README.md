@@ -183,13 +183,16 @@ CLI主なオプション（main.py実装）:
 - FFmpegの呼び出しは、不必要な再エンコードを避けるように最適化します。
 - 大規模なデータ処理を行う際は、メモリ使用量とCPU負荷を考慮し、効率的なアルゴリズムを選択します。
 
-### 6.9. GPUフィルタポリシー（overlay_cuda/scale_cuda）
+### 6.9. GPUフィルタポリシー（CUDA/OpenCL・スケール専用フォールバック）
 
-- 起動時にCUDAフィルタのスモークテストを実施し、失敗する環境では自動的にCPUフィルタへフォールバックします（NVENCは継続利用）。
+- 起動時にCUDA/OpenCLフィルタのスモークテストを実施し、利用可否を自動判定します。CUDA失敗時はCPUフィルタへフォールバックします（NVENCは継続利用）。
 - CUDAフィルタを利用しNVENCでエンコードする場合、filter_complex内での`hwdownload`を回避し、GPU内で合成→NVENCへ直接渡します（GPU⇄CPU往復を削減）。
 - 実行時にCUDA経路でエラーが発生したクリップは、1回だけCPUフィルタで自動リトライします。
 - 初回のCUDAフィルタ失敗（スモーク失敗 or 実行失敗）を検知した場合、プロセス内のグローバルフラグで以降の全クリップをCPUフィルタへバックオフします（NVENCの利用可否は別途維持）。`zundamotion/utils/ffmpeg_utils.py` の `set_hw_filter_mode('cpu'|'cuda'|'auto')` により明示的な制御も可能です。
- - CPUフィルタ経路が有効な場合（グローバルが`cpu`）、NVENCでのエンコード有無に関わらず、`clip_workers` と `-filter_threads`/`-filter_complex_threads` は CPU 向けヒューリスティクス（`max(1, nproc // clip_workers)`）に自動調整します（環境変数での明示指定がある場合はそちらを優先）。
+ - CPUフィルタ経路が有効な場合（グローバル`cpu`）でも、`scale_opencl` のスモークに通った環境では「GPUスケールのみ + CPU overlay（ハイブリッド）」を限定的に許可します。
+- CPUフィルタ経路が有効な場合、NVENCでのエンコード有無に関わらず、`clip_workers` と `-filter_threads`/`-filter_complex_threads` は CPU 向けヒューリスティクス（`max(1, nproc // clip_workers)`）に自動調整します（環境変数での明示指定がある場合はそちらを優先）。
+ - 画質プリセット→スケール最適化: CLIの `--quality` に応じてCPUスケーラのフラグを自動設定（speed=fast_bilinear, balanced=bicubic, quality=lanczos）。`video.scale_flags` で明示指定可。
+ - FPS適用ポリシー: speed時は背景スケール段での `fps` フィルタを省略して（`video.apply_fps_filter: false`）、出力 `-r` でCFR固定。フィルタ段のCPU負荷を削減。
 
 補足（診断とフォールバックの強化）:
 - スモーク失敗時は一度だけ、診断情報をINFOで自動ダンプします。
@@ -197,10 +200,14 @@ CLI主なオプション（main.py実装）:
 - 実行時にCUDAフィルタがエラー（exit 218/234等）となった場合も、同様の診断を一度だけ出力します。
 - スモークは複数候補のフィルタグラフ（NV12+NV12／RGBAオーバレイ）を順に試行し、偽陰性を低減します。
 - `scale_cuda` が列挙されない環境で `scale_npp` が存在する場合、GPUパスでは `scale_npp` を優先的に使用します（自動選択）。
+ - DevContainerでCUDAフィルタを確実に有効化したい場合は、`.devcontainer/Dockerfile.gpu` の `BUILD_FFMPEG_FROM_SOURCE=1` を指定し、`--enable-cuda-nvcc --enable-libnpp --enable-nonfree` でFFmpegをビルドしてください。
 - 字幕PNGはRGBAレイヤのため、既定ではCPU overlayを使用します（`video.gpu_overlay_experimental` をtrueにするとGPUを試行）。
-- CPUモード時でも `smoke_test_cuda_scale_only` のスモークに通った環境では、背景の「GPUスケールのみ + CPU overlay（ハイブリッド）」を限定的に許可します（背景スケールの高速化が目的）。
+- CPUモード時でも `smoke_test_cuda_scale_only` のスモークに通った環境では、背景の「GPUスケールのみ + CPU overlay（ハイブリッド）」を限定的に許可します（背景スケールの高速化が目的）。OpenCL についても `smoke_test_opencl_scale_only` を通過した場合に同様のハイブリッドを許可します。
 - RGBAオーバーレイでCPU合成となる場合でも、背景スケーリングのみGPUで先行してからCPUへ戻すハイブリッド最適化が可能です（`video.gpu_scale_with_cpu_overlay: true` 既定有効）。
- - 字幕PNGのプリキャッシュ（`video.precache_subtitles: true`）で、行ごとの字幕PNGをシーン開始時に並列生成し、VideoPhase中のばらつきを抑制します。
+- 字幕PNGのプリキャッシュ（`video.precache_subtitles: true`）で、行ごとの字幕PNGをシーン開始時に並列生成し、VideoPhase中のばらつきを抑制します。
+  - `video.precache_min_lines` により、`precache_subtitles=false` でも行数が閾値以上の場合は自動で有効化されます。
+  - 立ち絵PNGは Pillow で目標スケールに事前変換しキャッシュ。CPU overlay 時は `scale` フィルタを省いて `format=rgba` のみで合成（`CHAR_CACHE_DISABLE=1` で無効）。
+  - `video.allow_opencl_overlay_in_cpu_mode: true` が指定され、OpenCL のスモークに合格した場合は、グローバル `cpu` モードでも `overlay_opencl` を許可します（安定性優先のオプトイン）。
 
 補足（運用トグル／チューニング）:
 - 環境変数で挙動を制御できます。
@@ -208,7 +215,7 @@ CLI主なオプション（main.py実装）:
   - `FFMPEG_FILTER_THREADS` / `FFMPEG_FILTER_COMPLEX_THREADS`: FFmpegのフィルタスレッド数を明示的に上書き。未指定時は上記ヒューリスティクスを採用。
 - CPUフィルタ経路では `clip_workers × filter_threads` の過剰化を避けるため、`filter_threads = max(1, nproc // clip_workers)` を目安に設定してください（既定ロジックが自動調整）。
 - ログには各フェーズの所要時間が `--- Finished: <Phase>.run. Duration: X.YZ seconds ---` として出力されます。ボトルネック抽出は `logs/YYYYMMDD_*.log` を参照してください。
-- 追加計測: VideoPhase終了時に「最も遅い行クリップTop5」と「フィルタ経路の使用回数（cuda/opencl/gpu_scale_only/cpu）」をINFOで出力します。
+- 追加計測: VideoPhase終了時に「最も遅い行クリップTop5」と「フィルタ経路の使用回数（cuda/opencl/gpu_scale_only/cpu）」をINFOで出力します。加えて、起動時にフィルタ存在とスモーク結果（CUDA/OpenCL/スケール専用）をINFOでサマリ表示します。
  - CPUフィルタモード起動時は初期 `clip_workers<=2` に抑え、AutoTune前の過剰並列を回避します。
 
 ### 6.10. シーンベース生成スキップ（static overlays = 0）
@@ -248,7 +255,7 @@ CLI主なオプション（main.py実装）:
 - CPUフィルタ経路では過剰並列を避けるため、`clip_workers` と合わせて保守的に設定されます。
 
 補足（自動チューニング）:
-- `video.auto_tune: true` の場合、先頭Nクリップ（`video.profile_first_clips`, 既定4）を計測し、CPU overlay が支配的と判定された場合は `FFMPEG_FILTER_THREADS_CAP`/`FFMPEG_FILTER_COMPLEX_THREADS_CAP` を保守的な値（2）に設定し、`clip_workers` を抑制します（NVENC時は最大2）。
+- `video.auto_tune: true` の場合、先頭Nクリップ（`video.profile_first_clips`, 既定4）を計測し、CPU overlay が支配的と判定された場合は `FFMPEG_FILTER_THREADS_CAP`/`FFMPEG_FILTER_COMPLEX_THREADS_CAP` を保守的な値（2）に設定。CPUコア数に応じて `clip_workers` を 2→3/4 まで再探索し、平均/90パーセンタイルの所要をログに出力します。
 - 計測後は `FFMPEG_PROFILE_MODE` を無効化してオーバーヘッドを回避します。
 - 併せて、CPU overlay が支配的なケースでは `set_hw_filter_mode('cpu')` を適用し、プロセス全体でCPUフィルタ経路に統一します（NVENCによるエンコードは継続）。
 

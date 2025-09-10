@@ -31,11 +31,18 @@ class SubtitlePNGRenderer:
         # デフォルト: 物理コアの半分（最低1）
         try:
             import os
-
-            workers = max(1, (os.cpu_count() or 2) // 2)
+            env_workers = os.getenv("SUB_PNG_WORKERS")
+            if env_workers and env_workers.isdigit():
+                workers = max(1, int(env_workers))
+            else:
+                workers = max(1, (os.cpu_count() or 2) // 2)
         except Exception:
             workers = 1
         self._executor = ProcessPoolExecutor(max_workers=workers)
+        try:
+            logger.info("SubtitlePNGRenderer workers=%d", workers)
+        except Exception:
+            pass
 
     async def render(
         self, text: str, style: Dict[str, Any]

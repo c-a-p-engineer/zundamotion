@@ -268,7 +268,16 @@ class VideoPhase:
 
                 # Optional: Pre-cache subtitle PNGs to reduce jitter during rendering
                 try:
-                    if bool(self.config.get("video", {}).get("precache_subtitles", False)):
+                    vcfg = self.config.get("video", {}) or {}
+                    # Heuristic: enable precache when either explicitly enabled
+                    # or talk lines exceed configured threshold.
+                    precache_default = bool(vcfg.get("precache_subtitles", False))
+                    try:
+                        precache_min_lines = int(vcfg.get("precache_min_lines", 6))
+                    except Exception:
+                        precache_min_lines = 6
+                    will_precache = precache_default or (len(scene.get("lines", [])) >= precache_min_lines)
+                    if will_precache:
                         renderer = SubtitlePNGRenderer(self.cache_manager)
                         precache_tasks = []
                         for idx, line in enumerate(scene.get("lines", []), start=1):
@@ -532,6 +541,149 @@ class VideoPhase:
                                 e,
                             )
 
+                # 連続行で静的レイヤが不変な“ラン”のベース（行ブロック前処理）を検討
+                run_bases: List[Dict[str, Any]] = []
+                if scene_base_path is None:
+                    try:
+                        talk_lines2 = [
+                            l for l in scene.get("lines", []) if not ("wait" in l or l.get("type") == "wait")
+                        ]
+                        if talk_lines2:
+                            def _norm_char_entries(line: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:
+                                entries: Dict[tuple, Dict[str, Any]] = {}
+                                for ch in line.get("characters", []) or []:
+                                    if not ch.get("visible", False):
+                                        continue
+                                    name = ch.get("name")
+                                    expr = ch.get("expression", "default")
+                                    try:
+                                        scale = round(float(ch.get("scale", 1.0)), 2)
+                                    except Exception:
+                                        scale = 1.0
+                                    anchor = str(ch.get("anchor", "bottom_center")).lower()
+                                    pos_raw = ch.get("position", {"x": "0", "y": "0"}) or {}
+                                    def _q(v):
+                                        try:
+                                            return f"{float(v):.2f}"
+                                        except Exception:
+                                            return str(v)
+                                    pos = {"x": _q(pos_raw.get("x", "0")), "y": _q(pos_raw.get("y", "0"))}
+                                    key = (
+                                        name,
+                                        expr,
+                                        float(scale),
+                                        str(anchor),
+                                        str(pos.get("x", "0")),
+                                        str(pos.get("y", "0")),
+                                    )
+                                    base_dir = Path(f"assets/characters/{name}")
+                                    for c in [
+                                        base_dir / expr / "base.png",
+                                        base_dir / f"{expr}.png",
+                                        base_dir / "default" / "base.png",
+                                        base_dir / "default.png",
+                                    ]:
+                                        try:
+                                            if c.exists():
+                                                entries[key] = {
+                                                    "path": str(c),
+                                                    "scale": scale,
+                                                    "anchor": anchor,
+                                                    "position": {"x": pos.get("x", "0"), "y": pos.get("y", "0")},
+                                                }
+                                                break
+                                        except Exception:
+                                            pass
+                                return entries
+
+                            def _insert_image_overlay(line: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+                                ins = line.get("insert") or {}
+                                p = ins.get("path")
+                                if not p:
+                                    return None
+                                sp = Path(p)
+                                if sp.exists() and sp.suffix.lower() not in {".mp4", ".mov", ".webm", ".mkv", ".avi"}:
+                                    return {
+                                        "path": str(sp.resolve()),
+                                        "scale": float(ins.get("scale", 1.0) or 1.0),
+                                        "anchor": str(ins.get("anchor", "middle_center")),
+                                        "position": (ins.get("position") or {"x": "0", "y": "0"}),
+                                    }
+                                return None
+
+                            maps = [_norm_char_entries(l) for l in talk_lines2]
+                            run_start: Optional[int] = None
+                            run_sig = None
+                            for i, m in enumerate(maps):
+                                sig_keys = tuple(sorted(m.keys()))
+                                ov_ins = _insert_image_overlay(talk_lines2[i])
+                                sig = (sig_keys, ov_ins and (ov_ins.get("path"), ov_ins.get("scale"), ov_ins.get("anchor"), (ov_ins.get("position") or {}).get("x"), (ov_ins.get("position") or {}).get("y")))
+                                if run_start is None:
+                                    run_start = i
+                                    run_sig = sig
+                                    continue
+                                if sig != run_sig:
+                                    if run_start is not None and (i - run_start) >= 2 and sig_keys:
+                                        run_end = i - 1
+                                        overlays: List[Dict[str, Any]] = [maps[run_start][k] for k in tuple(sorted(maps[run_start].keys()))]
+                                        if ov_ins:
+                                            overlays.append(ov_ins)
+                                        # ランの長さ
+                                        dur = 0.0
+                                        for li in range(run_start, run_end + 1):
+                                            lid = f"{scene_id}_{li + 1}"
+                                            dur += float(line_data_map[lid]["duration"])  # type: ignore
+                                        try:
+                                            base_path = await self.video_renderer.render_scene_base_composited(
+                                                {"type": "video" if is_bg_video else "image", "path": str(bg_image)},
+                                                dur,
+                                                f"scene_base_{scene_id}_run_{run_start+1}_{run_end+1}",
+                                                overlays,
+                                            )
+                                            run_bases.append({
+                                                "start": run_start + 1,
+                                                "end": run_end + 1,
+                                                "path": base_path,
+                                                "char_keys": set(tuple(sorted(maps[run_start].keys()))),
+                                                "has_insert_image": bool(ov_ins),
+                                                "offsets": None,
+                                            })
+                                        except Exception as e:
+                                            logger.debug("Run-base generation failed: %s", e)
+                                    run_start = i
+                                    run_sig = sig
+                            # 末尾ラン
+                            i = len(maps)
+                            if run_start is not None and (i - run_start) >= 2 and tuple(sorted(maps[run_start].keys())):
+                                run_end = i - 1
+                                ov_ins0 = _insert_image_overlay(talk_lines2[run_start])
+                                overlays = [maps[run_start][k] for k in tuple(sorted(maps[run_start].keys()))]
+                                if ov_ins0:
+                                    overlays.append(ov_ins0)
+                                dur = 0.0
+                                for li in range(run_start, run_end + 1):
+                                    lid = f"{scene_id}_{li + 1}"
+                                    dur += float(line_data_map[lid]["duration"])  # type: ignore
+                                try:
+                                    base_path = await self.video_renderer.render_scene_base_composited(
+                                        {"type": "video" if is_bg_video else "image", "path": str(bg_image)},
+                                        dur,
+                                        f"scene_base_{scene_id}_run_{run_start+1}_{run_end+1}",
+                                        overlays,
+                                    )
+                                    run_bases.append({
+                                        "start": run_start + 1,
+                                        "end": run_end + 1,
+                                        "path": base_path,
+                                        "char_keys": set(tuple(sorted(maps[run_start].keys()))),
+                                        "has_insert_image": bool(ov_ins0),
+                                        "offsets": None,
+                                    })
+                                except Exception as e:
+                                    logger.debug("Run-base generation failed (tail): %s", e)
+                    except Exception as e:
+                        logger.debug("Run-base detection skipped: scene=%s err=%s", scene_id, e)
+
                 # 先に各行の開始時刻を決定
                 lines = list(enumerate(scene.get("lines", []), start=1))
                 start_time_by_idx: Dict[int, float] = {}
@@ -558,7 +710,12 @@ class VideoPhase:
                         duration = line_data["duration"]
                         line_config = line_data["line_config"]
 
-                        # シーンベース映像が生成できたらそれを使い、再スケール/正規化をスキップ
+                        # シーンベース or 連続ランのベースがあればそれを使用
+                        run_base = None
+                        for rb in run_bases or []:
+                            if rb["start"] <= idx <= rb["end"]:
+                                run_base = rb
+                                break
                         if scene_base_path is not None and scene_base_path.exists():
                             background_config = {
                                 "type": "video",
@@ -566,6 +723,23 @@ class VideoPhase:
                                 "start_time": start_time_by_idx[idx],
                                 "normalized": True,  # 正規化済み（ベース作成時）
                                 "pre_scaled": True,  # width/height/fps 済み
+                            }
+                        elif run_base is not None and Path(run_base["path"]).exists():
+                            # ラン内でのオフセットを算出（キャッシュ）
+                            if run_base.get("offsets") is None:
+                                offs = {}
+                                acc = 0.0
+                                for li in range(run_base["start"], run_base["end"] + 1):
+                                    offs[li] = acc
+                                    lid2 = f"{scene_id}_{li}"
+                                    acc += float(line_data_map[lid2]["duration"])  # type: ignore
+                                run_base["offsets"] = offs
+                            background_config = {
+                                "type": "video",
+                                "path": str(run_base["path"]),
+                                "start_time": float(run_base["offsets"][idx]),
+                                "normalized": True,
+                                "pre_scaled": True,
                             }
                         else:
                             # フォールバック（従来動作）: ベースなしで個別処理
@@ -652,7 +826,7 @@ class VideoPhase:
                         }
                         # 静的レイヤをベースに取り込んでいる場合、行側から該当項目のみ除去
                         original_characters = line.get("characters", []) or []
-                        if static_char_keys:
+                        if static_char_keys or (run_base and run_base.get("char_keys")):
                             eff_chars: List[Dict[str, Any]] = []
                             for ch in original_characters:
                                 if not ch.get("visible", False):
@@ -666,7 +840,7 @@ class VideoPhase:
                                     str((ch.get("position", {}) or {}).get("x", "0")),
                                     str((ch.get("position", {}) or {}).get("y", "0")),
                                 )
-                                if key in static_char_keys:
+                                if key in static_char_keys or (run_base and key in run_base.get("char_keys", set())):
                                     continue
                                 eff_chars.append(ch)
                             effective_characters = eff_chars
@@ -674,7 +848,7 @@ class VideoPhase:
                             effective_characters = original_characters
 
                         # ベースに取り込まれていない共通挿入“動画”があれば、事前正規化済みのパスを各行へ伝搬
-                        if static_insert_in_base:
+                        if static_insert_in_base or (run_base and run_base.get("has_insert_image")):
                             effective_insert = None
                         else:
                             raw_insert = line_config.get("insert")
@@ -819,6 +993,16 @@ class VideoPhase:
                             / float(len(self._profile_samples) or 1)
                         )
                         import os as _os
+                        # Basic throughput stats on the profiled clips
+                        try:
+                            elapsed_vals = [float(s.get("elapsed", 0.0)) for s in self._profile_samples]
+                            elapsed_vals = [v for v in elapsed_vals if v > 0]
+                            elapsed_vals.sort()
+                            avg_elapsed = sum(elapsed_vals) / float(len(elapsed_vals) or 1)
+                            p90_elapsed = elapsed_vals[int(0.9 * (len(elapsed_vals) - 1))] if elapsed_vals else 0.0
+                        except Exception:
+                            avg_elapsed = 0.0
+                            p90_elapsed = 0.0
                         # Be conservative on CPU overlays
                         if cpu_ratio >= 0.5:
                             # Tighten filter caps and lower concurrency
@@ -834,24 +1018,37 @@ class VideoPhase:
                                 )
                             except Exception:
                                 pass
-                            # Prefer at most 2 workers when NVENC + CPU overlays dominate
+                            # Explore a slightly higher worker count on larger CPUs
                             prev_workers = self.clip_workers
-                            self.clip_workers = max(1, min(prev_workers, 2))
+                            cpu_cnt = _os.cpu_count() or 8
+                            target_workers = 2
+                            if cpu_cnt >= 16 and cpu_ratio >= 0.8:
+                                target_workers = 4
+                            elif cpu_cnt >= 12 and cpu_ratio >= 0.6:
+                                target_workers = 3
+                            # Keep within CPU count
+                            target_workers = max(1, min(target_workers, cpu_cnt))
+                            # Apply the decided target
+                            self.clip_workers = target_workers
                             # Propagate new concurrency to the renderer for consistent thread logging
                             try:
                                 self.video_renderer.clip_workers = self.clip_workers
                             except Exception:
                                 pass
                             logger.info(
-                                "[AutoTune] cpu_ratio=%.2f -> caps(ft,fct)=2, clip_workers %s -> %s",
+                                "[AutoTune] cpu_ratio=%.2f avg=%.2fs p90=%.2fs -> caps(ft,fct)=2, clip_workers %s -> %s",
                                 cpu_ratio,
+                                avg_elapsed,
+                                p90_elapsed,
                                 prev_workers,
                                 self.clip_workers,
                             )
                         else:
                             logger.info(
-                                "[AutoTune] cpu_ratio=%.2f -> keeping current concurrency",
+                                "[AutoTune] cpu_ratio=%.2f avg=%.2fs p90=%.2fs -> keeping current concurrency",
                                 cpu_ratio,
+                                avg_elapsed,
+                                p90_elapsed,
                             )
                         # Disable profiling overhead after retune
                         _os.environ["FFMPEG_PROFILE_MODE"] = "0"
@@ -864,6 +1061,8 @@ class VideoPhase:
                                 "cpu_ratio": cpu_ratio,
                                 "decided_mode": "cpu" if cpu_ratio >= 0.5 else "auto",
                                 "clip_workers": self.clip_workers,
+                                "avg_elapsed": avg_elapsed,
+                                "p90_elapsed": p90_elapsed,
                                 "ffmpeg": await get_ffmpeg_version(),
                                 "hw_kind": self.hw_kind,
                             }
@@ -887,22 +1086,31 @@ class VideoPhase:
                     logger.info(f"Concatenated scene clips -> {scene_output_path.name}")
 
                     fg_overlays = scene.get("fg_overlays")
-                    if fg_overlays:
-                        scene_output_path = await self.video_renderer.apply_foreground_overlays(
-                            scene_output_path, fg_overlays
-                        )
-                        logger.info(
-                            f"Applied foreground overlays -> {scene_output_path.name}"
-                        )
-
-                    if subtitle_entries:
+                    # Combine subtitle + foreground overlays in one pass when both exist
+                    if fg_overlays and subtitle_entries:
                         subtitle_entries.sort(key=lambda s: s["start"])
-                        scene_output_path = await self.video_renderer.apply_subtitle_overlays(
-                            scene_output_path, subtitle_entries
+                        scene_output_path = await self.video_renderer.apply_overlays(
+                            scene_output_path, fg_overlays, subtitle_entries
                         )
                         logger.info(
-                            f"Applied subtitles -> {scene_output_path.name}"
+                            f"Applied foreground + subtitles -> {scene_output_path.name}"
                         )
+                    else:
+                        if fg_overlays:
+                            scene_output_path = await self.video_renderer.apply_foreground_overlays(
+                                scene_output_path, fg_overlays
+                            )
+                            logger.info(
+                                f"Applied foreground overlays -> {scene_output_path.name}"
+                            )
+                        if subtitle_entries:
+                            subtitle_entries.sort(key=lambda s: s["start"])
+                            scene_output_path = await self.video_renderer.apply_subtitle_overlays(
+                                scene_output_path, subtitle_entries
+                            )
+                            logger.info(
+                                f"Applied subtitles -> {scene_output_path.name}"
+                            )
 
                     all_clips.append(scene_output_path)
                     self.cache_manager.cache_file(

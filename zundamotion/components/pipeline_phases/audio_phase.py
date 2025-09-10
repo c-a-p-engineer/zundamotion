@@ -205,13 +205,48 @@ class AudioPhase:
 
                     face_anim = None
                     try:
-                        # Compute mouth timeline from speech audio only
-                        mouth_segments = compute_mouth_timeline(
-                            audio_path,
-                            fps=mouth_fps,
-                            thr_half_ratio=thr_half,
-                            thr_open_ratio=thr_open,
-                        )
+                        # Compute mouth timeline from speech audio only (cached by audio content + params)
+                        mouth_segments = []
+                        try:
+                            st = audio_path.stat()
+                            key_data = {
+                                "op": "mouth_timeline",
+                                "audio_path": str(audio_path.resolve()),
+                                "size": st.st_size,
+                                "mtime": int(st.st_mtime),
+                                "fps": int(mouth_fps),
+                                "thr_half": float(thr_half),
+                                "thr_open": float(thr_open),
+                            }
+
+                            async def _create_mouth_json(out_path: Path) -> Path:
+                                segs = compute_mouth_timeline(
+                                    audio_path,
+                                    fps=mouth_fps,
+                                    thr_half_ratio=thr_half,
+                                    thr_open_ratio=thr_open,
+                                )
+                                with open(out_path, "w", encoding="utf-8") as _f:
+                                    json.dump({"segments": segs}, _f, ensure_ascii=False)
+                                return out_path
+
+                            mouth_json_path = await self.cache_manager.get_or_create(
+                                key_data=key_data,
+                                file_name="face_mouth",
+                                extension="json",
+                                creator_func=_create_mouth_json,
+                            )
+                            with open(mouth_json_path, "r", encoding="utf-8") as _f:
+                                mouth_segments = (json.load(_f) or {}).get("segments", [])
+                        except Exception:
+                            # Fallback: compute inline on any cache/read error
+                            mouth_segments = compute_mouth_timeline(
+                                audio_path,
+                                fps=mouth_fps,
+                                thr_half_ratio=thr_half,
+                                thr_open_ratio=thr_open,
+                            )
+
                         # Deterministic blink schedule per line
                         seed = deterministic_seed_from_text(line_id)
                         blink_segments = generate_blink_timeline(

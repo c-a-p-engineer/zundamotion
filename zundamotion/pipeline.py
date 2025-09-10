@@ -40,6 +40,33 @@ class GenerationPipeline:
         self.hw_encoder = hw_encoder
         self.quality = quality
         self.final_copy_only = final_copy_only
+        # 既定で NVENC の高速化フラグを有効化（必要に応じて NVENC_FAST=0 で無効化）
+        try:
+            import os as _os
+            _os.environ.setdefault("NVENC_FAST", "1")
+        except Exception:
+            pass
+        # Propagate quality-aware scaling policy into config for VideoPhase/Renderer
+        try:
+            vcfg = self.config.setdefault("video", {})
+            # Map quality -> scale flags (CPU scaler) and fps filter policy
+            q = (quality or "balanced").lower()
+            if "scale_flags" not in vcfg:
+                vcfg["scale_flags"] = (
+                    "fast_bilinear" if q == "speed" else ("lanczos" if q == "quality" else "bicubic")
+                )
+            if "apply_fps_filter" not in vcfg:
+                # In speed mode, rely on output -r CFR to minimize per-frame filter cost
+                vcfg["apply_fps_filter"] = False if q == "speed" else True
+            # Encourage scene base generation slightly earlier in speed mode
+            if q == "speed":
+                try:
+                    cur = int(vcfg.get("scene_base_min_lines", 6))
+                except Exception:
+                    cur = 6
+                vcfg["scene_base_min_lines"] = max(2, min(cur, 4))
+        except Exception:
+            pass
         self.cache_manager = CacheManager(
             cache_dir=Path(self.config.get("system", {}).get("cache_dir", "cache")),
             no_cache=self.no_cache,

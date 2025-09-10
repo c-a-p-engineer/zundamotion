@@ -19,6 +19,7 @@ from ..utils.ffmpeg_utils import (
         has_cuda_filters,
         smoke_test_cuda_filters,
         smoke_test_cuda_scale_only,
+        smoke_test_opencl_scale_only,
         normalize_media,
         get_hw_filter_mode,
         set_hw_filter_mode,
@@ -26,6 +27,7 @@ from ..utils.ffmpeg_utils import (
         has_gpu_scale_filters,
         _dump_cuda_diag_once,
         get_profile_flags,
+        get_filter_diagnostics,
     )
 from .subtitle import SubtitleGenerator
 from .face_overlay_cache import FaceOverlayCache
@@ -60,6 +62,8 @@ class VideoRenderer:
         self.has_gpu_scale: bool = False
         # Whether GPU scale-only path is confirmed safe via smoke test
         self.cuda_scale_only_ok: bool = False
+        # If scale-only is allowed, which backend to use: 'cuda' | 'opencl'
+        self.scale_only_backend: Optional[str] = None
         # GPU overlay backend: 'cuda' | 'opencl' | None (cpu)
         self.gpu_overlay_backend: Optional[str] = None
         # 並列クリップ数（VideoPhase 側の決定を受け取る）
@@ -70,6 +74,10 @@ class VideoRenderer:
         )
         # Preferred GPU scaler ("scale_cuda" or fallback "scale_npp")
         self.scale_filter = "scale_cuda"
+        # Allow OpenCL overlays even when global HW filter mode is 'cpu'
+        self.allow_opencl_overlay_in_cpu_mode = bool(
+            config.get("video", {}).get("allow_opencl_overlay_in_cpu_mode", False)
+        )
         # Subtitle generator (used to build overlay snippet and PNG input)
         self.subtitle_gen = SubtitleGenerator(self.config, self.cache_manager)
         # Face overlay preprocessor/cache
@@ -81,6 +89,14 @@ class VideoRenderer:
             "gpu_scale_only": 0,
             "cpu": 0,
         }
+        # CPU scaler flags and fps filter policy (quality-aware)
+        try:
+            vcfg = config.get("video", {}) or {}
+            self.scale_flags: str = str(vcfg.get("scale_flags", "lanczos"))
+            self.apply_fps_filter: bool = bool(vcfg.get("apply_fps_filter", True))
+        except Exception:
+            self.scale_flags = "lanczos"
+            self.apply_fps_filter = True
 
         if self.has_cuda_filters:
             logger.info("CUDA filters available: True (scale_cuda/overlay_cuda)")
@@ -106,6 +122,7 @@ class VideoRenderer:
         clip_workers: Optional[int] = None,
     ):
         ffmpeg_path = config.get("ffmpeg_path", "ffmpeg")
+        vcfg = config.get("video", {}) if isinstance(config, dict) else {}
         # フィルタ存在チェックに加えて実行スモークテストで確度を上げる
         has_cuda_filters_listed = await has_cuda_filters(ffmpeg_path)
         has_cuda_filters_val = (
@@ -121,7 +138,8 @@ class VideoRenderer:
         # Try OpenCL as alternative backend when CUDA is not available/disabled
         from ..utils.ffmpeg_utils import has_opencl_filters, smoke_test_opencl_filters
         opencl_ok = False
-        if not has_cuda_filters_val and get_hw_filter_mode() != "cpu":
+        allow_opencl_cpu = bool(config.get("video", {}).get("allow_opencl_overlay_in_cpu_mode", False))
+        if not has_cuda_filters_val and (get_hw_filter_mode() != "cpu" or allow_opencl_cpu):
             try:
                 if await has_opencl_filters(ffmpeg_path):
                     opencl_ok = await smoke_test_opencl_filters(ffmpeg_path)
@@ -150,6 +168,11 @@ class VideoRenderer:
             inst.scale_filter = scale_filter or "scale_cuda"
         except Exception:
             inst.scale_filter = "scale_cuda"
+        # propagate allow-opencl-in-cpu flag
+        try:
+            inst.allow_opencl_overlay_in_cpu_mode = allow_opencl_cpu
+        except Exception:
+            pass
         try:
             inst.has_gpu_scale = bool(has_gpu_scale_val)
         except Exception:
@@ -159,11 +182,43 @@ class VideoRenderer:
         except Exception:
             pass
         # Decide overlay backend
-        if get_hw_filter_mode() != "cpu":
+        if (get_hw_filter_mode() != "cpu") or allow_opencl_cpu:
             if has_cuda_filters_val and hw_kind == "nvenc":
                 inst.gpu_overlay_backend = "cuda"
             elif opencl_ok:
                 inst.gpu_overlay_backend = "opencl"
+        # Decide scale-only backend (allowed also in CPU mode when smoke passed)
+        opencl_scale_only_ok = False
+        try:
+            opencl_scale_only_ok = await smoke_test_opencl_scale_only(ffmpeg_path)
+        except Exception:
+            opencl_scale_only_ok = False
+        if inst.cuda_scale_only_ok:
+            inst.scale_only_backend = "cuda"
+        elif opencl_scale_only_ok:
+            inst.scale_only_backend = "opencl"
+        # Aggressive enablement: when CUDA scale filters are present but the
+        # conservative smoke test failed, allow scale-only path opportunistically
+        # to reduce CPU work. This is guarded by config and still falls back
+        # safely via render_clip() retry logic if FFmpeg errors occur.
+        try:
+            aggressive = bool(vcfg.get("gpu_scale_aggressive", False))
+        except Exception:
+            aggressive = False
+        if (
+            aggressive
+            and not inst.cuda_scale_only_ok
+            and has_gpu_scale_val
+            and inst.scale_only_backend is None
+        ):
+            inst.cuda_scale_only_ok = True
+            inst.scale_only_backend = "cuda"
+            try:
+                logger.info(
+                    "[Filters] Enabling aggressive GPU scale-only path (smoke test failed, filters present)."
+                )
+            except Exception:
+                pass
         logger.info(
             "[Filters] GPU overlay backend=%s (cuda=%s, opencl_ok=%s, scale_only=%s, scale_only_smoke_ok=%s)",
             inst.gpu_overlay_backend or "none",
@@ -172,6 +227,27 @@ class VideoRenderer:
             has_gpu_scale_val,
             scale_only_ok,
         )
+        # Emit a one-shot diagnostics table for filters/smokes
+        try:
+            diag = await get_filter_diagnostics(ffmpeg_path)
+            pres = diag.get("present", {})
+            smo = diag.get("smokes", {})
+            logger.info(
+                "[FilterDiag] present(cu:ov=%s,sc=%s,npp=%s,up=%s; ocl:ov=%s,sc=%s,up=%s) smokes(cu=%s, cu_scale_only=%s, ocl=%s, ocl_scale_only=%s)",
+                int(bool(pres.get("overlay_cuda"))),
+                int(bool(pres.get("scale_cuda"))),
+                int(bool(pres.get("scale_npp"))),
+                int(bool(pres.get("hwupload_cuda"))),
+                int(bool(pres.get("overlay_opencl"))),
+                int(bool(pres.get("scale_opencl"))),
+                int(bool(pres.get("hwupload"))),
+                int(bool(smo.get("cuda_filters"))),
+                int(bool(smo.get("cuda_scale_only"))),
+                int(bool(smo.get("opencl_filters"))),
+                int(bool(smo.get("opencl_scale_only"))),
+            )
+        except Exception:
+            pass
         return inst
 
     # --------------------------
@@ -186,21 +262,53 @@ class VideoRenderer:
         nproc = multiprocessing.cpu_count() or 1
 
         # Global worker threads for encoders/decoders
-        if self.jobs == "auto":
-            threads = "0"
-            logger.info("[Jobs] Auto-detected CPU cores: %s (threads=auto)", nproc)
+        def _auto_threads_for_mode() -> str:
+            # CPU フィルタ優勢時は、クリップ並列(self.clip_workers)との過剰競合を避けるため
+            # プロセスあたりのスレッド数を抑制（nproc // clip_workers）。
+            # NVENC/GPU 経路では FFmpeg の自動スレッド化に委ねる（0）。
+            global_mode = get_hw_filter_mode()
+            if global_mode == "cpu":
+                per_proc = max(1, nproc // max(1, self.clip_workers))
+                return str(per_proc)
+            # 非CPU（NVENCなど）では 0（自動）
+            return "0"
+
+        if self.jobs is None or str(self.jobs).strip().lower() in {"auto", ""}:
+            threads = _auto_threads_for_mode()
+            logger.info(
+                "[Jobs] Auto mode: nproc=%s, clip_workers=%s -> threads=%s",
+                nproc,
+                self.clip_workers,
+                threads,
+            )
         else:
+            j = str(self.jobs).strip().lower()
             try:
-                num_jobs = int(self.jobs)
-                if num_jobs < 0:
-                    raise ValueError
-                threads = str(num_jobs)
-                logger.info("[Jobs] Using specified threads=%s", threads)
+                if j == "0":
+                    threads = _auto_threads_for_mode()
+                    logger.info(
+                        "[Jobs] Auto(0) adjusted: nproc=%s, clip_workers=%s -> threads=%s",
+                        nproc,
+                        self.clip_workers,
+                        threads,
+                    )
+                else:
+                    num_jobs = int(j)
+                    if num_jobs <= 0:
+                        threads = _auto_threads_for_mode()
+                        logger.info(
+                            "[Jobs] Non-positive --jobs -> auto adjusted to %s",
+                            threads,
+                        )
+                    else:
+                        threads = str(num_jobs)
+                        logger.info("[Jobs] Using specified threads=%s", threads)
             except ValueError:
-                threads = "0"
+                threads = _auto_threads_for_mode()
                 logger.warning(
-                    "[Jobs] Invalid --jobs '%s'. Falling back to auto (0).",
+                    "[Jobs] Invalid --jobs '%s'. Auto adjusted to %s.",
                     self.jobs,
+                    threads,
                 )
 
         # Filter thread overrides via env (used for fallback stability)
@@ -521,9 +629,10 @@ class VideoRenderer:
         # Allow hybrid path in non-CPU mode as before; additionally, if CPU mode
         # is active due to overlay failures, permit scale-only when the smoke passed.
         allow_in_cpu_mode = self.cuda_scale_only_ok
+        scale_only_available = bool(self.scale_only_backend) or self.has_gpu_scale or self.has_cuda_filters
         use_gpu_scale_only = (
             (not use_cuda_filters)
-            and (self.has_gpu_scale or self.has_cuda_filters)
+            and scale_only_available
             and self.hw_kind == "nvenc"
             and allow_gpu_scale_only_cfg
             and (not _force_cpu)
@@ -538,24 +647,24 @@ class VideoRenderer:
             except Exception:
                 pass
         else:
-            if self.hw_kind == "nvenc" and self.has_cuda_filters and uses_alpha_overlay:
-                if use_gpu_scale_only:
-                    logger.info(
-                        "[Filters] CPU path: RGBA overlays detected; forcing CPU overlays while keeping NVENC encoding (hybrid GPU scale enabled)"
-                    )
-                else:
-                    logger.info(
-                        "[Filters] CPU path: RGBA overlays detected; forcing CPU overlays while keeping NVENC encoding"
-                    )
-                if use_gpu_scale_only:
-                    logger.info(
-                        "[Filters] Hybrid path: GPU scale + CPU overlay (background only)%s",
-                        " [cpu-mode-override]" if global_mode == "cpu" else "",
-                    )
-                    try:
-                        self.path_counters["gpu_scale_only"] += 1
-                    except Exception:
-                        pass
+            # Prefer hybrid GPU scale-only when allowed (independent of overlay CUDA availability)
+            if use_gpu_scale_only:
+                logger.info(
+                    "[Filters] Hybrid path: GPU scale + CPU overlay (background only)%s",
+                    " [cpu-mode-override]" if global_mode == "cpu" else "",
+                )
+                try:
+                    self.path_counters["gpu_scale_only"] += 1
+                except Exception:
+                    pass
+            elif self.hw_kind == "nvenc" and uses_alpha_overlay:
+                logger.info(
+                    "[Filters] CPU path: RGBA overlays detected; forcing CPU overlays while keeping NVENC encoding"
+                )
+                try:
+                    self.path_counters["cpu"] += 1
+                except Exception:
+                    pass
             else:
                 logger.info("[Filters] CPU path: using CPU filters for scaling/overlay")
                 try:
@@ -568,6 +677,7 @@ class VideoRenderer:
 
         # 背景スケール
         pre_scaled = bool(background_config.get("pre_scaled", False))
+        fps_part = f",fps={fps}" if self.apply_fps_filter else ""
         if pre_scaled:
             # すでに width/height/fps に整形済みのベース映像（シーンベース）
             # 無駄な再スケールを避けるため passthrough
@@ -577,29 +687,38 @@ class VideoRenderer:
                 # CUDA: 一旦GPUへ上げてスケール＋fps。RGBA→NV12 変換はCUDA側に任せる。
                 filter_complex_parts.append("[0:v]format=rgba,hwupload_cuda[hw_bg_in]")
                 filter_complex_parts.append(
-                    f"[hw_bg_in]{self.scale_filter}={width}:{height},fps={fps}[bg]"
+                    f"[hw_bg_in]{self.scale_filter}={width}:{height}{(f',fps={fps}' if self.apply_fps_filter else '')}[bg]"
                 )
             elif use_gpu_scale_only:
                 # Hybrid: scale on GPU then download for CPU overlays
-                filter_complex_parts.append("[0:v]format=rgba,hwupload_cuda[hw_bg_in]")
-                filter_complex_parts.append(
-                    f"[hw_bg_in]{self.scale_filter}={width}:{height},fps={fps}[bg_gpu_scaled]"
-                )
-                filter_complex_parts.append(
-                    "[bg_gpu_scaled]hwdownload,format=rgba[bg]"
-                )
-            elif self.gpu_overlay_backend == "opencl" and not _force_cpu and get_hw_filter_mode() != "cpu":
+                if self.scale_only_backend == "opencl":
+                    filter_complex_parts.append("[0:v]format=rgba,hwupload[hw_bg_in]")
+                    filter_complex_parts.append(
+                        f"[hw_bg_in]scale_opencl={width}:{height}{(f',fps={fps}' if self.apply_fps_filter else '')}[bg_gpu_scaled]"
+                    )
+                    filter_complex_parts.append(
+                        "[bg_gpu_scaled]hwdownload,format=rgba[bg]"
+                    )
+                else:
+                    filter_complex_parts.append("[0:v]format=rgba,hwupload_cuda[hw_bg_in]")
+                    filter_complex_parts.append(
+                        f"[hw_bg_in]{self.scale_filter}={width}:{height}{(f',fps={fps}' if self.apply_fps_filter else '')}[bg_gpu_scaled]"
+                    )
+                    filter_complex_parts.append(
+                        "[bg_gpu_scaled]hwdownload,format=rgba[bg]"
+                    )
+            elif self.gpu_overlay_backend == "opencl" and not _force_cpu and (get_hw_filter_mode() != "cpu" or self.allow_opencl_overlay_in_cpu_mode):
                 # OpenCL: 背景のスケールはCPUで行い、その後にGPUへアップロードして合成に回す
                 filter_complex_parts.append(
-                    f"[0:v]scale={width}:{height}:flags=lanczos,fps={fps}[bg]"
+                    f"[0:v]scale={width}:{height}:flags={self.scale_flags}{fps_part}[bg]"
                 )
                 filter_complex_parts.append("[bg]format=rgba,hwupload[bg_gpu]")
                 current_video_stream = "[bg_gpu]"
             else:
                 filter_complex_parts.append(
-                    f"[0:v]scale={width}:{height}:flags=lanczos,fps={fps}[bg]"
+                    f"[0:v]scale={width}:{height}:flags={self.scale_flags}{fps_part}[bg]"
                 )
-        if not (self.gpu_overlay_backend == "opencl" and not _force_cpu and get_hw_filter_mode() != "cpu"):
+        if not (self.gpu_overlay_backend == "opencl" and not _force_cpu and (get_hw_filter_mode() != "cpu" or self.allow_opencl_overlay_in_cpu_mode)):
             current_video_stream = "[bg]"
         overlay_streams: List[str] = []
         overlay_filters: List[str] = []
@@ -633,7 +752,7 @@ class VideoRenderer:
                     )
                 overlay_streams.append("[insert_scaled]")
                 overlay_filters.append(f"overlay_cuda=x={x_expr}:y={y_expr}")
-            elif self.gpu_overlay_backend == "opencl" and not _force_cpu and get_hw_filter_mode() != "cpu":
+            elif self.gpu_overlay_backend == "opencl" and not _force_cpu and (get_hw_filter_mode() != "cpu" or self.allow_opencl_overlay_in_cpu_mode):
                 # スケールはCPUで前処理 → OpenCL へアップロードして overlay_opencl
                 filter_complex_parts.append(
                     f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[insert_scaled]"
@@ -645,7 +764,7 @@ class VideoRenderer:
                 overlay_filters.append(f"overlay_opencl=x={x_expr}:y={y_expr}")
             else:
                 filter_complex_parts.append(
-                    f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[insert_scaled]"
+                    f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}:flags={self.scale_flags}[insert_scaled]"
                 )
                 overlay_streams.append("[insert_scaled]")
                 overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
@@ -684,7 +803,7 @@ class VideoRenderer:
                 )
                 overlay_streams.append(f"[char_scaled_{i}]")
                 overlay_filters.append(f"overlay_cuda=x={x_expr}:y={y_expr}")
-            elif self.gpu_overlay_backend == "opencl" and not _force_cpu and get_hw_filter_mode() != "cpu":
+            elif self.gpu_overlay_backend == "opencl" and not _force_cpu and (get_hw_filter_mode() != "cpu" or self.allow_opencl_overlay_in_cpu_mode):
                 # 前段で Pillow による事前スケールが有効な場合、scale は 1.0 に縮退
                 if os.environ.get("CHAR_CACHE_DISABLE", "0") != "1":
                     try:
@@ -723,7 +842,7 @@ class VideoRenderer:
                     )
                 else:
                     filter_complex_parts.append(
-                        f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[char_scaled_{i}]"
+                        f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}:flags={self.scale_flags}[char_scaled_{i}]"
                     )
                 overlay_streams.append(f"[char_scaled_{i}]")
                 overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
@@ -1292,13 +1411,14 @@ class VideoRenderer:
 
         # Filters
         filter_parts: List[str] = []
+        fps_part = f",fps={fps}" if self.apply_fps_filter else ""
         if bg_type == "video":
             filter_parts.append(
-                f"[0:v]scale={width}:{height}:flags=lanczos,fps={fps}[bg]"
+                f"[0:v]scale={width}:{height}:flags={self.scale_flags}{fps_part}[bg]"
             )
         else:
             filter_parts.append(
-                f"[0:v]scale={width}:{height}:flags=lanczos,fps={fps},trim=duration={duration}[bg]"
+                f"[0:v]scale={width}:{height}:flags={self.scale_flags}{fps_part},trim=duration={duration}[bg]"
             )
 
         chain = "[bg]"
@@ -1317,7 +1437,7 @@ class VideoRenderer:
                 str(pos.get("y", "0")),
             )
             filter_parts.append(
-                f"[{idx}:v]scale=iw*{scale}:ih*{scale}[ov_{i}]"
+                f"[{idx}:v]scale=iw*{scale}:ih*{scale}:flags={self.scale_flags}[ov_{i}]"
             )
             if i < len(overlays) - 1:
                 chain += f"[ov_{i}]overlay=x={x_expr}:y={y_expr}[tmp_{i}];[tmp_{i}]"
@@ -1458,7 +1578,7 @@ class VideoRenderer:
             # ベースがすでに width/height/fps に整形済みなら再スケール不要
             filter_complex = f"[0:v]trim=duration={duration},format=yuv420p[final_v]"
         else:
-            filter_complex = f"[0:v]scale={width}:{height},trim=duration={duration},format=yuv420p[final_v]"
+            filter_complex = f"[0:v]scale={width}:{height}:flags={self.scale_flags},trim=duration={duration},format=yuv420p[final_v]"
 
         cmd.extend(["-filter_complex", filter_complex])
         cmd.extend(["-map", "[final_v]", "-map", "1:a"])
@@ -1541,18 +1661,20 @@ class VideoRenderer:
                 f"[Warning] Could not inspect/normalize looped BG video {bg_video_path.name}: {e}. Using as-is."
             )
 
-        cmd.extend(
-            [
-                "-stream_loop",
-                "-1",
-                "-i",
-                str(bg_video_path),
-                "-t",
-                str(duration),
-                "-vf",
-                f"scale={width}:{height},fps={fps},format=yuv420p",
-            ]
-        )
+        vf = f"scale={width}:{height}:flags={self.scale_flags}"
+        if self.apply_fps_filter:
+            vf += f",fps={fps}"
+        vf += ",format=yuv420p"
+        cmd.extend([
+            "-stream_loop",
+            "-1",
+            "-i",
+            str(bg_video_path),
+            "-t",
+            str(duration),
+            "-vf",
+            vf,
+        ])
         cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
         cmd.extend(["-an"])  # 音声は不要
         cmd.extend([str(output_path)])
@@ -1642,10 +1764,10 @@ class VideoRenderer:
             if w and h:
                 if keep:
                     steps.append(
-                        f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
+                        f"scale={w}:{h}:flags={self.scale_flags}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
                     )
                 else:
-                    steps.append(f"scale={w}:{h}")
+                    steps.append(f"scale={w}:{h}:flags={self.scale_flags}")
             if mode == "chroma":
                 chroma = ov.get("chroma", {})
                 key_color = chroma.get("key_color", "#000000").replace("#", "0x")
@@ -1686,8 +1808,141 @@ class VideoRenderer:
 
         cmd.extend(["-filter_complex", filter_complex, "-map", prev_stream, "-map", "0:a?"])
         cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
-        cmd.extend(self.audio_params.to_ffmpeg_opts())
+        # Keep audio stream as-is (no re-encode) for overlay-only operations
+        cmd.extend(["-c:a", "copy"])
         # Ensure we don't run past base video length
+        if base_dur and base_dur > 0:
+            cmd.extend(["-t", f"{base_dur:.3f}"])
+        cmd.append(str(output_path))
+
+        await _run_ffmpeg_async(cmd)
+        return output_path
+
+    async def apply_overlays(
+        self,
+        base_video: Path,
+        overlays: List[Dict[str, Any]],
+        subtitles: List[Dict[str, Any]],
+    ) -> Path:
+        """Apply foreground overlays and timed subtitle overlays in a single pass.
+
+        - Foreground overlays are applied first in the order provided.
+        - Subtitles are then applied sequentially on top so they always appear above.
+        """
+        if not overlays and not subtitles:
+            return base_video
+
+        output_path = self.temp_dir / f"{base_video.stem}_fg_sub.mp4"
+        # Bound to base duration to avoid running past the base (e.g., loops)
+        try:
+            base_dur = await get_media_duration(str(base_video))
+        except Exception:
+            base_dur = None
+
+        cmd: List[str] = [self.ffmpeg_path, "-y", "-nostdin", "-i", str(base_video)]
+
+        # 1) Add overlay inputs
+        for ov in overlays or []:
+            timing = ov.get("timing", {})
+            if timing.get("loop"):
+                cmd.extend(["-stream_loop", "-1"])
+            cmd.extend(["-i", str(Path(ov["src"]).resolve())])
+
+        # We'll compute subtitle PNG inputs while building filter graph
+
+        cmd.extend(self._thread_flags())
+
+        filter_parts: List[str] = []
+        prev_stream = "[0:v]"
+
+        # 2) Foreground overlays
+        for idx, ov in enumerate(overlays or []):
+            in_stream = f"[{idx + 1}:v]"
+            steps: List[str] = []
+            mode = ov.get("mode", "overlay")
+            fps = ov.get("fps")
+            if fps:
+                steps.append(f"fps={int(fps)}")
+            scale_cfg = ov.get("scale", {})
+            w = scale_cfg.get("w")
+            h = scale_cfg.get("h")
+            keep = scale_cfg.get("keep_aspect")
+            if w and h:
+                if keep:
+                    steps.append(
+                        f"scale={w}:{h}:flags={self.scale_flags}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
+                    )
+                else:
+                    steps.append(f"scale={w}:{h}:flags={self.scale_flags}")
+            if mode == "chroma":
+                chroma = ov.get("chroma", {})
+                key_color = chroma.get("key_color", "#000000").replace("#", "0x")
+                similarity = chroma.get("similarity", 0.1)
+                blend = chroma.get("blend", 0.0)
+                steps.append(f"colorkey={key_color}:{similarity}:{blend}")
+            steps.append("format=rgba")
+            opacity = ov.get("opacity")
+            if opacity is not None:
+                steps.append(f"colorchannelmixer=aa={float(opacity)}")
+            processed = f"[ov{idx}]"
+            filter_parts.append(f"{in_stream}{','.join(steps)}{processed}")
+
+            pos = ov.get("position", {})
+            x = pos.get("x", 0)
+            y = pos.get("y", 0)
+            timing = ov.get("timing", {})
+            start = float(timing.get("start", 0.0))
+            duration = timing.get("duration")
+            if duration is not None:
+                end = start + float(duration)
+                enable = f"between(t,{start},{end})"
+            else:
+                enable = f"gte(t,{start})"
+
+            if mode == "blend":
+                blend_mode = ov.get("blend_mode", "screen")
+                filter_parts.append(
+                    f"{prev_stream}{processed}blend=all_mode={blend_mode}:enable='{enable}'[tmp{idx}]"
+                )
+            else:
+                filter_parts.append(
+                    f"{prev_stream}{processed}overlay=x={x}:y={y}:enable='{enable}'[tmp{idx}]"
+                )
+            prev_stream = f"[tmp{idx}]"
+
+        # 3) Subtitle overlays (add PNG inputs on-the-fly)
+        overlay_input_count = len(overlays or [])
+        png_added = 0
+        for sidx, sub in enumerate(subtitles or []):
+            # Compute ffmpeg input index for this PNG (base=0, overlays=1..N, then PNGs)
+            png_input_index = overlay_input_count + png_added + 1
+            extra_input, snippet = await self.subtitle_gen.build_subtitle_overlay(
+                sub.get("text", ""),
+                float(sub.get("duration", 0.0)),
+                sub.get("line_config", {}),
+                in_label=prev_stream.strip("[]"),
+                index=png_input_index,
+                allow_cuda=self.gpu_overlay_backend == "cuda",
+            )
+            # Attach PNG input to cmd
+            for k, v in extra_input.items():
+                cmd.extend([k, v])
+            png_added += 1
+            # Adjust snippet timing to absolute scene time
+            start = float(sub.get("start", 0.0))
+            end = start + float(sub.get("duration", 0.0))
+            snippet = snippet.replace(
+                f"between(t,0,{sub.get('duration')})",
+                f"between(t,{start},{end})",
+            )
+            filter_parts.append(snippet)
+            prev_stream = f"[with_subtitle_{png_input_index}]"
+
+        filter_complex = ";".join(filter_parts)
+        cmd.extend(["-filter_complex", filter_complex, "-map", prev_stream, "-map", "0:a?"])
+        cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
+        # Keep audio stream as-is (no re-encode) for overlay-only operations
+        cmd.extend(["-c:a", "copy"])
         if base_dur and base_dur > 0:
             cmd.extend(["-t", f"{base_dur:.3f}"])
         cmd.append(str(output_path))
@@ -1744,7 +1999,8 @@ class VideoRenderer:
         filter_complex = ";".join(filter_parts)
         cmd.extend(["-filter_complex", filter_complex, "-map", prev_stream, "-map", "0:a?"])
         cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
-        cmd.extend(self.audio_params.to_ffmpeg_opts())
+        # Keep audio stream as-is (no re-encode) when only adding subtitle overlays
+        cmd.extend(["-c:a", "copy"])
         if base_dur and base_dur > 0:
             cmd.extend(["-t", f"{base_dur:.3f}"])
         cmd.append(str(output_path))

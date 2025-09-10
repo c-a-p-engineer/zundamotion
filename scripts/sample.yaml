@@ -35,7 +35,7 @@ subtitle:
   color: "white"
   outline: "black"
   wrap_mode: chars 
-  max_chars_per_line: 16 
+  max_chars_per_line: 28 
   # インライン読みを字幕に括弧付きで表示する（none|paren）
   reading_display: paren
 

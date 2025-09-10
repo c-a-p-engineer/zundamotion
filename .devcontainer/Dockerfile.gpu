@@ -49,22 +49,58 @@ RUN pip install --upgrade pip \
  && pip install --no-cache-dir -r requirements.txt
 
 # ---------------------------------------------------------
-# FFmpeg（NVENC + libmp3lame 対応）: BtbNの事前ビルドで高速導入
+# FFmpeg（NVENC + libmp3lame 対応）: 既定はBtbNの事前ビルドで高速導入
 #   ※ Driver 525+ & NVIDIA Container Toolkit 必須
 # ---------------------------------------------------------
+# NOTE:
+#  - The default BtbN build below provides NVENC encoders. CUDA/OpenCL filter availability
+#    (overlay_cuda/scale_cuda/scale_npp/overlay_opencl/scale_opencl) depends on the build.
+#  - If CUDA filters are missing in your environment, consider switching to a different
+#    artifact (e.g. specific version tag) or building FFmpeg with --enable-cuda-nvcc --enable-libnpp --enable-nonfree.
 ARG FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl-shared.tar.xz"
+# 最高性能重視の既定: 自前ビルドで CUDA/OpenCL フィルタと NVENC を確実化
+ARG BUILD_FFMPEG_FROM_SOURCE=1
 
 # 依存は最小限（mp3lameライブラリを保険で導入）
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libmp3lame0 \
   && rm -rf /var/lib/apt/lists/*
 
-RUN curl -L -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" \
- && mkdir -p /opt/ffmpeg \
- && tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1 \
- && ln -sf /opt/ffmpeg/bin/ffmpeg  /usr/local/bin/ffmpeg \
- && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
- && rm -f /tmp/ffmpeg.tar.xz
+RUN if [ "$BUILD_FFMPEG_FROM_SOURCE" = "1" ]; then \
+      set -eux; \
+      apt-get update && apt-get install -y --no-install-recommends \
+        build-essential pkg-config yasm nasm git ca-certificates \
+        libx264-dev libx265-dev libnuma-dev libfreetype6-dev libmp3lame-dev \
+        libvulkan-dev libdrm-dev libx11-dev libxext-dev libxfixes-dev \
+        libssl-dev ocl-icd-opencl-dev opencl-headers clinfo ; \
+      # NVENC ヘッダ（ffnvcodec）
+      git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers; \
+      make -C /tmp/nv-codec-headers install; \
+      git clone --depth 1 https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg-src; \
+      cd /tmp/ffmpeg-src; \
+      ./configure \
+        --prefix=/opt/ffmpeg \
+        --pkg-config-flags=--static \
+        --enable-gpl --enable-nonfree \
+        --enable-libx264 --enable-libx265 --enable-libmp3lame \
+        --enable-cuda-nvcc --enable-cuvid --enable-nvenc \
+        --enable-opencl \
+        --extra-cflags=-I/usr/local/cuda/include \
+        --extra-ldflags=-L/usr/local/cuda/lib64 \
+        --enable-openssl \
+        ; \
+      make -j"$(nproc)"; \
+      make install; \
+      rm -rf /tmp/ffmpeg-src; \
+      rm -rf /tmp/nv-codec-headers; \
+    else \
+      curl -L -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" \
+      && mkdir -p /opt/ffmpeg \
+      && tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1 \
+      && rm -f /tmp/ffmpeg.tar.xz; \
+    fi \
+    && ln -sf /opt/ffmpeg/bin/ffmpeg  /usr/local/bin/ffmpeg \
+    && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
 
 # 共有ライブラリの検索パス
 ENV LD_LIBRARY_PATH="/opt/ffmpeg/lib:${LD_LIBRARY_PATH}"
@@ -74,8 +110,13 @@ RUN echo "/opt/ffmpeg/lib" > /etc/ld.so.conf.d/ffmpeg.conf && ldconfig
 RUN set -eux; \
   ffmpeg -hide_banner -encoders | grep -E 'h264_nvenc|hevc_nvenc' >/dev/null; \
   ffmpeg -hide_banner -encoders | grep -i 'libmp3lame' >/dev/null; \
-  ffmpeg -hide_banner -encoders | grep -E 'h264_nvenc|hevc_nvenc'; \
-  ffmpeg -hide_banner -encoders | grep -i 'libmp3lame'
+  echo "== Encoders present =="; \
+  ffmpeg -hide_banner -encoders | grep -E 'h264_nvenc|hevc_nvenc' || true; \
+  ffmpeg -hide_banner -encoders | grep -i 'libmp3lame' || true; \
+  echo "== Filters (CUDA/OpenCL) snapshot =="; \
+  ffmpeg -hide_banner -filters | grep -E 'overlay_cuda|scale_cuda|scale_npp|overlay_opencl|scale_opencl' || true; \
+  echo "== OpenCL devices =="; \
+  clinfo | head -n 20 || true
 
 # ---------------------------------------------------------
 # ワークスペース

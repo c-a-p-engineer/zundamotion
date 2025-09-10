@@ -14,7 +14,10 @@ services:
       - VOICEVOX_URL=http://voicevox:50021
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+      - USE_RAMDISK=1
+      - NVENC_FAST=1
     runtime: nvidia
+    shm_size: "2gb"
     deploy:
       resources:
         reservations:
@@ -30,6 +33,7 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
     runtime: nvidia
+    shm_size: "2gb"
     deploy:
       resources:
         reservations:

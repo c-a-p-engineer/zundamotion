@@ -2,28 +2,41 @@
 
 本ファイルは、最新ログを踏まえた改善タスクのみを掲載します（完了済みは削除）。
 
-参照ログ: `logs/20250909_005958_069.log`, `logs/20250908_081408_745.log`, `logs/20250908_074624_481.log`
+参照ログ（最新→古い順）: `logs/20250910_045352_758.log`, `logs/20250910_041524_580.log`
 
-最新観測サマリ（2025-09-09 実行・直近）:
-- 総所要: 134.92s。内訳: AudioPhase 12.93s / VideoPhase 105.80s / BGMPhase 2.27s / FinalizePhase 11.85s。
-- GPUエンコードはNVENCを利用。`[Filters] GPU overlay backend=none (cuda=None, opencl_ok=False, scale_only=True, scale_only_smoke_ok=False)`
-  - CUDA overlay スモーク失敗→グローバルCPUモードへバックオフ。
-  - GPUスケール専用スモークも失敗（scale_only_smoke_ok=False）→ハイブリッド経路は未解禁。
-- 起動直後から `clip_workers=2`（CPUモード初期抑制）、AutoTune後に `filter_threads` が 4→2 へ低減。
-- ConcatCopy は高速（~85〜140MB/s）。ボトルネックは VideoPhase（CPU overlay 支配）。
+最新観測サマリ（2025-09-10 実行）:
+- 総所要: 187.98s。内訳: AudioPhase ≈? / VideoPhase 153.57s / BGMPhase ≈? / FinalizePhase ≈?（ログ時刻より）。
+- NVENCエンコードは利用可（smoke OK）。一方、GPUフィルタは無効: `[Filters] GPU overlay backend=none (cuda=None, opencl_ok=False, scale_only=True, scale_only_smoke_ok=False)`
+  - CUDA系フィルタのスモーク失敗/未提供→フィルタ経路はCPUへ統一（NVENCは継続）。
+  - OpenCL もスモーク失敗（overlay/scaleとも）→ハイブリッド経路は未解禁。
+- AutoTuneにより HWフィルタを `cpu` 固定、`filter_threads=2` 上限、`clip_workers≈3` に調整。
+- ConcatCopy は高速（~119MB/s）。明確なボトルネックは引き続き VideoPhase（CPU overlay 支配）。
+- 備考: スケーラ最適化（scale_flags）/FPSフィルタ抑制の導入により、VideoPhase は前回 178.45s → 今回 153.57s（約14%短縮）。総所要も 225.38s → 187.98s（約17%短縮）。
 
 
 ## P1（品質向上・高速化）
 
-（全項目完了につき削除済み）
+### 00. FFmpeg を CUDAフィルタ入りビルドへ切替（環境整備）［最優先・要環境対応］
+- 背景: 最新ログでは `overlay_cuda/scale_cuda` 不可。GPUフィルタ経路が解禁できずCPU支配。
+- 目的: `overlay_cuda` 経路の解禁で VideoPhase を大幅短縮。
+- 方針: BtbN の別アーティファクトや自前ビルド（`--enable-cuda-nvcc --enable-libnpp --enable-nonfree`）を採用。DevContainerのフィルタ一覧スナップショットで確認。
+- 成果確認: ログに `CUDA filters available: True`、`[Diagnostics] Filter path usage` に `cuda_overlay>0`。
+
+### 01. 新実装の効果検証＆チューニング（VideoPhase短縮）［実装継続・効果確認中］
+- 背景: 字幕PNGプリキャッシュ、キャラPNG事前スケール、スケーラ最適化（`video.scale_flags`）、FPSフィルタ抑制（`video.apply_fps_filter`）を導入済み。
+- 現状: VideoPhase 178.45s → 153.57s（約14%短縮）、総所要 225.38s → 187.98s（約17%短縮）。
+- 目的: 閾値/プリセットの最適化と回帰防止。
+- 方針: `precache_min_lines`/`CHAR_ALPHA_THRESHOLD`/`allow_opencl_overlay_in_cpu_mode`/`scene_base_min_lines` を再調整し、`[Diagnostics] Slowest line clips` とともに継続計測。
+- 成果確認: VideoPhaseのさらなる短縮（+5〜10%目安）と最遅行の改善。必要に応じ `cache/autotune_hint.json` を更新。
+
+### 02. OpenCL overlay 安定性検証（オプトイン）［実装完了・検証待ち］
+- 背景: CPUモードでも OpenCL overlay を許可できるようにしたが、環境差が大きい。
+- 目的: 対象環境での安定度/短縮効果を計測し、既定値（false）の是非を判断。
+- 方針: `video.allow_opencl_overlay_in_cpu_mode: true` で再計測、失敗時は自動フォールバックを確認。
+- 成果確認: `[Diagnostics] Filter path usage` に `opencl_overlay>0`、VideoPhase短縮が確認できること。
 
 
 ## P2（改善・将来・機能追加）
-
-### 00. OpenCL/他GPUのスケール専用スモーク導入（フォールバック）
-- 目的: CUDA 不可の環境でも OpenCL 等が利用可能なら「GPUスケールのみ」を解禁。
-- 方針: `smoke_test_opencl_scale_only` を追加し、`hwupload` + `scale_opencl` + `hwdownload` をスモーク。
-- 成果確認: CUDA不可かつOpenCL可の環境でハイブリッド経路が有効化。
 
 ### 01. VOICEVOX 音声合成の並列化（スピーカー単位の上限）
 - 背景: 今回ログではAudioPhaseは8%と支配的ではないが、行数が多い脚本で効く改善。

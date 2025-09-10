@@ -27,7 +27,10 @@ video:
   # GPU filters
   gpu_overlay_experimental: false      # Try CUDA overlays even with RGBA (experimental)
   gpu_scale_with_cpu_overlay: true     # Use GPU for background scaling even when overlays are on CPU
-  precache_subtitles: false            # Pre-generate subtitle PNGs per scene to reduce jitter
+  gpu_scale_aggressive: true           # Try GPU scale-only even if smoke test fails (safe fallback)
+  precache_subtitles: true             # Pre-generate subtitle PNGs per scene to reduce jitter
+  precache_min_lines: 6               # If precache_subtitles is false, auto-enable when lines >= this
+  allow_opencl_overlay_in_cpu_mode: true   # Allow OpenCL overlays even when HW filter mode is 'cpu' (requires smoke OK)
   # 静的オーバーレイが存在しないシーンでベース映像を生成する最小行数（動画背景時）
   # N 行未満ならベース生成をスキップし、背景をシーン単位で一度だけ正規化して各行へ伝搬（重複スケール回避）
   scene_base_min_lines: 6
@@ -37,7 +40,8 @@ subtitle:
   font_path: "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf" # IPAexGothic font path
   font_color: "white"
   font_size: 64
-  max_chars_per_line: 25 # Adjust based on font size and video width
+  max_chars_per_line: 28 # Widen lines (~1.5x) for fewer breaks
+  wrap_mode: chars       # Prefer character-based wrapping for CJK text
   stroke_color: "black"
   stroke_width: 2
   line_spacing_offset_per_line: 64 # Additional vertical offset per line for multi-line text (e.g., same as font_size)
