@@ -1,3 +1,5 @@
+"""メディア変換結果のキャッシュを管理するユーティリティ。"""
+
 import asyncio
 import hashlib
 import json
@@ -8,30 +10,24 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
-from zundamotion.utils.ffmpeg_utils import MediaInfo  # MediaInfo を追加
-
 from .exceptions import CacheError
-from .utils.ffmpeg_utils import (
-    get_media_info,
-    probe_media_params_async,
-    run_ffmpeg_async,
-)
-from .utils.ffmpeg_utils import (
-    AudioParams,
-    VideoParams,
-    normalize_media,
-)
+from .utils.ffmpeg_params import AudioParams, VideoParams
+from .utils.ffmpeg_probe import (MediaInfo, get_media_info, get_media_duration, probe_media_params_async)
+from .utils.ffmpeg_ops import normalize_media
+
 from .utils.logger import logger
 
 
 class CacheManager:
+    """メディア情報や正規化ファイルをキャッシュする。"""
+
     def __init__(
         self,
         cache_dir: Path,
         no_cache: bool = False,
         cache_refresh: bool = False,
-        max_size_mb: Optional[int] = None,  # キャッシュの最大サイズ (MB)
-        ttl_hours: Optional[int] = None,  # キャッシュの有効期限 (時間)
+        max_size_mb: Optional[int] = None,
+        ttl_hours: Optional[int] = None,
     ):
         self.cache_dir = cache_dir
         self.no_cache = no_cache
@@ -47,33 +43,12 @@ class CacheManager:
         try:
             self.cache_dir.mkdir(exist_ok=True)
             logger.info(f"Cache directory initialized: {self.cache_dir.resolve()}")
-            # no_cache や cache_refresh のロジックは get_or_create_normalized_video 内で処理するため、ここではディレクトリ削除は行わない
-            # if self.no_cache:
-            #     logger.info(
-            #         "Cache is disabled (--no-cache). All files will be regenerated."
-            #     )
-            #     if self.cache_dir.exists():
-            #         shutil.rmtree(self.cache_dir)
-            #         self.cache_dir.mkdir(exist_ok=True)
-            # elif self.cache_refresh:
-            #     logger.info(
-            #         "Cache refresh requested (--cache-refresh). All files will be regenerated and cache updated."
-            #     )
-            #     if self.cache_dir.exists():
-            #         shutil.rmtree(self.cache_dir)
-            #         self.cache_dir.mkdir(exist_ok=True)
-            # else:
-            #     logger.info(
-            #         "Using existing cache. Use --no-cache to disable or --cache-refresh to force regeneration."
-            #     )
-
             self._clean_cache()  # キャッシュ初期化時にクリーンアップを実行
-
         except Exception as e:
             raise CacheError(f"Failed to initialize cache directory: {e}")
 
     def set_ephemeral_dir(self, temp_dir: Path) -> None:
-        """Sets the directory for ephemeral outputs when cache is disabled."""
+        """--no-cache 時に利用する一時ディレクトリを設定する。"""
         try:
             temp_dir.mkdir(parents=True, exist_ok=True)
         except Exception:
@@ -82,7 +57,7 @@ class CacheManager:
         self.ephemeral_dir = temp_dir
 
     def _generate_hash(self, data: Dict[str, Any]) -> str:
-        """Generates a SHA256 hash from a dictionary, handling Path objects."""
+        """辞書データから SHA256 ハッシュを生成する。"""
 
         class PathEncoder(json.JSONEncoder):
             def default(self, obj):
@@ -94,9 +69,7 @@ class CacheManager:
         return hashlib.sha256(sorted_data).hexdigest()
 
     async def get_or_create_media_info(self, file_path: Path) -> MediaInfo:
-        """
-        メディアのメタ情報を取得し、キャッシュする。
-        """
+        """メディアのメタ情報を取得しキャッシュする。"""
         key_data = {
             "file_path": str(file_path.resolve()),
             "file_size": file_path.stat().st_size,
@@ -108,78 +81,10 @@ class CacheManager:
 
         if self.no_cache:
             logger.debug(
-                f"Cache disabled. Getting media info for {file_path.name} directly."
-            )
-            return await get_media_info(str(file_path))
-
-        if self.cache_refresh and cached_meta_path.exists():
-            logger.info(
-                f"Cache refresh requested. Removing existing media info cache: {cached_meta_path.name}"
-            )
-            cached_meta_path.unlink()
-
-        if cached_meta_path.exists():
-            try:
-                with open(cached_meta_path, "r", encoding="utf-8") as f:
-                    meta = json.load(f)
-                info = meta["media_info"]
-                logger.info(
-                    f"Cache HIT for media info of {file_path.name} (key: {cache_key[:8]})"
-                )
-                return info
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.warning(
-                    f"Corrupted media info cache for {file_path.name}: {e}. Regenerating."
-                )
-                cached_meta_path.unlink(missing_ok=True)
-
-        logger.info(
-            f"Cache MISS for media info of {file_path.name} (key: {cache_key[:8]}). Generating..."
-        )
-        try:
-            info = await get_media_info(str(file_path))
-            with open(cached_meta_path, "w", encoding="utf-8") as f:
-                json.dump({"media_info": info, "created_at": time.time()}, f)
-            logger.debug(f"Cached media info for {file_path.name}")
-            self._clean_cache()
-            return info
-        except Exception as e:
-            raise CacheError(
-                f"Failed to get or cache media info for {file_path.name}: {e}"
-            )
-
-    async def get_or_create_media_duration(self, file_path: Path) -> float:
-        """
-        メディアファイルの長さを取得し、キャッシュする。
-        """
-        key_data = {
-            "file_path": str(file_path.resolve()),
-            "file_size": file_path.stat().st_size,
-            "file_mtime": file_path.stat().st_mtime,
-            "operation": "media_duration",
-        }
-        cache_key = self._generate_hash(key_data)
-        cached_meta_path = self.cache_dir / f"duration_{cache_key}.json"
-
-        if self.no_cache:
-            logger.debug(
                 f"Cache disabled. Getting duration for {file_path.name} directly."
             )
-            # get_media_duration は ffmpeg_utils から削除されたため、直接 ffprobe を呼び出す
-            cmd = [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "json",
-                str(file_path),
-            ]
-            result = await run_ffmpeg_async(cmd)
-            probe = json.loads(result.stdout)
-            duration = float(probe["format"]["duration"])
-            return round(duration, 2)
+            duration = await get_media_duration(str(file_path))
+            return duration
 
         if self.cache_refresh and cached_meta_path.exists():
             logger.info(
@@ -206,23 +111,7 @@ class CacheManager:
             f"Cache MISS for duration of {file_path.name} (key: {cache_key[:8]}). Generating..."
         )
         try:
-            # get_media_info はストリーム情報のみを返すため、duration は別途取得
-            # ffmpeg_utils.py から get_media_duration を削除したため、ここで直接 ffprobe を呼び出す
-            cmd = [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "json",
-                str(file_path),
-            ]
-            result = await run_ffmpeg_async(cmd)  # _run_ffmpeg_async を直接呼び出す
-            probe = json.loads(result.stdout)
-            duration = float(probe["format"]["duration"])
-            duration = round(duration, 2)
-
+            duration = await get_media_duration(str(file_path))
             with open(cached_meta_path, "w", encoding="utf-8") as f:
                 json.dump({"duration": duration, "created_at": time.time()}, f)
             logger.debug(f"Cached duration for {file_path.name} -> {duration:.2f}s")
@@ -232,73 +121,124 @@ class CacheManager:
             raise CacheError(
                 f"Failed to get or cache media duration for {file_path.name}: {e}"
             )
+    async def get_or_create_media_duration(self, file_path: Path) -> float:
+        """メディアの再生時間を取得しキャッシュする。"""
+        key_data = {
+            "file_path": str(file_path.resolve()),
+            "file_size": file_path.stat().st_size,
+            "file_mtime": file_path.stat().st_mtime,
+            "operation": "media_duration",
+        }
+        cache_key = self._generate_hash(key_data)
+        cached_meta_path = self.cache_dir / f"duration_{cache_key}.json"
+
+        if self.no_cache:
+            logger.debug(
+                f"Cache disabled. Getting duration for {file_path.name} directly."
+            )
+            duration = await get_media_duration(str(file_path))
+            return duration
+
+        if self.cache_refresh and cached_meta_path.exists():
+            logger.info(
+                f"Cache refresh requested. Removing existing duration cache: {cached_meta_path.name}"
+            )
+            cached_meta_path.unlink()
+
+        if cached_meta_path.exists():
+            try:
+                with open(cached_meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                duration = meta["duration"]
+                logger.info(
+                    f"Cache HIT for duration of {file_path.name} (key: {cache_key[:8]}) -> {duration:.2f}s"
+                )
+                return duration
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(
+                    f"Corrupted duration cache for {file_path.name}: {e}. Regenerating."
+                )
+                cached_meta_path.unlink(missing_ok=True)
+
+        logger.info(
+            f"Cache MISS for duration of {file_path.name} (key: {cache_key[:8]}). Generating..."
+        )
+        try:
+            duration = await get_media_duration(str(file_path))
+            with open(cached_meta_path, "w", encoding="utf-8") as f:
+                json.dump({"duration": duration, "created_at": time.time()}, f)
+            logger.debug(f"Cached duration for {file_path.name} -> {duration:.2f}s")
+            self._clean_cache()
+            return duration
+        except Exception as e:
+            raise CacheError(
+                f"Failed to get or cache media duration for {file_path.name}: {e}"
+            )
+    def _remove_expired_files(self, files):
+        """有効期限切れのキャッシュを削除し、残りのファイル情報を返す。"""
+        if self.ttl_hours is None:
+            return files
+        current_time = time.time()
+        expired_threshold = current_time - (self.ttl_hours * 3600)
+        initial_count = len(files)
+        files = [f for f in files if f[2] > expired_threshold]
+        deleted_count = initial_count - len(files)
+        if deleted_count > 0:
+            logger.info(
+                f"Deleted {deleted_count} expired cache files (TTL: {self.ttl_hours} hours)."
+            )
+        return files
+
+    def _enforce_size_limit(self, files):
+        """最大サイズを超過した場合、最も古いキャッシュから削除する。"""
+        if self.max_size_mb is None:
+            return
+        max_bytes = self.max_size_mb * 1024 * 1024
+        current_size = sum(f[1] for f in files)
+        if current_size <= max_bytes:
+            return
+        files.sort(key=lambda x: x[2])
+        deleted_size = 0
+        deleted_count = 0
+        for f, size, _ in files:
+            if current_size <= max_bytes:
+                break
+            try:
+                f.unlink()
+                current_size -= size
+                deleted_size += size
+                deleted_count += 1
+            except OSError as e:
+                logger.warning(f"Failed to delete cache file {f.name}: {e}")
+        if deleted_count > 0:
+            logger.info(
+                f"Deleted {deleted_count} cache files ({deleted_size / (1024*1024):.2f} MB) "
+                f"to stay within max size limit ({self.max_size_mb} MB)."
+            )
 
     def _clean_cache(self):
-        """
-        キャッシュディレクトリをクリーンアップし、最大サイズと有効期限に基づいてファイルを削除します。
-        """
+        """キャッシュディレクトリをクリーンアップし不要ファイルを削除する。"""
         if not self.cache_dir.exists():
+            return
+        if self.max_size_mb is None and self.ttl_hours is None:
+            logger.debug(
+                "Cache cleanup skipped: max_size_mb and ttl_hours are not set."
+            )
             return
 
         files = []
         for f in self.cache_dir.iterdir():
             if f.is_file():
                 stat = f.stat()
-                files.append(
-                    (f, stat.st_size, stat.st_atime)
-                )  # パス, サイズ, 最終アクセス時刻
+                files.append((f, stat.st_size, stat.st_atime))
 
-        # 有効期限切れのファイルを削除
-        if self.ttl_hours is not None:
-            current_time = time.time()
-            expired_threshold = current_time - (self.ttl_hours * 3600)  # 秒
-
-            initial_count = len(files)
-            # 最終アクセス時刻が閾値より新しいものだけ残す
-            files = [f for f in files if f[2] > expired_threshold]
-
-            deleted_count = initial_count - len(files)
-            if deleted_count > 0:
-                logger.info(
-                    f"Deleted {deleted_count} expired cache files (TTL: {self.ttl_hours} hours)."
-                )
-
-        # サイズ超過のファイルを削除 (最も古いものから)
-        if self.max_size_mb is not None:
-            max_bytes = self.max_size_mb * 1024 * 1024
-            current_size = sum(f[1] for f in files)  # 現在の合計サイズ
-
-            if current_size > max_bytes:
-                # 最も古いファイル (最終アクセス時刻が最も古いもの) から削除
-                files.sort(key=lambda x: x[2])  # 最終アクセス時刻でソート
-
-                deleted_size = 0
-                deleted_count = 0
-                for f, size, _ in files:
-                    if current_size <= max_bytes:
-                        break
-                    try:
-                        f.unlink()
-                        current_size -= size
-                        deleted_size += size
-                        deleted_count += 1
-                    except OSError as e:
-                        logger.warning(f"Failed to delete cache file {f.name}: {e}")
-
-                if deleted_count > 0:
-                    logger.info(
-                        f"Deleted {deleted_count} cache files ({deleted_size / (1024*1024):.2f} MB) "
-                        f"to stay within max size limit ({self.max_size_mb} MB)."
-                    )
-
-        if self.max_size_mb is None and self.ttl_hours is None:
-            logger.debug(
-                "Cache cleanup skipped: max_size_mb and ttl_hours are not set."
-            )
+        files = self._remove_expired_files(files)
+        self._enforce_size_limit(files)
 
     def get_cached_path(
         self, key_data: Dict[str, Any], file_name: str, extension: str
     ) -> Optional[Path]:
+        """キャッシュ済みファイルの存在を確認し、パスを返す。"""
         if self.no_cache:
             return None
         cache_key = self._generate_hash(key_data)
@@ -318,6 +258,7 @@ class CacheManager:
         file_name: str,
         extension: str,
     ) -> Path:
+        """ファイルをキャッシュディレクトリへコピーしてパスを返す。"""
         cache_key = self._generate_hash(key_data)
         cached_path = self.cache_dir / f"{file_name}_{cache_key}.{extension}"
         shutil.copy(source_path, cached_path)
@@ -332,13 +273,13 @@ class CacheManager:
         file_name: str,
         extension: str,
     ) -> Path:
-        """Saves a file to the cache."""
+        """指定ファイルをキャッシュに保存するヘルパー。"""
         return self.cache_file(source_path, key_data, file_name, extension)
 
     def get_cache_path(
         self, key_data: Dict[str, Any], file_name: str, extension: str
     ) -> Path:
-        """Returns the expected path of a cached file, without checking existence."""
+        """キャッシュファイルの予想パスを返すが、存在確認は行わない。"""
         cache_key = self._generate_hash(key_data)
         return self.cache_dir / f"{file_name}_{cache_key}.{extension}"
 
@@ -351,6 +292,7 @@ class CacheManager:
             [Path], Awaitable[Path]
         ],  # creator_func は出力パスを受け取り、生成されたファイルのパスを返す (非同期対応のためAwaitable[Path])
     ) -> Path:
+        """キャッシュ済みファイルを取得し、無ければ creator_func で生成する。"""
         cache_key = self._generate_hash(key_data)
         cached_path = self.cache_dir / f"{file_name}_{cache_key}.{extension}"
         logger.debug(
@@ -428,6 +370,7 @@ class CacheManager:
             )
 
     def _hash_for_normalized(self, input_path: Path, target_spec: Dict) -> str:
+        """正規化対象のハッシュキーを計算する。"""
         p = input_path.resolve()
         st = p.stat()
         signature = {
@@ -440,6 +383,7 @@ class CacheManager:
         return hashlib.sha256(blob).hexdigest()
 
     def _paths_for_hash(self, h: str) -> Dict[str, Path]:
+        """ハッシュ値から出力・メタ・ロックファイルのパスを生成する。"""
         return {
             "out": self.cache_dir / f"temp_normalized_{h}.mp4",
             "meta": self.cache_dir / f"temp_normalized_{h}.meta.json",
@@ -448,6 +392,7 @@ class CacheManager:
 
     @contextmanager
     def _file_lock(self, lock_path: Path, timeout_sec: int = 600):
+        """非常に単純なファイルロックを提供するコンテキストマネージャ。"""
         # 超簡易ロック（プロセス間でファイル存在をロック扱い）
         start = time.time()
         while lock_path.exists():
@@ -591,9 +536,7 @@ class CacheManager:
                 raise
 
     def _judge_need_encode(self, current: Dict, target_spec: Dict, prefer_copy: bool):
-        """
-        current: probeで得た vwidth, vheight, vfps, vpix_fmt, vcodec, asr, ach, acodec など
-        """
+        """入力メディアが target_spec を満たすか判定する。"""
         v_tgt = target_spec.get("video") or {}
         a_tgt = target_spec.get("audio") or {}
 

@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
-"""
-AI-based background removal for images in a folder using rembg.
+"""rembg を用いてフォルダ内の画像背景を一括除去するスクリプト。
 
-Usage:
+使い方:
   python remove_bg_ai.py --input <in_dir> --output <out_dir> [--recursive]
                          [--model isnet-general-use|isnet-anime|u2net|u2netp|u2net_human_seg]
 
-Notes:
-  - Outputs are always saved as PNG with transparency.
-  - Requires: pip install rembg Pillow
-  - GPU: install onnxruntime-gpu to leverage CUDA (if available).
+注意:
+  - 出力は常に透過PNG。
+  - 必須: pip install rembg Pillow
+  - GPU 利用: onnxruntime-gpu をインストール（利用可能な場合）。
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import sys
-from typing import Iterable, Optional
+from pathlib import Path
+from typing import Iterable, Optional, Tuple
 
 from PIL import Image
 import onnxruntime as ort
@@ -32,77 +31,73 @@ except Exception as e:  # pragma: no cover - import guidance
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 
 
-def list_images(input_dir: str, recursive: bool) -> Iterable[str]:
-    """Yield image file paths from *input_dir*.
+def list_images(input_dir: Path, recursive: bool) -> Iterable[Path]:
+    """指定ディレクトリ内の画像パスを列挙する。
 
     Args:
-        input_dir: Directory to search for images.
-        recursive: Whether to traverse subdirectories recursively.
+        input_dir: 探索対象ディレクトリ。
+        recursive: サブディレクトリを再帰的に探索するか。
 
     Yields:
-        Paths to files with supported extensions.
+        サポート対象拡張子を持つファイルの :class:`Path` 。
     """
     if recursive:
-        for root, _dirs, files in os.walk(input_dir):
-            for f in files:
-                ext = os.path.splitext(f)[1].lower()
-                if ext in SUPPORTED_EXTS:
-                    yield os.path.join(root, f)
+        yield from (p for p in input_dir.rglob("*") if p.suffix.lower() in SUPPORTED_EXTS)
     else:
-        for f in os.listdir(input_dir):
-            p = os.path.join(input_dir, f)
-            if os.path.isfile(p) and os.path.splitext(f)[1].lower() in SUPPORTED_EXTS:
-                yield p
+        yield from (
+            p
+            for p in input_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
+        )
 
 
-def ensure_dir(path: str) -> None:
-    """Create *path* if it does not already exist."""
-    os.makedirs(path, exist_ok=True)
+def ensure_dir(path: Path) -> None:
+    """ディレクトリ *path* が存在しなければ作成する。"""
+    path.mkdir(parents=True, exist_ok=True)
 
 
-def compute_output_path(input_path: str, root_in: str, root_out: str) -> str:
-    """Determine the output file path for an input image."""
-    base_no_ext = os.path.splitext(os.path.basename(input_path))[0]
-    rel_dir = os.path.relpath(os.path.dirname(input_path), root_in)
-    if rel_dir == os.curdir:
-        rel_dir = ""
-    out_dir = os.path.join(root_out, rel_dir)
+def compute_output_path(input_path: Path, root_in: Path, root_out: Path) -> Path:
+    """入力画像に対応する出力先パスを算出する。"""
+    rel_dir = input_path.parent.relative_to(root_in)
+    out_dir = root_out / rel_dir
     ensure_dir(out_dir)
-    return os.path.join(out_dir, base_no_ext + ".png")
+    return out_dir / f"{input_path.stem}.png"
 
 
 def remove_bg_with_session(img: Image.Image, session) -> Image.Image:
-    """Remove the background from *img* using a prepared *session*."""
-    # rembg accepts bytes or PIL.Image, returns bytes or PIL.Image depending on input
+    """学習済みセッションを用いて画像から背景を除去する。"""
     out = remove(img, session=session)
-    # When input is PIL.Image, output is PIL.Image
     if isinstance(out, Image.Image):
         return out.convert("RGBA")
-    # Fallback if bytes were returned for some reason
     from io import BytesIO
 
     return Image.open(BytesIO(out)).convert("RGBA")
 
 
-def process_image(path: str, session, in_root: str, out_root: str, overwrite: bool) -> tuple[bool, str]:
-    """Apply background removal to a single image and save the result."""
+def process_image(
+    path: Path,
+    session,
+    in_root: Path,
+    out_root: Path,
+    overwrite: bool,
+) -> tuple[bool, str]:
+    """単一の画像に背景除去を適用し結果を保存する。"""
     try:
         with Image.open(path) as im:
-            # Convert to RGBA early for consistency
             if im.mode != "RGBA":
                 im = im.convert("RGBA")
             out_im = remove_bg_with_session(im, session)
             out_path = compute_output_path(path, in_root, out_root)
-            if (not overwrite) and os.path.exists(out_path):
+            if not overwrite and out_path.exists():
                 return False, f"Skip (exists): {out_path}"
             out_im.save(out_path, format="PNG")
-            return True, out_path
+            return True, str(out_path)
     except Exception as e:
         return False, f"Error processing {path}: {e}"
 
 
-def main(argv: Optional[list[str]] = None) -> int:
-    """Command-line interface for batch background removal."""
+def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
+    """コマンドライン引数を解析する。"""
     parser = argparse.ArgumentParser(
         description="Remove backgrounds with AI (rembg) and save as PNGs",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -111,10 +106,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--output", "-o", required=True, help="Output directory")
     parser.add_argument("--recursive", action="store_true", help="Process subdirectories")
     parser.add_argument("--no-overwrite", action="store_true", help="Do not overwrite outputs")
-    parser.add_argument("--show-providers", action="store_true", help="Show ONNX Runtime providers info")
     force_group = parser.add_mutually_exclusive_group()
     force_group.add_argument("--force-cpu", action="store_true", help="Force CPUExecutionProvider")
-    force_group.add_argument("--force-gpu", action="store_true", help="Force CUDAExecutionProvider (falls back to CPU if unavailable)")
+    force_group.add_argument(
+        "--force-gpu",
+        action="store_true",
+        help="Force CUDAExecutionProvider (falls back to CPU if unavailable)",
+    )
     parser.add_argument(
         "--model",
         default="isnet-general-use",
@@ -122,39 +120,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             "rembg model name (e.g., isnet-general-use|isnet-anime|u2net|u2netp|u2net_human_seg)"
         ),
     )
+    return parser.parse_args(argv)
 
-    args = parser.parse_args(argv)
 
-    in_dir = os.path.abspath(args.input)
-    out_dir = os.path.abspath(args.output)
-    recursive = bool(args.recursive)
-    overwrite = not bool(args.no_overwrite)
-    model_name = str(args.model)
-    show_providers = bool(args.show_providers)
-    force_cpu = bool(args.force_cpu)
-    force_gpu = bool(args.force_gpu)
-
-    if not os.path.isdir(in_dir):
-        print(f"Input directory not found: {in_dir}", file=sys.stderr)
-        return 2
-
-    ensure_dir(out_dir)
-
+def create_session(
+    model_name: str, force_cpu: bool, force_gpu: bool
+) -> Tuple[object, list[str]]:
+    """rembg セッションを初期化し利用可能なプロバイダ情報を返す。"""
     available_providers = list(ort.get_available_providers())
-
-    print(
-        "Settings: input=",
-        in_dir,
-        " output=",
-        out_dir,
-        " model=",
-        model_name,
-        " recursive=",
-        recursive,
-    )
-    print("ONNX Runtime available providers:", available_providers)
-
-    # Decide providers order
     providers = None
     if force_cpu:
         providers = ["CPUExecutionProvider"]
@@ -168,32 +141,18 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
             providers = ["CPUExecutionProvider"]
 
-    # Load model once and reuse for all images
-    try:
-        session = new_session(model_name, providers=providers)
-    except Exception as e:
-        print(f"Failed to load rembg model '{model_name}': {e}", file=sys.stderr)
-        return 2
+    session = new_session(model_name, providers=providers)
+    return session, available_providers
 
-    # Show providers information
-    try:
-        # BaseSession exposes the selected providers list
-        selected = getattr(session, "providers", None)
-        inner = getattr(session, "inner_session", None)
-        inner_providers = None
-        if inner is not None and hasattr(inner, "get_providers"):
-            inner_providers = list(inner.get_providers())
 
-        print("Session providers (requested):", selected)
-        if inner_providers is not None:
-            print("Session providers (active in ORT):", inner_providers)
-    except Exception:
-        pass
-
-    if show_providers:
-        # If only info was requested, exit successfully
-        print("Provider info displayed. Proceeding with processing...")
-
+def remove_background_in_directory(
+    in_dir: Path,
+    out_dir: Path,
+    session,
+    recursive: bool,
+    overwrite: bool,
+) -> Tuple[int, int]:
+    """ディレクトリ内の画像すべてから背景を除去する。"""
     total = 0
     ok = 0
     for in_path in list_images(in_dir, recursive):
@@ -204,7 +163,57 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"OK: {msg}")
         else:
             print(msg, file=sys.stderr)
+    return ok, total
 
+
+def main(argv: Optional[list[str]] = None) -> int:
+    """バッチ背景除去のCLIエントリポイント。"""
+    args = parse_args(argv)
+
+    in_dir = Path(args.input).resolve()
+    out_dir = Path(args.output).resolve()
+    recursive = bool(args.recursive)
+    overwrite = not bool(args.no_overwrite)
+    model_name = str(args.model)
+    force_cpu = bool(args.force_cpu)
+    force_gpu = bool(args.force_gpu)
+
+    if not in_dir.is_dir():
+        print(f"Input directory not found: {in_dir}", file=sys.stderr)
+        return 2
+
+    ensure_dir(out_dir)
+
+    try:
+        session, available_providers = create_session(model_name, force_cpu, force_gpu)
+    except Exception as e:
+        print(f"Failed to load rembg model '{model_name}': {e}", file=sys.stderr)
+        return 2
+
+    print(
+        "Settings: input=",
+        in_dir,
+        " output=",
+        out_dir,
+        " model=",
+        model_name,
+        " recursive=",
+        recursive,
+    )
+    print("ONNX Runtime available providers:", available_providers)
+    try:
+        selected = getattr(session, "providers", None)
+        inner = getattr(session, "inner_session", None)
+        inner_providers = list(inner.get_providers()) if inner and hasattr(inner, "get_providers") else None
+        print("Session providers (requested):", selected)
+        if inner_providers is not None:
+            print("Session providers (active in ORT):", inner_providers)
+    except Exception:
+        pass
+
+    ok, total = remove_background_in_directory(
+        in_dir, out_dir, session, recursive, overwrite
+    )
     print(f"Done. {ok}/{total} images processed.")
     return 0 if ok == total and total > 0 else (1 if ok > 0 else 2)
 

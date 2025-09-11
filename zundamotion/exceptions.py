@@ -2,7 +2,7 @@ from typing import Optional
 
 
 class ValidationError(Exception):
-    """Custom exception for validation errors in Zundamotion."""
+    """Zundamotionでのバリデーションエラーを表す例外。"""
 
     def __init__(
         self,
@@ -22,7 +22,7 @@ class ValidationError(Exception):
 
 
 class PipelineError(Exception):
-    """Custom exception for pipeline errors in Zundamotion."""
+    """パイプライン処理で発生したエラーを表す例外。"""
 
     def __init__(self, message: str):
         super().__init__(message)
@@ -33,7 +33,7 @@ class PipelineError(Exception):
 
 
 class CacheError(Exception):
-    """Custom exception for cache errors in Zundamotion."""
+    """キャッシュ処理に関連するエラーを表す例外。"""
 
     def __init__(self, message: str):
         super().__init__(message)

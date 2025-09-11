@@ -3,7 +3,8 @@ from typing import Any, Dict, Tuple
 
 from zundamotion.cache import CacheManager
 
-from ..utils.ffmpeg_utils import has_cuda_filters, is_nvenc_available, get_hw_filter_mode
+from ..utils.ffmpeg_capabilities import has_cuda_filters, is_nvenc_available
+from ..utils.ffmpeg_hw import get_hw_filter_mode
 from .subtitle_png import SubtitlePNGRenderer
 
 

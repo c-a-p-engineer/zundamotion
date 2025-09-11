@@ -9,6 +9,7 @@
 1. 推論、回答は日本語を基本にしてください。
 1. プロジェクトは品質を優先に進めていきます。
 1. 当プロジェクトはPythonを使用してPythonのベストプラクティスに沿ってコードを書いてください。
+1. 明示指示のないコミットは禁止（ユーザーからの指示がある場合のみコミット）。
 1. コードは以下の原則を守ってください。
   1. DRY (Don't Repeat Yourself)<br>重複を避けることで、保守性・可読性を高め、変更時の修正漏れを防ぐ。
   1. KISS (Keep It Simple, Stupid)<br>設計や実装を過度に複雑にせず、できる限りシンプルに保つ。
@@ -25,8 +26,13 @@ Zundamotionは、YAML台本・アセット（音声/BGM/背景/立ち絵/挿入�
 - BGM/効果音の挿入、シーン毎のループ背景、挿入メディア（画像/動画）
 - シーン単位のベース映像生成（背景＋静的レイヤを事前合成）→各行では字幕と音声のみ重ねる
 - キャッシュ最適化（正規化、メタ情報、クリップ、シーン連結）
+- キャッシュクリーンアップ処理を関数分割しメンテナンス性を向上
+- 動画オーバーレイ処理をMixinへ分割し`VideoRenderer`を整理
+- 音声処理ヘルパーを分割し、FFmpeg音声操作を専用モジュールへ集約
+- ffprobe呼び出しを並列化し、メディアパラメータ比較を高速化
 - ハードウェアエンコード自動判定（NVENC等）とフォールバック
 - タイムライン/字幕ファイル出力（md/csv、srt/ass）
+- 主要モジュールに日本語Docstringを整備
 
 ## 2. 技術スタック
 
@@ -51,8 +57,13 @@ Zundamotionは、YAML台本・アセット（音声/BGM/背景/立ち絵/挿入�
 │   │   ├── audio.py          # AudioGenerator
 │   │   ├── subtitle.py       # 字幕オーバーレイ準備
 │   │   ├── subtitle_png.py   # 字幕PNG生成(Pillow)
+│   │   ├── video_overlays.py # オーバーレイ合成Mixin
 │   │   ├── video.py          # VideoRenderer（FFmpeg合成）
 │   │   ├── voicevox_client.py# VOICEVOX API（async + retry）
+│   │   ├── script_loader.py  # スクリプト読込・統合（公開API: load_script_and_config）
+│   │   ├── config_io.py      # YAMLローダ（構文エラー位置つき）
+│   │   ├── config_merge.py   # 設定のディープマージ（override優先）
+│   │   ├── config_validate.py# 設定検証（スキーマ/パス/数値範囲など）
 │   │   └── pipeline_phases/  # 各フェーズ
 │   │       ├── audio_phase.py
 │   │       ├── video_phase.py
@@ -60,9 +71,12 @@ Zundamotionは、YAML台本・アセット（音声/BGM/背景/立ち絵/挿入�
 │   │       └── finalize_phase.py
 │   ├── reporting/voice_report_generator.py
 │   ├── templates/config.yaml # 既定設定
-│   └── utils/ffmpeg_utils.py, logger.py
+│   └── utils/ffmpeg_audio.py, ffmpeg_capabilities.py, ffmpeg_ops.py, ffmpeg_params.py, ffmpeg_hw.py, ffmpeg_probe.py, ffmpeg_runner.py, logger.py
 ├── .devcontainer/            # DevContainer（FFmpeg/NVENC/依存関係）
 └── requirements.txt          # ローカル実行用依存
+
+その他:
+- `remove_bg_ai.py`           # rembgによる背景除去スクリプト
 ```
 
 注意:
@@ -93,11 +107,11 @@ CLI主なオプション（main.py実装）:
 - パイプライン: `zundamotion/pipeline.py`（Audio→Video→BGM→Finalize）
 - 音声: `components/audio.py`, `components/voicevox_client.py`, `components/pipeline_phases/audio_phase.py`
 - 字幕: `components/subtitle.py`, `components/subtitle_png.py`
-- 動画: `components/video.py`, `components/pipeline_phases/video_phase.py`
+- 動画: `components/video.py`, `components/video_overlays.py`, `components/pipeline_phases/video_phase.py`
 - BGM: `components/pipeline_phases/bgm_phase.py`
 - 最終化: `components/pipeline_phases/finalize_phase.py`
 - キャッシュ: `cache.py`
-- ユーティリティ: `utils/ffmpeg_utils.py`, `utils/logger.py`
+- ユーティリティ: `utils/ffmpeg_audio.py`, `utils/ffmpeg_capabilities.py`, `utils/ffmpeg_ops.py`, `utils/ffmpeg_params.py`, `utils/ffmpeg_hw.py`, `utils/ffmpeg_probe.py`, `utils/ffmpeg_runner.py`, `utils/logger.py`
 
 ## 6. 開発規約とベストプラクティス
 
@@ -109,6 +123,43 @@ CLI主なオプション（main.py実装）:
 
 - **インデント**: スペース4つを使用します。タブは使用しません。
 - **行の長さ**: 1行の最大文字数は79文字とします。
+
+## 7. AIに読みやすいコード規模と分割基準
+
+AI（LLM）が正確に理解・推論しやすいサイズと構成を明文化します。本プロジェクトでは以下を推奨します。
+
+- 最適行数: 1ファイル 200–400行（上限の目安は500行）
+- 関数サイズ: 20–40行（最大80行）。深い分岐はヘルパー化
+- 構造: 1ファイルに5–15関数、1–3クラス程度に収める
+- 概要コメント: ファイル先頭に目的/公開API/前提/外部依存/簡単な例を5–10行で記述
+- 型ヒント: 主要な引数・戻り値に型ヒントを付与
+
+分割の判断基準:
+- 責務の分離: ロード/検証/キャッシュ/実行など異なる責務が混在している
+- 複雑度: ネストが3段以上、条件分岐が肥大化している
+- テスト容易性: テスト対象の単位が異なるものが同居している
+- 依存/設定: 外部依存や設定が異なる領域が混ざっている
+- 変更頻度: 変更される箇所・ペースが明確に異なる
+
+AIに優しい書き方:
+- 明示的な入出力: グローバル状態や暗黙の副作用を避ける
+- 小さな関数: 早期return・ガード節で分岐を浅く保つ
+- 一貫した命名: ドメイン用語を統一、略語を避ける
+- ログ/エラー: 重要分岐に意味のあるメッセージを出す
+
+AIにコードを貼るときのコツ:
+- 要約を添える: 目的、現象、対象関数名、想定と実際を1–3行で
+- 抜粋する: 問題の前後50–100行だけ抜粋（全量より精度↑）
+- 依存関係: 関連ファイル名と役割、呼び出し順を列挙
+- 実行条件: 簡単な再現手順や入力例を添える
+
+今回の適用（構成の分割）:
+- `components/script_loader.py` を責務別に再構成
+  - 読み込み: `components/config_io.py`
+  - マージ: `components/config_merge.py`
+  - 検証: `components/config_validate.py`
+  - 入口: `components/script_loader.py` は公開API `load_script_and_config` のみを保持
+- 既存の `pipeline.py` からの import は変更不要（後方互換）
 - **命名規約**:
     - モジュール名: 小文字とアンダースコア (`snake_case`)
     - パッケージ名: 小文字 (`snake_case`)
@@ -188,7 +239,7 @@ CLI主なオプション（main.py実装）:
 - 起動時にCUDA/OpenCLフィルタのスモークテストを実施し、利用可否を自動判定します。CUDA失敗時はCPUフィルタへフォールバックします（NVENCは継続利用）。
 - CUDAフィルタを利用しNVENCでエンコードする場合、filter_complex内での`hwdownload`を回避し、GPU内で合成→NVENCへ直接渡します（GPU⇄CPU往復を削減）。
 - 実行時にCUDA経路でエラーが発生したクリップは、1回だけCPUフィルタで自動リトライします。
-- 初回のCUDAフィルタ失敗（スモーク失敗 or 実行失敗）を検知した場合、プロセス内のグローバルフラグで以降の全クリップをCPUフィルタへバックオフします（NVENCの利用可否は別途維持）。`zundamotion/utils/ffmpeg_utils.py` の `set_hw_filter_mode('cpu'|'cuda'|'auto')` により明示的な制御も可能です。
+- 初回のCUDAフィルタ失敗（スモーク失敗 or 実行失敗）を検知した場合、プロセス内のグローバルフラグで以降の全クリップをCPUフィルタへバックオフします（NVENCの利用可否は別途維持）。`zundamotion/utils/ffmpeg_hw.py` の `set_hw_filter_mode('cpu'|'cuda'|'auto')` により明示的な制御も可能です。
  - CPUフィルタ経路が有効な場合（グローバル`cpu`）でも、`scale_opencl` のスモークに通った環境では「GPUスケールのみ + CPU overlay（ハイブリッド）」を限定的に許可します。
 - CPUフィルタ経路が有効な場合、NVENCでのエンコード有無に関わらず、`clip_workers` と `-filter_threads`/`-filter_complex_threads` は CPU 向けヒューリスティクス（`max(1, nproc // clip_workers)`）に自動調整します（環境変数での明示指定がある場合はそちらを優先）。
  - 画質プリセット→スケール最適化: CLIの `--quality` に応じてCPUスケーラのフラグを自動設定（speed=fast_bilinear, balanced=bicubic, quality=lanczos）。`video.scale_flags` で明示指定可。

@@ -16,6 +16,13 @@ Zundamotionは、VOICEVOXによる高品質な音声合成とFFmpegを用いた�
 - **ファイルログ出力**: すべてのログは `./logs/YYYYMMDD_HHMMS_MS.log` の形式でファイルに出力されます。
 - **JSONログ出力**: `--log-json`オプションを使用することで、機械可読なJSON形式でログをコンソールに出力し、GUIや外部ツールとの連携を容易にします。
 - **KVログ出力**: `--log-kv`オプションを使用することで、人間が読みやすいKey-Value形式でログをコンソールに出力し、ログの解析とボトルネックの特定を容易にします。
+- **日本語Docstring**: 主要な関数・クラスに日本語コメントを付与し、コードの理解を助けます。
+- **キャッシュクリーンアップのモジュール化**: キャッシュ削除処理を関数に分割し、保守性を向上させました。
+- **オーバーレイ処理のモジュール化**: 前景動画や字幕の合成をMixinに切り出し、`VideoRenderer`を簡潔にしました。
+- **音声処理ヘルパーの分離**: FFmpeg音声操作を`ffmpeg_audio.py`に集約し、責務を明確化しました。
+- **メディアパラメータ比較の並列化**: 複数ファイルのffprobeを同時実行し、前処理を高速化しました。
+- **設定ローダの責務分離**: YAML読み込み（`config_io.py`）/ディープマージ（`config_merge.py`）/検証（`config_validate.py`）に分割し、`script_loader.py`はエントリAPIに集約しました。
+- **AIに読みやすい規模の徹底**: 1ファイル200–400行（最大500）、1関数20–40行（最大80）の目安で分割・整理。[AI_README.md](AI_README.md) に詳細。
 - **並列レンダリングとハードウェアエンコードの自動検出**: CPUコア数やGPU（NVENC/VAAPI/VideoToolbox）を検出し、最適なジョブ数を自動設定します。ハードウェアエンコードが利用可能な場合は自動的に活用し、失敗時はソフトウェアにフォールバックします。
 - **キャラクター配置の柔軟性**: キャラクターの表示位置をX/Y座標で指定できるだけでなく、スケーリング（拡大縮小）やアンカーポイント（画像の基準点）を設定することで、より細かくキャラクターの配置を制御できます。
   - `scale`: キャラクター画像の拡大縮小率を指定します（例: `0.8` で80%のサイズ）。
@@ -92,22 +99,32 @@ lines:
 │   ├── pipeline.py         # 動画生成パイプラインの定義 (`GenerationPipeline` クラス, `run_generation` 関数)
 │   ├── components/         # パイプラインの各ステップで使用されるコンポーネント
 │   │   ├── audio.py        # 音声生成 (`AudioGenerator` クラス)
-│   │   ├── script_loader.py# スクリプトと設定の読み込み、マージ、検証
+│   │   ├── script_loader.py# 設定統合の入口API（load_script_and_config）
+│   │   ├── config_io.py    # YAMLローダ（構文エラー位置つき）
+│   │   ├── config_merge.py # 設定のディープマージ（override優先）
+│   │   ├── config_validate.py # 設定検証（スキーマ/パス/数値範囲など）
 │   │   ├── subtitle.py     # 字幕生成 (`SubtitleGenerator` クラス)
+│   │   ├── video_overlays.py # 動画オーバーレイ処理 (`OverlayMixin` クラス)
 │   │   ├── video.py        # 動画レンダリング (`VideoRenderer` クラス)
-│   │   └── voicevox_client.py # VOICEVOX APIクライアント (`generate_voice` 関数)
-│   ├── pipeline_phases/    # 動画生成パイプラインの各フェーズ
-│   │   ├── audio_phase.py  # 音声生成フェーズ (`AudioPhase` クラス)
-│   │   ├── bgm_phase.py    # BGM追加フェーズ (`BGMPhase` クラス)
-│   │   ├── finalize_phase.py # 最終化フェーズ (`FinalizePhase` クラス)
-│   │   └── video_phase.py  # 動画生成フェーズ (`VideoPhase` クラス)
+│   │   ├── voicevox_client.py # VOICEVOX APIクライアント (`generate_voice` 関数)
+│   │   └── pipeline_phases/    # 各フェーズ（components配下）
+│   │       ├── audio_phase.py  # 音声生成フェーズ (`AudioPhase` クラス)
+│   │       ├── bgm_phase.py    # BGM追加フェーズ (`BGMPhase` クラス)
+│   │       ├── finalize_phase.py # 最終化フェーズ (`FinalizePhase` クラス)
+│   │       └── video_phase.py  # 動画生成フェーズ (`VideoPhase` クラス)
 │   ├── reporting/          # レポート生成関連
 │   │   └── voice_report_generator.py # VOICEVOX使用情報レポート生成
 │   ├── templates/          # 設定テンプレート
 │   │   └── config.yaml     # デフォルト設定テンプレート
 │   └── utils/              # ユーティリティ関数
-│       ├── ffmpeg_utils.py # FFmpeg関連ユーティリティ
-│       └── logger.py       # ロギングユーティリティ
+│       ├── ffmpeg_audio.py       # 音声処理ヘルパー
+│       ├── ffmpeg_capabilities.py  # FFmpeg機能検出
+│       ├── ffmpeg_ops.py         # 映像処理ヘルパー
+│       ├── ffmpeg_params.py  # エンコード設定データクラス
+│       ├── ffmpeg_hw.py      # ハードウェアフィルタ制御
+│       ├── ffmpeg_probe.py   # ffprobeラッパー
+│       ├── ffmpeg_runner.py  # FFmpeg実行ヘルパー
+│       └── logger.py         # ロギングユーティリティ
 └── requirements.txt        # Pythonの依存関係
 ```
 
@@ -129,6 +146,21 @@ cd zundamotion
 
 ### 3. DevContainerの起動
 VS Codeでプロジェクトを開き、プロンプトが表示されたら「Reopen in Container」を選択します。これにより、必要な依存関係が自動的にインストールされ、開発環境が構築されます。
+
+---
+
+## 🧩 開発者向け: コード分割とAI向けガイド（要点）
+
+- ファイル規模の目安: 1ファイル200–400行（最大500行）
+- 関数規模の目安: 20–40行（最大80行）、深い分岐はヘルパー化
+- 責務分離: ロード/マージ/検証/実行を分け、テスト容易性と保守性を向上
+- 本プロジェクトの適用例:
+  - `components/script_loader.py`: エントリAPI（`load_script_and_config`）
+  - `components/config_io.py`: YAML読み込みとエラーハンドリング
+  - `components/config_merge.py`: ディープマージ（override優先）
+  - `components/config_validate.py`: スキーマ/パス/数値範囲などの検証
+
+より詳しい指針や貼り方のコツは [AI_README.md](AI_README.md) を参照してください。
 
 ---
 
@@ -418,15 +450,15 @@ python remove_bg_ai.py --input ./in --output ./out --recursive
 # モデル切替（アニメ調に強い）
 python remove_bg_ai.py --input ./in --output ./out --model isnet-anime
 
-# 現在のONNX Runtimeプロバイダを確認
-python remove_bg_ai.py --input ./in --output ./out --show-providers
-
 # CPU/GPUを強制（GPUが不可ならCPUにフォールバック）
 python remove_bg_ai.py --input ./in --output ./out --force-cpu
 python remove_bg_ai.py --input ./in --output ./out --force-gpu
 ```
 
+モジュールとしても利用でき、`remove_background_in_directory` 関数を使ってプログラムから直接ディレクトリを処理できます。
+
 備考:
+- 起動時に利用可能なONNX Runtimeプロバイダ情報を表示します。
 - 出力は常に透過PNGです。
 - GPU環境では `pip install onnxruntime-gpu` で高速化できます。
 
@@ -549,7 +581,7 @@ python -m zundamotion.main scripts/sample.yaml --log-json
 ```bash
 python -m zundamotion.main scripts/sample.yaml --log-kv
 ```
-出力ファイルのパスを指定する場合は、`-o`または`--output`オプションを使用します。デフォルトの出力パスは `output/final.mp4` です。
+出力ファイルのパスを指定する場合は、`-o`または`--output`オプションを使用します。未指定の場合は `output/final_YYYYMMDD_HHMMSS.mp4` の形式で自動命名されます（例: `output/final_20250911_143015.mp4`）。
 ```bash
 python -m zundamotion.main scripts/sample.yaml -o output/my_video.mp4
 ```

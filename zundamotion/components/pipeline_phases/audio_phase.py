@@ -10,7 +10,8 @@ from zundamotion.cache import CacheManager
 from zundamotion.components.audio import AudioGenerator
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
-from zundamotion.utils.ffmpeg_utils import AudioParams, get_audio_duration
+from zundamotion.utils.ffmpeg_params import AudioParams
+from zundamotion.utils.ffmpeg_probe import get_audio_duration
 from zundamotion.utils.text_processing import parse_reading_markup
 from zundamotion.utils.logger import logger, time_log
 from zundamotion.utils.face_anim import (

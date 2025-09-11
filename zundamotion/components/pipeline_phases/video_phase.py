@@ -10,12 +10,13 @@ from zundamotion.cache import CacheManager
 from zundamotion.components.video import VideoRenderer
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
-from zundamotion.utils.ffmpeg_utils import (
+from zundamotion.utils.ffmpeg_capabilities import (
     get_hw_encoder_kind_for_video_params,  # 追加
     get_ffmpeg_version,
 )
-from zundamotion.utils.ffmpeg_utils import set_hw_filter_mode  # Auto-tuneでのバックオフに使用
-from zundamotion.utils.ffmpeg_utils import AudioParams, VideoParams, normalize_media
+from zundamotion.utils.ffmpeg_ops import normalize_media
+from zundamotion.utils.ffmpeg_hw import set_hw_filter_mode  # Auto-tuneでのバックオフに使用
+from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
 from zundamotion.utils.logger import logger, time_log
 from zundamotion.components.subtitle_png import SubtitlePNGRenderer
 
@@ -67,7 +68,7 @@ class VideoPhase:
         """決定的な並列度を返す。"""
         try:
             import os
-            from zundamotion.utils.ffmpeg_utils import get_hw_filter_mode
+            from zundamotion.utils.ffmpeg_hw import get_hw_filter_mode
 
             # 実効フィルタがCPUかどうか（プロセス全体のバックオフ判定）
             filter_mode = get_hw_filter_mode()
@@ -1056,7 +1057,7 @@ class VideoPhase:
                         # Persist hint for next runs
                         try:
                             import json as _json
-                            from zundamotion.utils.ffmpeg_utils import get_ffmpeg_version
+                            from zundamotion.utils.ffmpeg_capabilities import get_ffmpeg_version
                             hint = {
                                 "cpu_ratio": cpu_ratio,
                                 "decided_mode": "cpu" if cpu_ratio >= 0.5 else "auto",

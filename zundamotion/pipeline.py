@@ -1,3 +1,5 @@
+"""音声・映像生成フェーズを統括するパイプライン実装。"""
+
 import asyncio
 import shutil
 import os
@@ -14,12 +16,12 @@ from .components.pipeline_phases import AudioPhase, BGMPhase, FinalizePhase, Vid
 from .components.script_loader import load_script_and_config
 from .exceptions import PipelineError
 from .timeline import Timeline
-from .utils.ffmpeg_utils import AudioParams, VideoParams
+from .utils.ffmpeg_params import AudioParams, VideoParams
 from .utils.logger import KVLogger, logger, time_log
 
 
 class GenerationPipeline:
-    """Orchestrates audio, video, and post-processing phases for a script."""
+    """スクリプトを元に音声・映像・仕上げの各フェーズを連携させる。"""
 
     def __init__(
         self,
@@ -83,7 +85,7 @@ class GenerationPipeline:
         }
 
     async def _run_phase(self, phase_name: str, func, *args, **kwargs):
-        """Execute a pipeline phase and record its duration."""
+        """各フェーズを実行し処理時間を記録する。"""
         start_time = time.time()
         if isinstance(logger, KVLogger):
             logger.kv_info(
@@ -116,11 +118,10 @@ class GenerationPipeline:
 
     @time_log(logger)
     async def run(self, output_path: str):
-        """
-        Executes the full video generation pipeline.
+        """動画生成パイプライン全体を実行する。
 
         Args:
-            output_path (str): The final output video file path.
+            output_path: 最終出力する動画ファイルのパス。
         """
         pipeline_start_time = time.time()
         # Prefer RAM disk (/dev/shm) when available and large enough, controlled by USE_RAMDISK env (default: 1)
@@ -355,9 +356,7 @@ async def run_generation(
     quality: str = "balanced",
     final_copy_only: bool = False,
 ):
-    """
-    High-level function to run the entire generation process.
-    """
+    """動画生成を高レベルに実行するユーティリティ関数。"""
     # Get the path to the default config file
     default_config_path = Path(__file__).parent / "templates" / "config.yaml"
 

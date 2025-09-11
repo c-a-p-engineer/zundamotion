@@ -1,4 +1,4 @@
-"""Utilities for recording timeline events and exporting them in various formats."""
+"""タイムライン情報を管理しレポートや字幕ファイルを生成するモジュール。"""
 
 import csv
 from pathlib import Path
@@ -8,21 +8,21 @@ import pysubs2
 
 
 def format_timestamp(seconds: float) -> str:
-    """Converts seconds to HH:MM:SS format."""
+    """秒数を HH:MM:SS 形式の文字列に変換する。"""
     m, s = divmod(seconds, 60)
     h, m = divmod(m, 60)
     return f"{int(h):02}:{int(m):02}:{int(s):02}"
 
 
 class Timeline:
-    """In-memory representation of video events used for reporting and subtitles."""
+    """動画イベントを記録しタイムラインや字幕を出力する。"""
 
     def __init__(self):
         self.events: List[Dict[str, Any]] = []
         self.current_time: float = 0.0
 
     def add_event(self, description: str, duration: float, text: Optional[str] = None):
-        """Adds a new event to the timeline."""
+        """タイムラインに新しいイベントを追加する。"""
         self.events.append(
             {
                 "start_time": self.current_time,
@@ -34,7 +34,7 @@ class Timeline:
         self.current_time += duration
 
     def add_scene_change(self, scene_id: str, bg: str):
-        """Adds a scene change event."""
+        """シーン切り替えイベントを追加する。"""
         self.events.append(
             {
                 "start_time": self.current_time,
@@ -46,7 +46,7 @@ class Timeline:
         )
 
     def save_as_md(self, output_path: Path):
-        """Saves the timeline as a Markdown file."""
+        """タイムラインを Markdown 形式で保存する。"""
         with open(output_path, "w", encoding="utf-8") as f:
             f.write("# Video Timeline\n\n")
             for event in self.events:
@@ -54,7 +54,7 @@ class Timeline:
                 f.write(f"- {timestamp} - {event['description']}\n")
 
     def save_as_csv(self, output_path: Path):
-        """Saves the timeline as a CSV file."""
+        """タイムラインを CSV 形式で保存する。"""
         with open(output_path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["start_time", "duration", "description"])
@@ -68,7 +68,7 @@ class Timeline:
                 )
 
     def save_subtitles(self, output_path: Path, format: str):
-        """Saves subtitles as an SRT or ASS file."""
+        """字幕ファイルを SRT または ASS 形式で保存する。"""
         subs = pysubs2.SSAFile()
         for event in self.events:
             if event.get("text"):

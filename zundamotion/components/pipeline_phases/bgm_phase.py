@@ -4,12 +4,10 @@ from typing import Any, Dict, List
 from tqdm import tqdm
 
 from zundamotion.exceptions import PipelineError
-from zundamotion.utils.ffmpeg_utils import (
-    AudioParams,
-    add_bgm_to_video,
-    get_audio_duration,
-    get_media_duration,
-)
+from zundamotion.utils.ffmpeg_params import AudioParams
+from zundamotion.utils.ffmpeg_probe import get_audio_duration, get_media_duration
+from zundamotion.utils.ffmpeg_audio import add_bgm_to_video
+
 from zundamotion.utils.logger import logger, time_log
 
 

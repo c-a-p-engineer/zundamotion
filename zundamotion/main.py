@@ -1,11 +1,11 @@
+"""コマンドラインから動画生成パイプラインを実行するエントリポイント。"""
+
 import argparse
 import sys
-import time  # Add this import
+import time
 import traceback
 from pathlib import Path
 
-# Add the project root to the sys.path to enable absolute imports
-# This is necessary when running the module directly or as a package from a higher directory.
 project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
@@ -17,8 +17,8 @@ from zundamotion.pipeline import run_generation
 from zundamotion.utils.logger import KVLogger, get_logger, setup_logging
 
 
-async def main():  # Make main function async
-    """Main function to run the command line interface."""
+async def main() -> None:
+    """コマンドライン引数を解析し動画生成を実行する。"""
     parser = argparse.ArgumentParser(
         description="Generate a video from a YAML script using VOICEVOX and FFmpeg."
     )
@@ -31,8 +31,11 @@ async def main():  # Make main function async
         "-o",
         "--output",
         type=str,
-        default="output/final.mp4",
-        help="Path to the output video file. Defaults to 'output/final.mp4'.",
+        default=None,
+        help=(
+            "Path to the output video file. If omitted, a timestamped file like "
+            "'output/final_YYYYMMDD_HHMMSS.mp4' is used."
+        ),
     )
     parser.add_argument(
         "--no-cache",
@@ -112,6 +115,11 @@ async def main():  # Make main function async
     # If both are set, --log-kv takes precedence for console output
     setup_logging(log_json=args.log_json, log_kv=args.log_kv)
     logger: KVLogger = get_logger()  # Explicitly type hint logger as KVLogger
+
+    # Resolve default output if not explicitly provided
+    if not args.output:
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        args.output = f"output/final_{ts}.mp4"
 
     # Ensure output directory exists
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
