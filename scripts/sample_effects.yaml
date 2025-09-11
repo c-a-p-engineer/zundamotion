@@ -1,0 +1,31 @@
+meta:
+  title: "前景エフェクト統一・最小サンプル"
+  version: 3
+
+video:
+  fps: 30
+
+scenes:
+  - id: effects_demo
+    bg: "assets/bg/room.png"
+    fg_overlays:
+      - id: speedlines
+        src: "assets/overlay/speedlines.png"
+        mode: overlay  # 元色を保つ
+        opacity: 0.9
+        position: {x: 0, y: 0}
+        scale: {w: 1920, h: 1080, keep_aspect: true}
+        fps: 30
+        effects:
+          - type: blur
+            sigma: 2.5
+          - type: eq
+            contrast: 1.02
+            saturation: 1.0
+          - type: rotate
+            degrees: 0.0
+        timing:
+          start: 0.0
+          duration: 4.0
+    lines:
+      - wait: 4.0

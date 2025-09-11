@@ -56,6 +56,24 @@ scenes:
           start: 0.0
           duration: 5.0
           loop: true
+      - id: speedlines_img_effects
+        src: "assets/overlay/speedlines.png"
+        mode: overlay  # 元色を保つ（色被りを避ける）
+        opacity: 0.9
+        position: {x: 0, y: 0}
+        scale: {w: 1920, h: 1080, keep_aspect: true}
+        fps: 30
+        effects:
+          - type: blur
+            sigma: 2.5
+          - type: eq
+            contrast: 1.02
+            saturation: 1.0
+          - type: rotate
+            degrees: 0.0
+        timing:
+          start: 0.0
+          duration: 5.0
     lines:
       - text: "こんにちは！ずんだもんです。この字幕はキャラクターデフォルト色なのだ。"
         speaker_name: "zundamon"
@@ -126,6 +144,22 @@ scenes:
             scale: {w: 1920, h: 1080, keep_aspect: true}
             timing:
               loop: true
+          - id: line_speedlines
+            src: "assets/overlay/speedlines.png"
+            mode: overlay  # 元色を保つ（色被りを避ける）
+            opacity: 0.85
+            position: {x: 0, y: 0}
+            scale: {w: 1920, h: 1080, keep_aspect: true}
+            fps: 30
+            effects:
+              - type: blur
+                sigma: 2.0
+              - type: eq
+                contrast: 1.02
+                saturation: 1.0
+            timing:
+              start: 0.0
+              duration: 4.0
 
       - text: "このセリフだけ、少しゆっくり話してみるのだ。"
         speaker_name: "zundamon"

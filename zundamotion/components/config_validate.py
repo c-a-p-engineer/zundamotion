@@ -48,7 +48,7 @@ def _validate_fg_overlays(container: Dict[str, Any], container_id: str) -> None:
             )
 
         mode = fg.get("mode")
-        if mode not in {"overlay", "blend", "chroma"}:
+        if mode not in {"overlay", "blend", "chroma", "alpha"}:
             raise ValidationError(
                 f"Foreground overlay '{fg_id}' in {container_id} has invalid mode '{mode}'."
             )
@@ -147,6 +147,32 @@ def _validate_fg_overlays(container: Dict[str, Any], container_id: str) -> None:
             raise ValidationError(
                 f"Foreground overlay '{fg_id}' in {container_id} fps must be a positive integer."
             )
+
+        preserve_color = fg.get("preserve_color")
+        if preserve_color is not None and not isinstance(preserve_color, bool):
+            raise ValidationError(
+                f"Foreground overlay '{fg_id}' in {container_id} preserve_color must be a boolean."
+            )
+
+        # Optional effects list (order-preserving)
+        effects = fg.get("effects")
+        if effects is not None:
+            if not isinstance(effects, list):
+                raise ValidationError(
+                    f"Foreground overlay '{fg_id}' in {container_id} effects must be a list."
+                )
+            for eff_idx, eff in enumerate(effects):
+                if isinstance(eff, str):
+                    continue
+                if not isinstance(eff, dict):
+                    raise ValidationError(
+                        f"Foreground overlay '{fg_id}' in {container_id} effects[{eff_idx}] must be a string or dictionary."
+                    )
+                eff_type = eff.get("type")
+                if not isinstance(eff_type, str) or not eff_type:
+                    raise ValidationError(
+                        f"Foreground overlay '{fg_id}' in {container_id} effects[{eff_idx}] requires a string 'type'."
+                    )
 
 
 def validate_config(config: Dict[str, Any]) -> None:
@@ -376,4 +402,3 @@ def validate_config(config: Dict[str, Any]) -> None:
                         raise ValidationError(
                             f"Sound effect volume for scene '{scene_id}', line {line_idx}, index {se_idx} must be between 0.0 and 1.0, but got {se_volume}."
                         )
-
