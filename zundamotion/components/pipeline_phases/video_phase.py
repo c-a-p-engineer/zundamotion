@@ -1,6 +1,7 @@
 import hashlib
 import json
 import time  # Import time module
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +20,47 @@ from zundamotion.utils.ffmpeg_hw import set_hw_filter_mode  # Auto-tuneでのバ
 from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
 from zundamotion.utils.logger import logger, time_log
 from zundamotion.components.subtitle_png import SubtitlePNGRenderer
+
+
+@dataclass
+class CharacterState:
+    """シーン内でのキャラクター状態を保持する。"""
+
+    name: str
+    expression: str = "default"
+    anchor: str = "bottom_center"
+    position: Dict[str, Any] = field(default_factory=lambda: {"x": "0", "y": "0"})
+    scale: float = 1.0
+    z: int = 0
+    visible: bool = True
+
+
+class CharacterTracker:
+    """VNモード用のキャラクター状態トラッカー。"""
+
+    def __init__(self, width: int, height: int) -> None:
+        self.width = width
+        self.height = height
+        self._states: Dict[str, Dict[str, Any]] = {}
+
+    def reset(self) -> None:
+        self._states.clear()
+
+    def apply(self, updates: List[Dict[str, Any]]) -> None:
+        for upd in updates:
+            name = upd.get("name")
+            if not name:
+                continue
+            if upd.get("exit"):
+                self._states.pop(name, None)
+                continue
+            state = self._states.get(name, {}).copy()
+            state.update({k: v for k, v in upd.items() if k not in {"enter", "exit"}})
+            state.setdefault("visible", True)
+            self._states[name] = state
+
+    def snapshot(self) -> List[Dict[str, Any]]:
+        return list(self._states.values())
 
 
 class VideoPhase:
@@ -245,6 +287,28 @@ class VideoPhase:
                 scene_id = scene["id"]
                 scene_hash_data = self._generate_scene_hash(scene)
 
+                scene_cp = bool(
+                    scene.get(
+                        "characters_persist",
+                        self.config.get("defaults", {}).get("characters_persist", False),
+                    )
+                )
+                if scene_cp:
+                    tracker = CharacterTracker(
+                        self.video_params.width, self.video_params.height
+                    )
+                    for line in scene.get("lines", []):
+                        if line.get("reset_characters"):
+                            tracker.reset()
+                        tracker.apply(line.get("characters", []) or [])
+                        snap = tracker.snapshot()
+                        if snap:
+                            line["characters"] = snap
+                        else:
+                            line.pop("characters", None)
+                else:
+                    tracker = None
+
                 cached_scene_video_path = self.cache_manager.get_cached_path(
                     key_data=scene_hash_data,
                     file_name=f"scene_{scene_id}",
@@ -453,6 +517,11 @@ class VideoPhase:
                     logger.debug(
                         f"Static overlay detection failed on scene {scene_id}: {e}"
                     )
+                if scene_cp:
+                    static_overlays = []
+                    static_char_keys = set()
+                    static_insert_in_base = False
+                    scene_level_insert_video = None
                 # ベース映像生成の可否を判断
                 normalized_bg_path: Optional[Path] = None
                 total_lines_in_scene = len(scene.get("lines", []))
@@ -544,10 +613,12 @@ class VideoPhase:
 
                 # 連続行で静的レイヤが不変な“ラン”のベース（行ブロック前処理）を検討
                 run_bases: List[Dict[str, Any]] = []
-                if scene_base_path is None:
+                if scene_base_path is None and not scene_cp:
                     try:
                         talk_lines2 = [
-                            l for l in scene.get("lines", []) if not ("wait" in l or l.get("type") == "wait")
+                            l
+                            for l in scene.get("lines", [])
+                            if not ("wait" in l or l.get("type") == "wait")
                         ]
                         if talk_lines2:
                             def _norm_char_entries(line: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:

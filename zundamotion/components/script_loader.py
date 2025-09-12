@@ -1,8 +1,11 @@
 from typing import Any, Dict
 
+from ..exceptions import ValidationError
 from .config_io import load_config
 from .config_merge import merge_configs
 from .config_validate import validate_config
+
+__all__ = ["load_script_and_config", "ValidationError"]
 
 
 def load_script_and_config(script_path: str, default_config_path: str) -> Dict[str, Any]:

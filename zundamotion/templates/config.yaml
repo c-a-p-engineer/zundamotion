@@ -85,3 +85,7 @@ bgm:
 # Background settings
 background:
   default: "assets/bg/default.png"
+
+# character presist
+defaults:
+  characters_persist: true

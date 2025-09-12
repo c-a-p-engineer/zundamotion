@@ -1,0 +1,50 @@
+meta:
+  title: "VNモード最小サンプル"
+  version: 1
+
+defaults:
+  characters_persist: true
+  characters:
+    zundamon:
+      speaker_id: 3
+    metan:
+      speaker_id: 6
+
+scenes:
+  - id: vn_demo
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "ずんだもん登場"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            enter: true
+            anchor: bottom_center
+            position:
+              x: -480
+              y: -20
+            scale: 0.8
+      - text: "次の行でも表示が続くのだ"
+        speaker_name: "zundamon"
+      - text: "めたんも来たよ"
+        speaker_name: "metan"
+        characters:
+          - name: "metan"
+            expression: "normal"
+            enter: true
+            anchor: bottom_center
+            position:
+              x: 480
+              y: -20
+            scale: 0.8
+      - text: "ずんだもんは退場するのだ"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            exit: true
+      - text: "バイバイ"
+        speaker_name: "metan"
+        characters:
+          - name: "metan"
+            exit: true

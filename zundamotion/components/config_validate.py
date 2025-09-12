@@ -189,6 +189,14 @@ def validate_config(config: Dict[str, Any]) -> None:
     if not isinstance(script, dict):
         raise ValueError("Script data must be a dictionary under the 'script' key.")
 
+    defaults = config.get("defaults", {})
+    if defaults:
+        cp = defaults.get("characters_persist")
+        if cp is not None and not isinstance(cp, bool):
+            raise ValidationError(
+                "'defaults.characters_persist' must be a boolean."
+            )
+
     scenes = script.get("scenes")
     if not isinstance(scenes, list):
         raise ValueError("Script must contain a 'scenes' list.")
@@ -198,6 +206,11 @@ def validate_config(config: Dict[str, Any]) -> None:
             raise ValidationError(f"Scene at index {scene_idx} must be a dictionary.")
 
         scene_id = scene.get("id", f"scene_{scene_idx}")
+        cp = scene.get("characters_persist")
+        if cp is not None and not isinstance(cp, bool):
+            raise ValidationError(
+                f"Scene '{scene_id}' characters_persist must be a boolean."
+            )
 
         lines = scene.get("lines")
         if not isinstance(lines, list):
@@ -296,6 +309,12 @@ def validate_config(config: Dict[str, Any]) -> None:
                 )
 
             _validate_fg_overlays(line, f"scene '{scene_id}', line {line_idx}")
+
+            reset_flag = line.get("reset_characters")
+            if reset_flag is not None and not isinstance(reset_flag, bool):
+                raise ValidationError(
+                    f"Line at scene '{scene_id}', index {line_idx} reset_characters must be a boolean."
+                )
 
             # 'text' or 'wait' key must exist
             if "text" not in line and "wait" not in line:

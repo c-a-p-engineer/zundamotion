@@ -80,45 +80,31 @@ scenes:
         characters:
           - name: "zundamon"
             expression: "normal"
-            visible: true
-            # 差分PNGを配置した場合の推奨（同一配置で口/目差分を重畳）
-            anchor: "bottom_center"
-            position: {"x": "0", "y": "0"}
+            enter: true
+            anchor: bottom_center
             scale: 0.8
 
       - text: "このセリフだけ、字幕の色を変えてみるのだ。"
         speaker_name: "zundamon"
         subtitle:
           font_color: "yellow" # この行だけデフォルトを上書き
-        characters:
-          - name: "zundamon"
-            expression: "normal"
-            visible: true
-            anchor: "bottom_center"
-            position: {"x": "0", "y": "0"}
-            scale: 0.8
 
       - text: "私は四国めたん。私の字幕もデフォルト設定よ。"
         speaker_name: "metan"
         characters:
+          - name: "zundamon"
+            exit: true
           - name: "metan"
             expression: "normal"
-            visible: true
-            anchor: "bottom_center"
-            position: {"x": "0", "y": "0"}
+            enter: true
+            anchor: bottom_center
+            position:
+              x: 480
+              y: -20
             scale: 0.8
 
       - text: "このプロジェクト、なかなか面白いじゃない。"
         speaker_name: "metan"
-        subtitle:
-          stroke_color: "red" # この行だけ縁取りの色を上書き
-        characters:
-          - name: "metan"
-            expression: "normal"
-            visible: true
-            anchor: "bottom_center"
-            position: {"x": "0", "y": "0"}
-            scale: 0.8
 
   - id: voice_zundamon
     bg: "assets/bg/room.png"
@@ -129,9 +115,7 @@ scenes:
           - name: "zundamon"
             expression: "normal"
             visible: true
-            anchor: "bottom_center"
-            position: {"x": "0", "y": "0"}
-            scale: 0.8
+            anchor: "middle_left"
         fg_overlays:
           - id: line_sakura
             src: "assets/overlay/sakura_bg_black.mp4"
@@ -164,13 +148,6 @@ scenes:
       - text: "このセリフだけ、少しゆっくり話してみるのだ。"
         speaker_name: "zundamon"
         speed: 0.9 # この行だけデフォルトを上書き
-        characters:
-          - name: "zundamon"
-            expression: "normal"
-            visible: true
-            anchor: "bottom_center"
-            position: {"x": "0", "y": "0"}
-            scale: 0.8
 
       - text: "私は四国めたん。私もデフォルト設定よ。"
         speaker_name: "metan"
@@ -178,20 +155,12 @@ scenes:
           - name: "metan"
             expression: "normal"
             visible: true
-            anchor: "bottom_center"
-            position: {"x": "0", "y": "0"}
+            anchor: "middle_right"
             scale: 0.8
 
       - text: "このプロジェクト、なかなか面白いじゃない。"
         speaker_name: "metan"
         pitch: -0.1 # この行だけデフォルトを上書き
-        characters:
-          - name: "metan"
-            expression: "normal"
-            visible: true
-            anchor: "bottom_center"
-            position: {"x": "0", "y": "0"}
-            scale: 0.8
 
   - id: intro
     bg: "assets/bg/sample_video.mp4"    # シーン背景 (動画ファイル)

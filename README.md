@@ -55,6 +55,27 @@ lines:
         visible: true
 ```
 
+### VNモード（キャラクター持続表示）
+
+`defaults.characters_persist: true` を指定すると、シーン内でキャラクターの表示状態が持続し、各行では差分のみを記述できます。
+`characters` ブロックには `enter`/`exit`、`position` や `anchor` を差分指定して登場位置や退場を表現できます。
+
+```yaml
+defaults:
+  characters_persist: true
+scenes:
+  - lines:
+      - text: "ずんだもん登場"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            enter: true
+            anchor: bottom_center
+            position: {x: -480, y: -20}
+      - text: "次の行でも表示が続くのだ"
+        speaker_name: "zundamon"
+```
+
 - **DevContainer対応**: VSCode DevContainerをサポートしており、どこでも一貫した開発環境を簡単に構築できます。
 - **外部設定ファイル**: `config.yaml`を通じて、キャッシュディレクトリや動画拡張子などのシステム設定を柔軟に変更できます。
 - **タイムライン出力**: 動画の各シーンやセリフの開始時刻を記録し、YouTubeのチャプターなどに利用できるタイムラインファイルを自動生成します。出力形式はMarkdown (`.md`)、CSV (`.csv`)、またはその両方を選択できます。
