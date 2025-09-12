@@ -14,6 +14,122 @@
 - ConcatCopyは高速（~170MB/s）。
 
 
+## P0（新機能）VNモード：シーン内キャラ持続表示の導入（非破壊）
+
+ビジュアルノベル風の「登場後は退場まで常時表示」「退場後は非表示」を、シーン内限定で実現する。
+既存挙動（行ごとスナップショット）を既定として維持し、`characters_persist` 有効時のみ差分解釈に切り替える。
+
+参考コードと発見点:
+- 立ち絵の解決と合成は `zundamotion/components/video.py:520` 以降。
+- 行レンダ入口（effective_characters 決定ポイント）は `zundamotion/components/pipeline_phases/video_phase.py:780` 付近。
+- 座標式は `zundamotion/utils/ffmpeg_ops.py:246` `calculate_overlay_position` を利用。
+
+### VN-00 用語と仕様の確定（設計のみ）
+- 背景: 仕様の曖昧さを解消し実装に落とす。
+- 目的: シーン内での持続表示・差分指定・演出のON/OFFを明確化。
+- 方針:
+  - characters_persist: シーン内でキャラ状態（可視・表情・位置等）を持続させるフラグ。既定は false。
+  - スロット: `slot: left|center|right` を `anchor/position` に変換（anchor=`bottom_center`）。
+    - x: left→ `-(W/4)`, center→ `0`, right→ `+(W/4)`（Wは動画幅）。
+    - y: `-(H*0.02)` として僅かに上げる（微調整可）。
+  - フォーカス: 行単位でON/OFF可能。ON時は「発話者以外」を軽く減光（例: `eq=brightness=-0.05:saturation=0.9`）。既定はOFF。
+  - トランジション: enter/exit にフェード適用（既定 250ms）。
+  - 自動登場: なし。必ず `enter`（または `visible:true`）で明示。
+  - 口パク/まばたき: 口パクは発話者のみ／まばたきはその行で可視な全員に適用。
+- 実装イメージ: 下位タスク VN-01〜03 に従い段階導入。
+- 成果確認: サンプル台本で「登場→継続→退場」が期待通り・フォーカス/フェードが効く。
+
+### VN-01 スキーマ拡張（台本・既定値）
+- 背景: 差分指定と演出を台本で表現可能にする。
+- 目的: 互換性を保ちながら最小キー追加でVNモードを有効化。
+- 方針（追加キー案）:
+  - 既定（scriptまたはconfig）
+    - `script.defaults.characters_persist: false`（既定）
+    - `script.defaults.vn.focus.enabled: false`
+    - `script.defaults.vn.transitions.enter_ms: 250`
+    - `script.defaults.vn.transitions.exit_ms: 250`
+    - `script.defaults.vn.focus.brightness_delta: -0.05`
+    - `script.defaults.vn.focus.saturation: 0.9`
+  - 行レベル（差分）
+    - `characters: [{ name, enter|exit, expression, slot|position, scale, z }]`
+    - `reset_characters: true`（その行頭で全員退場）
+    - `vn: { focus: true|false }`（行単位の上書き）
+- 実装イメージ:
+  - `components/config_validate.py` にキーを許容（必須ではない）。
+  - `components/script_loader.py:1` で既定値マージは既存の仕組みを流用。
+- 成果確認: 追加キーがエラーなく読み込め、既存台本も動作不変。
+
+### VN-02 CharacterTracker 設計と追加（VideoPhase）
+- 背景: 行ごとに差分を適用し有効キャラ集合を生成する必要。
+- 目的: シーン内でキャラ状態を保持・更新して `effective_characters` を出力。
+- 方針:
+  - `CharacterState`: {name, visible, expression, slot|position, scale, z, entering, exiting} を保持。
+  - シーン開始でリセット、`reset_characters` で全消し。
+  - 行の `characters[]` を差分として適用（enter/exit/表情/スロット/座標/スケール）。
+  - スロット→座標は `calculate_overlay_position` 前提で `anchor='bottom_center'` + 既定オフセットに正規化。
+  - フォーカス判定: 既定+行上書き、`speaker_name` を発話者として記録。
+  - 口パク/まばたき: その行の可視キャラ集合と発話者から `face_anim` メタを構築。
+- 実装イメージ:
+  - 実装箇所: `components/pipeline_phases/video_phase.py:780` 付近に `CharacterTracker` を導入。
+  - `characters_persist:false` の場合は従来どおり `line.characters` をそのまま使用。
+- 成果確認: ログに tracker の適用が出力され、`effective_characters` が差分通り生成。
+
+### VN-03 行レンダリングへの組み込みとキャッシュキー拡張
+- 背景: 見た目の変化がキャッシュ衝突しないようにする。
+- 目的: `get_or_create` キーに視覚状態を反映するハッシュを追加。
+- 方針:
+  - `characters_effective_hash` を `video_cache_data` に追加（name/expression/scale/anchor/position/z/focus/entering/exiting）。
+  - VNモード時は「静的レイヤのベース取り込み」を原則OFF（enter/exit/フォーカスが効かなくなるため）。
+- 実装イメージ:
+  - 実装箇所: `components/pipeline_phases/video_phase.py:920` 前後（talk系の `video_cache_data` 構築部）。
+  - ベース最適化制御: `video_phase.py:398` 以降の静的判定に `characters_persist` を加味。
+- 成果確認: 同一音声でも見た目が異なる場合にキャッシュ取り違えが起きない。
+
+### VN-04 VideoRenderer 最小改修（フォーカス・トランジション）
+- 背景: キャラOverlay段で効果を注入する必要。
+- 目的: 既存のFilterグラフに最小変更でフォーカス/フェードを適用。
+- 方針:
+  - フォーカス: `active_speaker` と `vn.focus` を `render_clip` に渡し、各キャラの合成直前に `eq=brightness=Δb:saturation=s` を付与（発話者以外）。
+  - フェード: `entering/exiting` に応じて `fade=t=in/out:d=ms/1000` をキャラストリームへ付与（1回限り）。
+  - 既定値は `config.video` または `defaults.vn` から取得。
+- 実装イメージ:
+  - 実装箇所: `components/video.py:520` 以降のキャラ合成部分。
+  - `characters_config` の各要素に `{ entering, exiting }` を付加し、`line_config` で `{ active_speaker, vn: { focus } }` を受ける。
+- 成果確認: サンプルで非発話者が減光、enter/exitにフェードがのる。
+
+### VN-05 Config 読み込み・バリデーションの拡張
+- 背景: 新キーの読み書きで失敗しないようにする。
+- 目的: 互換性を壊さずに新キーを許容。
+- 方針: `config_validate.py` に `script.defaults.vn.*` と行の `reset_characters`/`vn.focus` を追加許容。
+- 実装イメージ: `zundamotion/components/config_validate.py:1` に型・既定の緩い検証を追加。
+- 成果確認: 新旧台本でバリデーションエラーが出ない。
+
+### VN-06 検証用サンプル台本と再生性テスト
+- 背景: 手動検証の手間を下げる。
+- 目的: 最小ケースで仕様が満たされることを確認。
+- 方針: 3〜5行のシーンで「登場→継続→別キャラ登場→退場」「フォーカスON/OFF」を含むYAMLを用意。
+- 実装イメージ: `assets/` 配下の既存キャラ素材で再生。`tests/` に期待スクリーンショット（任意）。
+- 成果確認: 目視で仕様どおり、ログにVNパスの診断が出る。
+
+### VN-07 ドキュメント（README/テンプレ）
+- 背景: 台本作者が使い始めやすくする。
+- 目的: キー一覧・スロット早見表・サンプルを追加。
+- 方針: READMEの「スクリプト書き方」に VN モード節を追加。
+- 実装イメージ: スロット→座標の式、注意点（ベース取り込みの制限、フォーカスの既定OFF等）を記載。
+- 成果確認: 新規ユーザがこの節のみで利用開始できる。
+
+### VN-08 後続: video.py の責務分割（設計のみ、実装は別フェーズ）
+- 背景: `video.py` が肥大（入力列構築・背景・立ち絵・字幕・GPU/CPU切替が一体）。
+- 目的: 責務分離で保守性を高め、VN演出の追加を安全にする。
+- 方針（クラス分割案）:
+  - BackgroundBuilder: 背景正規化/ループ/シーンベース。
+  - CharacterOverlayBuilder: 立ち絵の入力投入・事前スケール・フィルタ断片生成（フォーカス/フェード含む）。
+  - ClipCommandBuilder: 入力/マップ/フィルタグラフを最終コマンドに組立。
+  - VideoRenderer: 上記のオーケストレーションのみ。
+- 実装イメージ: まずは設計ドキュメント（クラス境界と責務）を `docs/` に作成。
+- 成果確認: 設計合意後、実装タスクへ分割可能な状態。
+
+
 ## P1（品質向上・高速化）
 
 ### 00. FFmpeg を CUDAフィルタ入りビルドへ切替（環境整備）
@@ -47,12 +163,6 @@
 
 ## P2（改善・将来・機能追加）
 
-### 01. 画像オーバーレイにも前景フィルタ適用（エフェクト統一）
-- 背景: 現状の前景フィルタは動画中心で、静止画像（PNG）に未適用の効果がある。
-- 目的: 動画/画像問わず同じエフェクト指定で表現を統一。
-- 方針: `fg_overlays[*].effects[]` を導入。画像は `format=rgba`＋必要時 `fps` を与え、filter_complexへ統合。
-- 実装イメージ: `effects[]` に `blur/vignette/eq/hue/curves/unsharp/lut3d/zoompan/rotate` を段階実装、順序制御に対応。
-- 成果確認: 同一YAMLで動画/画像ともに効果適用、回帰テストOK。
 
 ### 02. 複数キャラクター同時配置（レイアウト・Z順・自動配置）
 - 背景: 2人/3人ショットなど同時表示ニーズ。
