@@ -55,12 +55,43 @@ class CharacterTracker:
                 self._states.pop(name, None)
                 continue
             state = self._states.get(name, {}).copy()
-            state.update({k: v for k, v in upd.items() if k not in {"enter", "exit"}})
+            if "enter" in upd:
+                state["enter"] = upd.get("enter")
+                if "enter_duration" in upd:
+                    state["enter_duration"] = upd["enter_duration"]
+            if "leave" in upd:
+                state["leave"] = upd.get("leave")
+                if "leave_duration" in upd:
+                    state["leave_duration"] = upd["leave_duration"]
+            state.update(
+                {
+                    k: v
+                    for k, v in upd.items()
+                    if k
+                    not in {
+                        "enter",
+                        "exit",
+                        "enter_duration",
+                        "leave",
+                        "leave_duration",
+                    }
+                }
+            )
             state.setdefault("visible", True)
             self._states[name] = state
 
     def snapshot(self) -> List[Dict[str, Any]]:
-        return list(self._states.values())
+        snap: List[Dict[str, Any]] = []
+        for name, st in list(self._states.items()):
+            snap.append(st.copy())
+            st.pop("enter", None)
+            st.pop("enter_duration", None)
+            if st.pop("leave", None) is not None:
+                st.pop("leave_duration", None)
+                self._states.pop(name, None)
+            else:
+                st.pop("leave_duration", None)
+        return snap
 
 
 class VideoPhase:
@@ -263,6 +294,69 @@ class VideoPhase:
             "audio_params": self.audio_params.__dict__,  # 追加
         }
 
+    @staticmethod
+    def _norm_char_entries(line: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:
+        """Extracts static character overlay entries from a line configuration.
+
+        Characters with dynamic enter/leave animations are excluded to avoid
+        duplicating them in the scene base. The returned dictionary maps
+        normalized character keys to overlay configuration.
+        """
+        entries: Dict[tuple, Dict[str, Any]] = {}
+        for ch in line.get("characters", []) or []:
+            if not ch.get("visible", False):
+                continue
+            if ch.get("enter") or ch.get("leave"):
+                continue
+            name = ch.get("name")
+            expr = ch.get("expression", "default")
+            try:
+                scale = round(float(ch.get("scale", 1.0)), 2)
+            except Exception:
+                scale = 1.0
+            anchor = str(ch.get("anchor", "bottom_center")).lower()
+            pos_raw = ch.get("position", {"x": "0", "y": "0"}) or {}
+
+            def _q(v: Any) -> str:
+                try:
+                    return f"{float(v):.2f}"
+                except Exception:
+                    return str(v)
+
+            pos = {"x": _q(pos_raw.get("x", "0")), "y": _q(pos_raw.get("y", "0"))}
+            key = (
+                name,
+                expr,
+                float(scale),
+                str(anchor),
+                str(pos.get("x", "0")),
+                str(pos.get("y", "0")),
+            )
+            base_dir = Path(f"assets/characters/{name}")
+            candidates = [
+                base_dir / expr / "base.png",  # new: <name>/<expr>/base.png
+                base_dir / f"{expr}.png",  # legacy: <name>/{expr}.png
+                base_dir / "default" / "base.png",  # new default: <name>/default/base.png
+                base_dir / "default.png",  # legacy default: <name>/default.png
+            ]
+            chosen = None
+            for c in candidates:
+                try:
+                    if c.exists():
+                        chosen = c
+                        break
+                except Exception:
+                    pass
+            if chosen is None:
+                continue
+            entries[key] = {
+                "path": str(chosen),
+                "scale": scale,
+                "anchor": anchor,
+                "position": {"x": pos.get("x", "0"), "y": pos.get("y", "0")},
+            }
+        return entries
+
     @time_log(logger)
     async def run(
         self,
@@ -326,6 +420,33 @@ class VideoPhase:
                 bg_image = scene.get("bg", bg_default)
                 is_bg_video = Path(bg_image).suffix.lower() in self.video_extensions
 
+                # キャラクターの登場/退場アニメーション秒数を行ごとに反映
+                for idx, line in enumerate(scene.get("lines", []), start=1):
+                    line_id = f"{scene_id}_{idx}"
+                    data = line_data_map.get(line_id)
+                    if not data:
+                        continue
+                    chars = line.get("characters", []) or []
+
+                    def _max_dur(key: str) -> float:
+                        """Return max duration for enter/leave across characters."""
+                        dur = 0.0
+                        flag = key.replace("_duration", "")
+                        for ch in chars:
+                            if ch.get(flag):
+                                try:
+                                    d = float(ch.get(key, 0.0))
+                                except Exception:
+                                    d = 0.0
+                                dur = max(dur, d)
+                        return dur
+
+                    enter_pad = _max_dur("enter_duration")
+                    leave_pad = _max_dur("leave_duration")
+                    data["pre_duration"] = enter_pad
+                    data["post_duration"] = leave_pad
+                    data["duration"] = float(data.get("duration", 0.0)) + enter_pad + leave_pad
+
                 scene_duration = sum(
                     line_data_map[f"{scene_id}_{idx + 1}"]["duration"]
                     for idx, line in enumerate(scene.get("lines", []))
@@ -384,62 +505,7 @@ class VideoPhase:
                     ]
                     if talk_lines:
                         # 各行の可視キャラを正規化してキー化（name, expr, scale, anchor, pos）
-                        def _norm_char_entries(line: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:
-                            entries: Dict[tuple, Dict[str, Any]] = {}
-                            for ch in line.get("characters", []) or []:
-                                if not ch.get("visible", False):
-                                    continue
-                                name = ch.get("name")
-                                expr = ch.get("expression", "default")
-                                # 量子化（微差を同一扱い）
-                                try:
-                                    scale = round(float(ch.get("scale", 1.0)), 2)
-                                except Exception:
-                                    scale = 1.0
-                                anchor = str(ch.get("anchor", "bottom_center")).lower()
-                                pos_raw = ch.get("position", {"x": "0", "y": "0"}) or {}
-                                def _q(v):
-                                    try:
-                                        return f"{float(v):.2f}"
-                                    except Exception:
-                                        return str(v)
-                                pos = {"x": _q(pos_raw.get("x", "0")), "y": _q(pos_raw.get("y", "0"))}
-                                key = (
-                                    name,
-                                    expr,
-                                    float(scale),
-                                    str(anchor),
-                                    str(pos.get("x", "0")),
-                                    str(pos.get("y", "0")),
-                                )
-                                # Resolve base image with new expression-first layout and legacy fallbacks
-                                base_dir = Path(f"assets/characters/{name}")
-                                candidates = [
-                                    base_dir / expr / "base.png",           # new: <name>/<expr>/base.png
-                                    base_dir / f"{expr}.png",                # legacy: <name>/{expr}.png
-                                    base_dir / "default" / "base.png",       # new default: <name>/default/base.png
-                                    base_dir / "default.png",                # legacy default: <name>/default.png
-                                ]
-                                chosen = None
-                                for c in candidates:
-                                    try:
-                                        if c.exists():
-                                            chosen = c
-                                            break
-                                    except Exception:
-                                        pass
-                                if chosen is None:
-                                    # If nothing exists, skip this character for scene-base
-                                    continue
-                                entries[key] = {
-                                    "path": str(chosen),
-                                    "scale": scale,
-                                    "anchor": anchor,
-                                    "position": {"x": pos.get("x", "0"), "y": pos.get("y", "0")},
-                                }
-                            return entries
-
-                        per_line_char_maps = [_norm_char_entries(tl) for tl in talk_lines]
+                        per_line_char_maps = [self._norm_char_entries(tl) for tl in talk_lines]
                         if per_line_char_maps:
                             common_keys = set(per_line_char_maps[0].keys())
                             for m in per_line_char_maps[1:]:
@@ -780,6 +846,7 @@ class VideoPhase:
                         line_id = f"{scene_id}_{idx}"
                         line_data = line_data_map[line_id]
                         duration = line_data["duration"]
+                        pre_dur = float(line_data.get("pre_duration", 0.0))
                         line_config = line_data["line_config"]
 
                         # シーンベース or 連続ランのベースがあればそれを使用
@@ -978,6 +1045,7 @@ class VideoPhase:
                                 output_filename=output_path.stem,
                                 insert_config=effective_insert,
                                 face_anim=face_anim,
+                                audio_delay=pre_dur,
                             )
                             if clip_path is None:
                                 raise PipelineError(

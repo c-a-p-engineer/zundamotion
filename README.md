@@ -55,10 +55,30 @@ lines:
         visible: true
 ```
 
+### キャラクター登場/退場アニメーション
+
+`characters` ブロックの `enter`/`leave` で登場・退場アニメーションを指定できます。
+`true` または `"fade"` でフェードイン/アウト（既定0.3秒、`enter_duration`/`leave_duration` で秒数変更）。
+`"slide_left"` / `"slide_right"` / `"slide_top"` / `"slide_bottom"` で各方向にスライドイン・アウトします。
+指定したアニメーションは口パク・目パチなどの顔パーツにも同期し、登場直後のゴーストを防ぎます。
+登場アニメーションが指定されている場合、音声はアニメーション完了後に再生され、退場アニメーションは音声終了後に実行されます。
+
+```yaml
+characters:
+  - name: "zundamon"
+    expression: "normal"
+    enter: slide_left     # 左からスライドイン
+    enter_duration: 0.5   # アニメーション秒数
+    leave: fade           # フェードアウト
+    leave_duration: 0.5
+    anchor: bottom_center
+    scale: 0.8
+```
+
 ### VNモード（キャラクター持続表示）
 
 `defaults.characters_persist: true` を指定すると、シーン内でキャラクターの表示状態が持続し、各行では差分のみを記述できます。
-`characters` ブロックには `enter`/`exit`、`position` や `anchor` を差分指定して登場位置や退場を表現できます。
+`characters` ブロックには `enter`/`leave`/`exit`、`position` や `anchor` を差分指定して登場位置や退場を表現できます。
 
 ```yaml
 defaults:

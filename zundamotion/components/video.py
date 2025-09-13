@@ -390,6 +390,7 @@ class VideoRenderer(OverlayMixin):
         subtitle_png_path: Optional[Path] = None,
         face_anim: Optional[Dict[str, Any]] = None,
         _force_cpu: bool = False,
+        audio_delay: float = 0.0,
     ) -> Optional[Path]:
         """
         drawtext 全廃版:
@@ -786,10 +787,12 @@ class VideoRenderer(OverlayMixin):
             if not char_config.get("visible", False) or i not in character_indices:
                 continue
             ffmpeg_index = character_indices[i]
-            scale = float(char_effective_scale.get(i, float(char_config.get("scale", 1.0))))
+            scale = float(
+                char_effective_scale.get(i, float(char_config.get("scale", 1.0)))
+            )
             anchor = char_config.get("anchor", "bottom_center")
             pos = char_config.get("position", {"x": "0", "y": "0"})
-            x_expr, y_expr = calculate_overlay_position(
+            x_base, y_base = calculate_overlay_position(
                 "W",
                 "H",
                 "w",
@@ -798,15 +801,88 @@ class VideoRenderer(OverlayMixin):
                 str(pos.get("x", "0")),
                 str(pos.get("y", "0")),
             )
+            enter_duration = 0.3
+            try:
+                enter_duration = float(char_config.get("enter_duration", 0.3))
+            except Exception:
+                enter_duration = 0.3
+            leave_duration = 0.3
+            try:
+                leave_duration = float(char_config.get("leave_duration", 0.3))
+            except Exception:
+                leave_duration = 0.3
+            enter_val = char_config.get("enter")
+            leave_val = char_config.get("leave")
+            enter_effect = ""
+            leave_effect = ""
+            if enter_val:
+                enter_effect = (
+                    str(enter_val).lower() if not isinstance(enter_val, bool) else "fade"
+                )
+            if leave_val:
+                leave_effect = (
+                    str(leave_val).lower() if not isinstance(leave_val, bool) else "fade"
+                )
+            fade = ""
+            x_expr, y_expr = x_base, y_base
+            if enter_effect == "fade":
+                fade += f",fade=t=in:st=0:d={enter_duration}:alpha=1"
+            if leave_effect == "fade":
+                fade += (
+                    f",fade=t=out:st={max(0.0, duration - leave_duration)}:d={leave_duration}:alpha=1"
+                )
+            if enter_effect == "slide_left":
+                x_expr = (
+                    f"if(lt(t,{enter_duration}), -w+({x_base}+w)*t/{enter_duration}, {x_expr})"
+                )
+            elif enter_effect == "slide_right":
+                x_expr = (
+                    f"if(lt(t,{enter_duration}), W+({x_base}-W)*t/{enter_duration}, {x_expr})"
+                )
+            elif enter_effect == "slide_top":
+                y_expr = (
+                    f"if(lt(t,{enter_duration}), -h+({y_base}+h)*t/{enter_duration}, {y_expr})"
+                )
+            elif enter_effect == "slide_bottom":
+                y_expr = (
+                    f"if(lt(t,{enter_duration}), H+({y_base}-H)*t/{enter_duration}, {y_expr})"
+                )
+            leave_start = max(0.0, duration - leave_duration)
+            if leave_effect == "slide_left":
+                x_expr = (
+                    f"if(gt(t,{leave_start}), {x_base} + (-w-{x_base})*(t-{leave_start})/{leave_duration}, {x_expr})"
+                )
+            elif leave_effect == "slide_right":
+                x_expr = (
+                    f"if(gt(t,{leave_start}), {x_base} + (W-{x_base})*(t-{leave_start})/{leave_duration}, {x_expr})"
+                )
+            elif leave_effect == "slide_top":
+                y_expr = (
+                    f"if(gt(t,{leave_start}), {y_base} + (-h-{y_base})*(t-{leave_start})/{leave_duration}, {y_expr})"
+                )
+            elif leave_effect == "slide_bottom":
+                y_expr = (
+                    f"if(gt(t,{leave_start}), {y_base} + (H-{y_base})*(t-{leave_start})/{leave_duration}, {y_expr})"
+                )
+
+            # ffmpegのfiltergraphでは`,`がフィルタ区切りと解釈されるため
+            # 式中に含まれるカンマをエスケープする
+            def _esc_commas(expr: str) -> str:
+                return expr.replace(",", "\\,")
+
+            x_expr = _esc_commas(x_expr)
+            y_expr = _esc_commas(y_expr)
 
             if use_cuda_filters:
                 # 想定上ここには来ない（uses_alpha_overlay True → CPU 合成）
                 filter_complex_parts.append(
-                    f"[{ffmpeg_index}:v]format=rgba,hwupload_cuda,{self.scale_filter}=iw*{scale}:ih*{scale}[char_scaled_{i}]"
+                    f"[{ffmpeg_index}:v]format=rgba{fade},hwupload_cuda,{self.scale_filter}=iw*{scale}:ih*{scale}[char_scaled_{i}]"
                 )
                 overlay_streams.append(f"[char_scaled_{i}]")
                 overlay_filters.append(f"overlay_cuda=x={x_expr}:y={y_expr}")
-            elif self.gpu_overlay_backend == "opencl" and not _force_cpu and (get_hw_filter_mode() != "cpu" or self.allow_opencl_overlay_in_cpu_mode):
+            elif self.gpu_overlay_backend == "opencl" and not _force_cpu and (
+                get_hw_filter_mode() != "cpu" or self.allow_opencl_overlay_in_cpu_mode
+            ):
                 # 前段で Pillow による事前スケールが有効な場合、scale は 1.0 に縮退
                 if os.environ.get("CHAR_CACHE_DISABLE", "0") != "1":
                     try:
@@ -814,10 +890,8 @@ class VideoRenderer(OverlayMixin):
 
                         cache = self.face_cache  # same cache instance
                         # 事前スケール済み PNG を別入力として差し替え（ffmpeg_index の実入力を置換）
-                        # ここではフィルタでのスケールを行わず、GPU に上げて overlay のみ実施
-                        # 既存 ffmpeg_index はそのまま使用し、format=rgba,hwupload を適用
                         filter_complex_parts.append(
-                            f"[{ffmpeg_index}:v]format=rgba,hwupload[char_gpu_{i}]"
+                            f"[{ffmpeg_index}:v]format=rgba{fade},hwupload[char_gpu_{i}]"
                         )
                         overlay_streams.append(f"[char_gpu_{i}]")
                         overlay_filters.append(
@@ -827,10 +901,7 @@ class VideoRenderer(OverlayMixin):
                     except Exception:
                         # フォールバック: CPU スケール→GPUへ
                         filter_complex_parts.append(
-                            f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[char_scaled_{i}]"
-                        )
-                        filter_complex_parts.append(
-                            f"[char_scaled_{i}]format=rgba,hwupload[char_gpu_{i}]"
+                            f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale},format=rgba{fade},hwupload[char_gpu_{i}]"
                         )
                         overlay_streams.append(f"[char_gpu_{i}]")
                         overlay_filters.append(
@@ -841,11 +912,11 @@ class VideoRenderer(OverlayMixin):
                 # CPU 経路: 事前スケールが有効なら scale を省いて format のみ
                 if os.environ.get("CHAR_CACHE_DISABLE", "0") != "1" and abs(scale - 1.0) < 1e-6:
                     filter_complex_parts.append(
-                        f"[{ffmpeg_index}:v]format=rgba[char_scaled_{i}]"
+                        f"[{ffmpeg_index}:v]format=rgba{fade}[char_scaled_{i}]"
                     )
                 else:
                     filter_complex_parts.append(
-                        f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}:flags={self.scale_flags}[char_scaled_{i}]"
+                        f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}:flags={self.scale_flags},format=rgba{fade}[char_scaled_{i}]"
                     )
                 overlay_streams.append(f"[char_scaled_{i}]")
                 overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
@@ -899,6 +970,9 @@ class VideoRenderer(OverlayMixin):
                 char_overlay_placement[str(char_name)] = {
                     "x_expr": x_expr,
                     "y_expr": y_expr,
+                    "enter_effect": enter_effect,
+                    "leave_effect": leave_effect,
+                    "fade": fade,
                     "scale_orig": str(scale_orig),
                     "scale_eff": str(scale),
                     "x_num": str(int(round(xn))),
@@ -955,9 +1029,13 @@ class VideoRenderer(OverlayMixin):
 
             if placement:
                 scale = placement.get("scale_orig") or placement.get("scale") or "1.0"
-                # Use numeric top-left position for stability (independent of each overlay's w/h)
                 x_fix = placement.get("x_num") or placement.get("x_expr") or "0"
                 y_fix = placement.get("y_num") or placement.get("y_expr") or "0"
+                enter_eff = str(placement.get("enter_effect") or "")
+                fade_str = placement.get("fade", "")
+                use_dynamic = enter_eff.startswith("slide")
+                x_pos = placement.get("x_expr") if use_dynamic else x_fix
+                y_pos = placement.get("y_expr") if use_dynamic else y_fix
 
                 # Asset discovery
                 base_dir = Path(f"assets/characters/{target_name}")
@@ -1044,15 +1122,14 @@ class VideoRenderer(OverlayMixin):
                     except Exception:
                         return _add_image_input(path)
                 
-                def _prep_overlay(idx: int, scale_val: float, out_label: str) -> None:
+                def _prep_overlay(idx: int, scale_val: float, out_label: str, fade_add: str = "") -> None:
                     if idx in preprocessed_inputs:
-                        # Already scaled via Pillow; only ensure rgba passthrough
                         filter_complex_parts.append(
-                            f"[{idx}:v]format=rgba[{out_label}]"
+                            f"[{idx}:v]format=rgba{fade_add}[{out_label}]"
                         )
                     else:
                         filter_complex_parts.append(
-                            f"[{idx}:v]format=rgba,scale=iw*{scale_val}:ih*{scale_val}[{out_label}]"
+                            f"[{idx}:v]format=rgba{fade_add},scale=iw*{scale_val}:ih*{scale_val}[{out_label}]"
                         )
 
                 # Eyes: show only 'close' during blink to avoid doubling base open eyes
@@ -1062,10 +1139,10 @@ class VideoRenderer(OverlayMixin):
                     idx = await _add_preprocessed_overlay(eyes_close, float(scale))
                     if idx is not None:
                         label = f"eyes_close_scaled_{idx}"
-                        _prep_overlay(idx, float(scale), label)
+                        _prep_overlay(idx, float(scale), label, fade_str)
                         overlay_streams.append(f"[{label}]")
                         overlay_filters.append(
-                            f"overlay=x={x_fix}:y={y_fix}:enable='{eyes_close_expr}'"
+                            f"overlay=x={x_pos}:y={y_pos}:enable='{eyes_close_expr}'"
                         )
 
                 # Mouth: overlay only 'half'/'open' states; avoid baseline 'close' to prevent doubling
@@ -1081,20 +1158,20 @@ class VideoRenderer(OverlayMixin):
                     idx = await _add_preprocessed_overlay(mouth_half, float(scale))
                     if idx is not None:
                         label = f"mouth_half_scaled_{idx}"
-                        _prep_overlay(idx, float(scale), label)
+                        _prep_overlay(idx, float(scale), label, fade_str)
                         overlay_streams.append(f"[{label}]")
                         overlay_filters.append(
-                            f"overlay=x={x_fix}:y={y_fix}:enable='{half_expr}'"
+                            f"overlay=x={x_pos}:y={y_pos}:enable='{half_expr}'"
                         )
 
                 if mouth_open.exists() and open_expr:
                     idx = await _add_preprocessed_overlay(mouth_open, float(scale))
                     if idx is not None:
                         label = f"mouth_open_scaled_{idx}"
-                        _prep_overlay(idx, float(scale), label)
+                        _prep_overlay(idx, float(scale), label, fade_str)
                         overlay_streams.append(f"[{label}]")
                         overlay_filters.append(
-                            f"overlay=x={x_fix}:y={y_fix}:enable='{open_expr}'"
+                            f"overlay=x={x_pos}:y={y_pos}:enable='{open_expr}'"
                         )
 
         # オーバーレイを連結
@@ -1186,6 +1263,7 @@ class VideoRenderer(OverlayMixin):
         # has_audio_stream is async; ensure we await it to get a boolean
         has_speech_audio = await has_audio_stream(str(audio_path))
 
+        audio_src = None
         if insert_config and insert_audio_index != -1:
             volume = float(insert_config.get("volume", 1.0))
             filter_complex_parts.append(
@@ -1193,22 +1271,25 @@ class VideoRenderer(OverlayMixin):
             )
             if has_speech_audio:
                 filter_complex_parts.append(
-                    f"[{speech_audio_index}:a][insert_audio_vol]amix=inputs=2:duration=longest:dropout_transition=0[final_a]"
+                    f"[{speech_audio_index}:a][insert_audio_vol]amix=inputs=2:duration=longest:dropout_transition=0[mixed_a]"
                 )
-                audio_map = "[final_a]"
+                audio_src = "[mixed_a]"
             else:
-                filter_complex_parts.append(f"[insert_audio_vol]anull[final_a]")
-                audio_map = "[final_a]"
+                audio_src = "[insert_audio_vol]"
         else:
             if has_speech_audio:
-                filter_complex_parts.append(f"[{speech_audio_index}:a]anull[final_a]")
-                audio_map = "[final_a]"
+                audio_src = f"[{speech_audio_index}:a]"
             else:
-                # 無音生成
                 filter_complex_parts.append(
-                    f"anullsrc=channel_layout=stereo:sample_rate={self.audio_params.sample_rate},duration={duration}[final_a]"
+                    f"anullsrc=channel_layout=stereo:sample_rate={self.audio_params.sample_rate}[sil]"
                 )
-                audio_map = "[final_a]"
+                audio_src = "[sil]"
+
+        delay_ms = max(0, int(audio_delay * 1000))
+        filter_complex_parts.append(
+            f"{audio_src}adelay={delay_ms}:all=1,apad=pad_dur={duration}[final_a]"
+        )
+        audio_map = "[final_a]"
 
         # --- Assemble & Run -----------------------------------------------------
         cmd.extend(["-filter_complex", ";".join(filter_complex_parts)])
@@ -1284,6 +1365,7 @@ class VideoRenderer(OverlayMixin):
                         subtitle_png_path=subtitle_png_path,
                         face_anim=face_anim,
                         _force_cpu=True,
+                        audio_delay=audio_delay,
                     )
                 finally:
                     if prev_hw is None:

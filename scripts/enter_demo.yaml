@@ -1,0 +1,70 @@
+meta:
+  title: "登場アニメーションサンプル"
+  version: 1
+
+defaults:
+  characters:
+    zundamon:
+      speaker_id: 3
+    metan:
+      speaker_id: 6
+
+scenes:
+  - id: enter_demo
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "フェードイン"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            enter: true
+            enter_duration: 0.5  # 登場完了後に音声開始
+            anchor: middle_left
+            scale: 0.8
+      - text: "フェードアウト"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            leave: true
+            leave_duration: 0.5  # 音声終了後に退場
+      - text: "左からスライド"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            enter: slide_left
+            enter_duration: 0.5
+            anchor: middle_left
+            scale: 0.8
+      - text: "右からスライド"
+        speaker_name: "metan"
+        characters:
+          - name: "metan"
+            expression: "normal"
+            enter: slide_right
+            enter_duration: 0.5
+            anchor: middle_right
+            scale: 0.8
+      - text: "クールな僕は無言で去るぜ！"
+        speaker_name: "zundamon"
+      - text: ""
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            leave: slide_left
+            leave_duration: 0.5
+            anchor: middle_left
+      - text: "ずんんだもんを追いかけるわ"
+        speaker_name: "metan"
+        characters:
+          - name: "metan"
+      - text: "まてーーーー"
+        speaker_name: "metan"
+        characters:
+          - name: "metan"
+            expression: "normal"
+            leave: slide_left
+            enter_duration: 0.5
+            anchor: middle_right
+            scale: 0.8

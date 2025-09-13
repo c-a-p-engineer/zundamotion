@@ -81,6 +81,7 @@ scenes:
           - name: "zundamon"
             expression: "normal"
             enter: true
+            enter_duration: 0.5 # 登場→0.5秒後に音声開始
             anchor: bottom_center
             scale: 0.8
 
@@ -93,10 +94,11 @@ scenes:
         speaker_name: "metan"
         characters:
           - name: "zundamon"
-            exit: true
+            leave: slide_right
+            leave_duration: 0.5
           - name: "metan"
             expression: "normal"
-            enter: true
+            enter: slide_left
             anchor: bottom_center
             position:
               x: 480
