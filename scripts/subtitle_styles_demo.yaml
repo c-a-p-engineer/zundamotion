@@ -1,0 +1,62 @@
+meta:
+  title: "字幕スタイル検証ミニスクリプト"
+  version: 1
+
+defaults:
+  characters_persist: true
+  characters:
+    zundamon:
+      speaker_id: 3
+
+scenes:
+  - id: subtitle_styles
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "基本の字幕。標準の半透明黒背景を確認します。"
+        speaker_name: "zundamon"
+
+      - text: "角丸と太めの枠線、広めの余白を指定した例です。"
+        speaker_name: "zundamon"
+        subtitle:
+          background:
+            color: "#0041FF"
+            opacity: 0.75
+            radius: 48
+            border_color: "#FFFFFF"
+            border_width: 6
+            border_opacity: 0.95
+            padding: {left: 96, right: 96, top: 32, bottom: 32}
+
+      - text: "背景を薄くしてアクセントカラーの枠を付けます。"
+        speaker_name: "zundamon"
+        subtitle:
+          background:
+            color: "#111111"
+            opacity: 0.35
+            radius: 24
+            border_color: "#00FFCC"
+            border_width: 3
+            border_opacity: 0.7
+            padding: [36, 18]
+
+      - text: |-
+          背景画像を貼り付けたサンプルです。
+          透過率を調整しつつ角丸で切り抜きます。
+        speaker_name: "zundamon"
+        subtitle:
+          background:
+            image: "assets/bg/room.png"
+            opacity: 0.6
+            radius: 40
+            border_color: "#FFFFFF"
+            border_width: 4
+            padding: {x: 56, y: 24}
+
+      - text: "背景を完全にオフにしてテキストのみ表示する例です。"
+        speaker_name: "zundamon"
+        subtitle:
+          box_color: null
+          background:
+            color: null
+            border_width: 0
+            padding: 0

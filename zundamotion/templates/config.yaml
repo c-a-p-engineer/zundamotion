@@ -44,6 +44,15 @@ subtitle:
   wrap_mode: chars       # Prefer character-based wrapping for CJK text
   stroke_color: "black"
   stroke_width: 2
+  background:
+    color: "#000000"         # 背景色（RGBA/HTML表記可, `@0.65` などで透過指定）
+    opacity: 0.65             # 0.0〜1.0。colorに@指定がある場合はこちらが優先
+    radius: 32                # 角丸半径(px)
+    padding: {x: 48, y: 28}   # 内側余白(px)。x/y or left/right/top/bottomで細かく指定可
+    border_color: "#FFFFFF"   # 枠線色（border_width>0時のみ適用）
+    border_width: 0           # 0で枠線なし
+    border_opacity: 0.9       # 枠線の透過率(0.0-1.0)
+    image: null               # 画像パスを指定すると背景に貼り付けられる
   line_spacing_offset_per_line: 64 # Additional vertical offset per line for multi-line text (e.g., same as font_size)
   x: "(w-text_w)/2"
   y: "h-100-text_h/2" # Center text block 100px from bottom, adjusting for total text height
