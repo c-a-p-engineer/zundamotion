@@ -1,9 +1,9 @@
 from typing import Any, Dict
 
-from ..exceptions import ValidationError
-from .config_io import load_config
-from .config_merge import merge_configs
-from .config_validate import validate_config
+from ...exceptions import ValidationError
+from ..config.io import load_config
+from ..config.merge import merge_configs
+from ..config.validate import validate_config
 
 __all__ = ["load_script_and_config", "ValidationError"]
 

@@ -21,7 +21,7 @@ Zundamotionは、VOICEVOXによる高品質な音声合成とFFmpegを用いた�
 - **オーバーレイ処理のモジュール化**: 前景動画や字幕の合成をMixinに切り出し、`VideoRenderer`を簡潔にしました。
 - **音声処理ヘルパーの分離**: FFmpeg音声操作を`ffmpeg_audio.py`に集約し、責務を明確化しました。
 - **メディアパラメータ比較の並列化**: 複数ファイルのffprobeを同時実行し、前処理を高速化しました。
-- **設定ローダの責務分離**: YAML読み込み（`config_io.py`）/ディープマージ（`config_merge.py`）/検証（`config_validate.py`）に分割し、`script_loader.py`はエントリAPIに集約しました。
+- **設定ローダの責務分離**: YAML読み込み（`config/io.py`）/ディープマージ（`config/merge.py`）/検証（`config/validate.py`）に分割し、`script/loader.py`はエントリAPIに集約しました。
 - **AIに読みやすい規模の徹底**: 1ファイル200–400行（最大500）、1関数20–40行（最大80）の目安で分割・整理。[AI_README.md](AI_README.md) に詳細。
 - **並列レンダリングとハードウェアエンコードの自動検出**: CPUコア数やGPU（NVENC/VAAPI/VideoToolbox）を検出し、最適なジョブ数を自動設定します。ハードウェアエンコードが利用可能な場合は自動的に活用し、失敗時はソフトウェアにフォールバックします。
 - **キャラクター配置の柔軟性**: キャラクターの表示位置をX/Y座標で指定できるだけでなく、スケーリング（拡大縮小）やアンカーポイント（画像の基準点）を設定することで、より細かくキャラクターの配置を制御できます。
@@ -139,15 +139,11 @@ scenes:
 │   ├── main.py             # エントリーポイント (`main` 関数)
 │   ├── pipeline.py         # 動画生成パイプラインの定義 (`GenerationPipeline` クラス, `run_generation` 関数)
 │   ├── components/         # パイプラインの各ステップで使用されるコンポーネント
-│   │   ├── audio.py        # 音声生成 (`AudioGenerator` クラス)
-│   │   ├── script_loader.py# 設定統合の入口API（load_script_and_config）
-│   │   ├── config_io.py    # YAMLローダ（構文エラー位置つき）
-│   │   ├── config_merge.py # 設定のディープマージ（override優先）
-│   │   ├── config_validate.py # 設定検証（スキーマ/パス/数値範囲など）
-│   │   ├── subtitle.py     # 字幕生成 (`SubtitleGenerator` クラス)
-│   │   ├── video_overlays.py # 動画オーバーレイ処理 (`OverlayMixin` クラス)
-│   │   ├── video.py        # 動画レンダリング (`VideoRenderer` クラス)
-│   │   ├── voicevox_client.py # VOICEVOX APIクライアント (`generate_voice` 関数)
+│   │   ├── audio/          # 音声生成 (`AudioGenerator`) と VOICEVOX クライアント
+│   │   ├── script/         # 設定統合の入口API（`load_script_and_config`）
+│   │   ├── config/         # YAMLローダ/マージ/検証ユーティリティ
+│   │   ├── subtitles/      # 字幕生成 (`SubtitleGenerator`, `SubtitlePNGRenderer`)
+│   │   ├── video/          # 動画レンダリング (`VideoRenderer`, `OverlayMixin`)
 │   │   └── pipeline_phases/    # 各フェーズ（components配下）
 │   │       ├── audio_phase.py  # 音声生成フェーズ (`AudioPhase` クラス)
 │   │       ├── bgm_phase.py    # BGM追加フェーズ (`BGMPhase` クラス)
@@ -196,10 +192,10 @@ VS Codeでプロジェクトを開き、プロンプトが表示されたら「R
 - 関数規模の目安: 20–40行（最大80行）、深い分岐はヘルパー化
 - 責務分離: ロード/マージ/検証/実行を分け、テスト容易性と保守性を向上
 - 本プロジェクトの適用例:
-  - `components/script_loader.py`: エントリAPI（`load_script_and_config`）
-  - `components/config_io.py`: YAML読み込みとエラーハンドリング
-  - `components/config_merge.py`: ディープマージ（override優先）
-  - `components/config_validate.py`: スキーマ/パス/数値範囲などの検証
+  - `components/script/loader.py`: エントリAPI（`load_script_and_config`）
+  - `components/config/io.py`: YAML読み込みとエラーハンドリング
+  - `components/config/merge.py`: ディープマージ（override優先）
+  - `components/config/validate.py`: スキーマ/パス/数値範囲などの検証
 
 より詳しい指針や貼り方のコツは [AI_README.md](AI_README.md) を参照してください。
 

@@ -7,7 +7,7 @@ from typing import Any, Dict, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
-from zundamotion.cache import CacheManager
+from ...cache import CacheManager
 
 logger = logging.getLogger(__name__)
 

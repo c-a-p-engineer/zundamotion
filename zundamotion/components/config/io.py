@@ -3,7 +3,7 @@ from typing import Any, Dict
 import yaml
 from yaml import YAMLError
 
-from ..exceptions import ValidationError
+from ...exceptions import ValidationError
 
 
 def load_config(config_path: str) -> Dict[str, Any]:

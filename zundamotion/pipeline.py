@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from .cache import CacheManager
 from .components.pipeline_phases import AudioPhase, BGMPhase, FinalizePhase, VideoPhase
-from .components.script_loader import load_script_and_config
+from .components.script import load_script_and_config
 from .exceptions import PipelineError
 from .timeline import Timeline
 from .utils.ffmpeg_params import AudioParams, VideoParams

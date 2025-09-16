@@ -1,11 +1,11 @@
 import re
 from typing import Any, Dict, Tuple
 
-from zundamotion.cache import CacheManager
+from ...cache import CacheManager
 
-from ..utils.ffmpeg_capabilities import has_cuda_filters, is_nvenc_available
-from ..utils.ffmpeg_hw import get_hw_filter_mode
-from .subtitle_png import SubtitlePNGRenderer
+from ...utils.ffmpeg_capabilities import has_cuda_filters, is_nvenc_available
+from ...utils.ffmpeg_hw import get_hw_filter_mode
+from .png import SubtitlePNGRenderer
 
 
 class SubtitleGenerator:

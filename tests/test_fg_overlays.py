@@ -4,7 +4,7 @@ import sys
 import pytest
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
-from zundamotion.components.script_loader import load_script_and_config, ValidationError
+from zundamotion.components.script import load_script_and_config, ValidationError
 from zundamotion.cache import CacheManager
 from zundamotion.components.video import VideoRenderer
 

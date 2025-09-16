@@ -6,6 +6,7 @@ import asyncio
 import os
 import re
 import subprocess
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from .ffmpeg_hw import get_hw_filter_mode, set_hw_filter_mode
@@ -102,7 +103,7 @@ async def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
             "-",
         ]
         try:
-            await _run_ffmpeg_async(cmd)
+            await _run_ffmpeg_async(cmd, error_log_level=logging.WARNING)
             logger.info("h264_nvenc smoke test successful. NVENC is available.")
             _nvenc_availability_cache[ffmpeg_path] = True
             return True
@@ -144,12 +145,9 @@ async def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
 async def has_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
     """overlay_cuda と scale_cuda が使えるかを確認"""
     try:
-        result = await _run_ffmpeg_async(  # subprocess.run を _run_ffmpeg_async に変更
-            [ffmpeg_path, "-hide_banner", "-filters"]
-        )
-        out = result.stdout
-        return ("overlay_cuda" in out) and (
-            "scale_cuda" in out or "hwupload_cuda" in out
+        filters = await _list_ffmpeg_filters(ffmpeg_path)
+        return ("overlay_cuda" in filters) and (
+            "scale_cuda" in filters or "hwupload_cuda" in filters
         )
     except Exception:
         return False
@@ -298,7 +296,7 @@ async def smoke_test_cuda_scale_only(ffmpeg_path: str = "ffmpeg") -> bool:
                     "-",
                 ]
                 try:
-                    await _run_ffmpeg_async(cmd)
+                    await _run_ffmpeg_async(cmd, error_log_level=logging.WARNING)
                     _cuda_scale_only_smoke_result = True
                     return _cuda_scale_only_smoke_result
                 except Exception as e:  # pragma: no cover - environment dependent
@@ -323,14 +321,18 @@ async def _dump_cuda_diag_once(ffmpeg_path: str = "ffmpeg") -> None:
     logger.info("[CUDA Diag] Collecting environment diagnostics after smoke failure...")
     # ffmpeg -buildconf
     try:
-        proc = await _run_ffmpeg_async([ffmpeg_path, "-hide_banner", "-buildconf"])
+        proc = await _run_ffmpeg_async(
+            [ffmpeg_path, "-hide_banner", "-buildconf"], error_log_level=logging.DEBUG
+        )
         if proc.stdout:
             logger.info("[ffmpeg -buildconf]\n%s", proc.stdout.strip())
     except Exception as e:
         logger.info("[ffmpeg -buildconf] failed: %s", e)
     # ffmpeg -filters
     try:
-        proc = await _run_ffmpeg_async([ffmpeg_path, "-hide_banner", "-filters"])
+        proc = await _run_ffmpeg_async(
+            [ffmpeg_path, "-hide_banner", "-filters"], error_log_level=logging.DEBUG
+        )
         if proc.stdout:
             logger.info("[ffmpeg -filters]\n%s", proc.stdout.strip())
     except Exception as e:
@@ -437,7 +439,7 @@ async def smoke_test_opencl_filters(ffmpeg_path: str = "ffmpeg") -> bool:
             "-",
         ]
         try:
-            await _run_ffmpeg_async(cmd)
+            await _run_ffmpeg_async(cmd, error_log_level=logging.WARNING)
             _opencl_smoke_result = True
             return _opencl_smoke_result
         except subprocess.CalledProcessError as e:  # pragma: no cover - environment dependent
@@ -506,7 +508,7 @@ async def smoke_test_opencl_filters(ffmpeg_path: str = "ffmpeg") -> bool:
                 "-",
             ]
             try:
-                await _run_ffmpeg_async(cmd)
+                await _run_ffmpeg_async(cmd, error_log_level=logging.WARNING)
                 _cuda_smoke_result = True
                 return _cuda_smoke_result
             except subprocess.CalledProcessError as e:
@@ -585,7 +587,7 @@ async def smoke_test_opencl_scale_only(ffmpeg_path: str = "ffmpeg") -> bool:
                     "-",
                 ]
                 try:
-                    await _run_ffmpeg_async(cmd)
+                    await _run_ffmpeg_async(cmd, error_log_level=logging.WARNING)
                     _opencl_scale_only_smoke_result = True
                     return _opencl_scale_only_smoke_result
                 except Exception as e:

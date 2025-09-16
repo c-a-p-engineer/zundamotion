@@ -5,18 +5,18 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..cache import CacheManager
-from ..exceptions import PipelineError  # 追加
-from ..utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async  # 追加
-from ..utils.ffmpeg_params import AudioParams, VideoParams
-from ..utils.ffmpeg_hw import get_hw_filter_mode, set_hw_filter_mode, get_profile_flags
-from ..utils.ffmpeg_ops import (
+from ...cache import CacheManager
+from ...exceptions import PipelineError  # 追加
+from ...utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async  # 追加
+from ...utils.ffmpeg_params import AudioParams, VideoParams
+from ...utils.ffmpeg_hw import get_hw_filter_mode, set_hw_filter_mode, get_profile_flags
+from ...utils.ffmpeg_ops import (
     calculate_overlay_position,
     concat_videos_copy,
     normalize_media,
 )
-from ..utils.ffmpeg_audio import has_audio_stream
-from ..utils.ffmpeg_capabilities import (
+from ...utils.ffmpeg_audio import has_audio_stream
+from ...utils.ffmpeg_capabilities import (
     has_cuda_filters,
     smoke_test_cuda_filters,
     smoke_test_cuda_scale_only,
@@ -26,10 +26,10 @@ from ..utils.ffmpeg_capabilities import (
     _dump_cuda_diag_once,
     get_filter_diagnostics,
 )
-from .subtitle import SubtitleGenerator
+from ..subtitles import SubtitleGenerator
 from .face_overlay_cache import FaceOverlayCache
-from .video_overlays import OverlayMixin
-from ..utils.logger import logger
+from .overlays import OverlayMixin
+from ...utils.logger import logger
 
 
 class VideoRenderer(OverlayMixin):
@@ -971,6 +971,7 @@ class VideoRenderer(OverlayMixin):
                     "x_expr": x_expr,
                     "y_expr": y_expr,
                     "enter_effect": enter_effect,
+                    "enter_duration": f"{enter_duration:.3f}",
                     "leave_effect": leave_effect,
                     "fade": fade,
                     "scale_orig": str(scale_orig),
@@ -983,13 +984,22 @@ class VideoRenderer(OverlayMixin):
                 pass
 
         # Helper: build enable expr from segments
-        def _enable_expr(segments: List[Dict[str, Any]]) -> Optional[str]:
+        def _enable_expr(
+            segments: List[Dict[str, Any]], *, start_offset: float = 0.0
+        ) -> Optional[str]:
             try:
-                parts = [
-                    f"between(t,{float(seg['start']):.3f},{float(seg['end']):.3f})"
-                    for seg in segments
-                    if float(seg.get("end", 0)) > float(seg.get("start", 0))
-                ]
+                parts: List[str] = []
+                for seg in segments:
+                    end = float(seg.get("end", 0))
+                    start = float(seg.get("start", 0))
+                    if start_offset > 0.0:
+                        if end <= start_offset:
+                            continue
+                        if start < start_offset:
+                            start = start_offset
+                    if end <= start:
+                        continue
+                    parts.append(f"between(t,{start:.3f},{end:.3f})")
                 if not parts:
                     return None
                 return "+".join(parts)
@@ -1017,10 +1027,23 @@ class VideoRenderer(OverlayMixin):
                                 str(pos.get("x", "0")),
                                 str(pos.get("y", "0")),
                             )
+                            enter_val = ch.get("enter")
+                            enter_effect = (
+                                str(enter_val).lower()
+                                if enter_val and not isinstance(enter_val, bool)
+                                else ("fade" if enter_val else "")
+                            )
+                            enter_dur = 0.0
+                            try:
+                                enter_dur = float(ch.get("enter_duration", 0.0))
+                            except Exception:
+                                enter_dur = 0.0
                             placement = {
                                 "x_expr": x_expr,
                                 "y_expr": y_expr,
                                 "scale": str(scale),
+                                "enter_effect": enter_effect,
+                                "enter_duration": f"{enter_dur:.3f}",
                                 "expression": str(ch.get("expression", "default")),
                             }
                             break
@@ -1032,6 +1055,11 @@ class VideoRenderer(OverlayMixin):
                 x_fix = placement.get("x_num") or placement.get("x_expr") or "0"
                 y_fix = placement.get("y_num") or placement.get("y_expr") or "0"
                 enter_eff = str(placement.get("enter_effect") or "")
+                enter_duration_val = 0.0
+                try:
+                    enter_duration_val = float(placement.get("enter_duration", 0.0) or 0.0)
+                except Exception:
+                    enter_duration_val = 0.0
                 fade_str = placement.get("fade", "")
                 use_dynamic = enter_eff.startswith("slide")
                 x_pos = placement.get("x_expr") if use_dynamic else x_fix
@@ -1151,8 +1179,25 @@ class VideoRenderer(OverlayMixin):
                 if isinstance(mouth_segments, list) and mouth_segments:
                     half_segments = [s for s in mouth_segments if s.get("state") == "half"]
                     open_segments = [s for s in mouth_segments if s.get("state") == "open"]
-                    half_expr = _enable_expr(half_segments) if half_segments else None
-                    open_expr = _enable_expr(open_segments) if open_segments else None
+                    delayed_effects = {
+                        "fade",
+                        "slide_left",
+                        "slide_right",
+                        "slide_top",
+                        "slide_bottom",
+                    }
+                    requires_delay = enter_eff in delayed_effects and enter_duration_val > 0.0
+                    start_offset = enter_duration_val if requires_delay else 0.0
+                    if start_offset > 0.0:
+                        logger.debug(
+                            "[FaceAnim] Deferring mouth animation until %.2fs due to enter=%s",
+                            start_offset,
+                            enter_eff,
+                        )
+                    if half_segments:
+                        half_expr = _enable_expr(half_segments, start_offset=start_offset)
+                    if open_segments:
+                        open_expr = _enable_expr(open_segments, start_offset=start_offset)
 
                 if mouth_half.exists() and half_expr:
                     idx = await _add_preprocessed_overlay(mouth_half, float(scale))

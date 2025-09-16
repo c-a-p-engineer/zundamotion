@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from importlib import import_module
 
-from ..utils.ffmpeg_probe import get_media_duration
+from ...utils.ffmpeg_probe import get_media_duration
 
 
 async def _run_ffmpeg(cmd: List[str]) -> None:

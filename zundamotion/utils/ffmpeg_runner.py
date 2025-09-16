@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import subprocess
 import time
@@ -11,8 +12,16 @@ from typing import List, Optional
 
 from .logger import logger
 
-async def run_ffmpeg_async(args: List[str], *, timeout: Optional[float] = None) -> subprocess.CompletedProcess:
-    """FFmpeg/ffprobe を非同期で起動し、ログとタイムアウトを管理する。"""
+
+async def run_ffmpeg_async(
+    args: List[str], *, timeout: Optional[float] = None, error_log_level: int | None = logging.ERROR
+) -> subprocess.CompletedProcess:
+    """
+    FFmpeg/ffprobe を非同期で起動し、ログとタイムアウトを管理する。
+
+    :param error_log_level: 非0終了コード時に出力するログレベル。
+        `None` を指定するとログ出力しない。
+    """
     try:
         exe = str(args[0]) if args else "ffmpeg"
         base = os.path.basename(exe)
@@ -79,12 +88,20 @@ async def run_ffmpeg_async(args: List[str], *, timeout: Optional[float] = None) 
         logger.debug(f"Command finished rc={rc} in {dt:.2f}s (PID={process.pid})")
 
         if rc != 0:
-            logger.error(f"FFmpeg command failed with exit code {rc}")
-            logger.debug(f"Command: {cmd_str}")
-            if stdout_str:
-                logger.debug(f"FFmpeg stdout:\n{stdout_str}")
-            if stderr_str:
-                logger.debug(f"FFmpeg stderr:\n{stderr_str}")
+            if error_log_level is not None:
+                logger.log(
+                    error_log_level,
+                    f"FFmpeg command failed rc={rc}. Command: {cmd_str}",
+                )
+                if stderr_str:
+                    logger.log(error_log_level, f"stderr:\n{stderr_str}")
+                if stdout_str:
+                    logger.debug(f"stdout:\n{stdout_str}")
+            else:
+                if stdout_str:
+                    logger.debug(f"stdout:\n{stdout_str}")
+                if stderr_str:
+                    logger.debug(f"stderr:\n{stderr_str}")
             raise subprocess.CalledProcessError(
                 rc,
                 args,
@@ -97,6 +114,9 @@ async def run_ffmpeg_async(args: List[str], *, timeout: Optional[float] = None) 
 
         return subprocess.CompletedProcess(args, rc, stdout_str, stderr_str)
 
+    except subprocess.CalledProcessError:
+        # 上位で処理される想定（必要に応じてログ済み）
+        raise
     except FileNotFoundError:
         logger.error(
             "FFmpeg or FFprobe command not found. Please ensure it's installed and in your PATH."

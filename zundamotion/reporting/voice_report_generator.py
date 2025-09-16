@@ -1,6 +1,6 @@
 from typing import Dict, List, Tuple
 
-from zundamotion.components.voicevox_client import get_speakers_info
+from zundamotion.components.audio import get_speakers_info
 
 
 def generate_voice_report(

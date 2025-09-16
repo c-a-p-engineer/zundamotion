@@ -19,7 +19,7 @@ from zundamotion.utils.ffmpeg_ops import normalize_media
 from zundamotion.utils.ffmpeg_hw import set_hw_filter_mode  # Auto-tuneでのバックオフに使用
 from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
 from zundamotion.utils.logger import logger, time_log
-from zundamotion.components.subtitle_png import SubtitlePNGRenderer
+from zundamotion.components.subtitles import SubtitlePNGRenderer
 
 
 @dataclass

@@ -54,16 +54,11 @@ Zundamotionは、YAML台本・アセット（音声/BGM/背景/立ち絵/挿入�
 │   ├── pipeline.py           # パイプライン制御
 │   ├── cache.py              # CacheManager
 │   ├── components/
-│   │   ├── audio.py          # AudioGenerator
-│   │   ├── subtitle.py       # 字幕オーバーレイ準備
-│   │   ├── subtitle_png.py   # 字幕PNG生成(Pillow)
-│   │   ├── video_overlays.py # オーバーレイ合成Mixin
-│   │   ├── video.py          # VideoRenderer（FFmpeg合成）
-│   │   ├── voicevox_client.py# VOICEVOX API（async + retry）
-│   │   ├── script_loader.py  # スクリプト読込・統合（公開API: load_script_and_config）
-│   │   ├── config_io.py      # YAMLローダ（構文エラー位置つき）
-│   │   ├── config_merge.py   # 設定のディープマージ（override優先）
-│   │   ├── config_validate.py# 設定検証（スキーマ/パス/数値範囲など）
+│   │   ├── audio/            # AudioGenerator と VOICEVOX クライアント
+│   │   ├── script/           # スクリプト読込・統合（公開API: load_script_and_config）
+│   │   ├── config/           # YAMLローダ/マージ/検証
+│   │   ├── subtitles/        # 字幕生成とPNGレンダリング
+│   │   ├── video/            # VideoRenderer とオーバーレイMixin
 │   │   └── pipeline_phases/  # 各フェーズ
 │   │       ├── audio_phase.py
 │   │       ├── video_phase.py
@@ -105,9 +100,9 @@ CLI主なオプション（main.py実装）:
 
 - エントリ: `zundamotion/main.py` → `pipeline.run_generation`
 - パイプライン: `zundamotion/pipeline.py`（Audio→Video→BGM→Finalize）
-- 音声: `components/audio.py`, `components/voicevox_client.py`, `components/pipeline_phases/audio_phase.py`
-- 字幕: `components/subtitle.py`, `components/subtitle_png.py`
-- 動画: `components/video.py`, `components/video_overlays.py`, `components/pipeline_phases/video_phase.py`
+- 音声: `components/audio/`, `components/pipeline_phases/audio_phase.py`
+- 字幕: `components/subtitles/`
+- 動画: `components/video/`, `components/pipeline_phases/video_phase.py`
 - BGM: `components/pipeline_phases/bgm_phase.py`
 - 最終化: `components/pipeline_phases/finalize_phase.py`
 - キャッシュ: `cache.py`
@@ -154,11 +149,11 @@ AIにコードを貼るときのコツ:
 - 実行条件: 簡単な再現手順や入力例を添える
 
 今回の適用（構成の分割）:
-- `components/script_loader.py` を責務別に再構成
-  - 読み込み: `components/config_io.py`
-  - マージ: `components/config_merge.py`
-  - 検証: `components/config_validate.py`
-  - 入口: `components/script_loader.py` は公開API `load_script_and_config` のみを保持
+- `components/script/loader.py` を責務別に再構成
+  - 読み込み: `components/config/io.py`
+  - マージ: `components/config/merge.py`
+  - 検証: `components/config/validate.py`
+  - 入口: `components/script/loader.py` は公開API `load_script_and_config` のみを保持
 - 既存の `pipeline.py` からの import は変更不要（後方互換）
 - **命名規約**:
     - モジュール名: 小文字とアンダースコア (`snake_case`)
@@ -249,6 +244,7 @@ AIにコードを貼るときのコツ:
 - スモーク失敗時は一度だけ、診断情報をINFOで自動ダンプします。
   - `ffmpeg -hide_banner -buildconf`, `ffmpeg -hide_banner -filters`, `nvidia-smi -L`, `nvcc --version`
 - 実行時にCUDAフィルタがエラー（exit 218/234等）となった場合も、同様の診断を一度だけ出力します。
+- 各スモーク結果はプロセス内でキャッシュされ、同一実行中に再試行されません。失敗したコマンドはWARNINGレベルで記録されます。
 - スモークは複数候補のフィルタグラフ（NV12+NV12／RGBAオーバレイ）を順に試行し、偽陰性を低減します。
 - `scale_cuda` が列挙されない環境で `scale_npp` が存在する場合、GPUパスでは `scale_npp` を優先的に使用します（自動選択）。
  - DevContainerでCUDAフィルタを確実に有効化したい場合は、`.devcontainer/Dockerfile.gpu` の `BUILD_FFMPEG_FROM_SOURCE=1` を指定し、`--enable-cuda-nvcc --enable-libnpp --enable-nonfree` でFFmpegをビルドしてください。

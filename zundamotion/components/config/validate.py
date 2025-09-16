@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict
 
-from ..exceptions import ValidationError
+from ...exceptions import ValidationError
 
 
 def _validate_fg_overlays(container: Dict[str, Any], container_id: str) -> None:
