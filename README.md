@@ -779,7 +779,7 @@ video:
   - 字幕PNGプリキャッシュ: `video.precache_subtitles: true`（既定）で各シーンの字幕PNGを事前生成。`video.precache_min_lines` を設定すると、`precache_subtitles=false` 時でもシーン行数が閾値以上なら自動有効化。
   - キャラPNG事前スケール: 立ち絵PNGは Pillow で目標スケールに事前変換しキャッシュ。CPU overlay 時は `scale` フィルタを省略し、`format=rgba` のみで合成（`CHAR_CACHE_DISABLE=1` で無効化）。
   - 口パクタイムラインのキャッシュ: 音声WAVとパラメータ（fps/閾値）に基づきJSONをキャッシュ（`cache/`）。`--no-cache` 時はラン内Ephemeralを再利用。
-  - CPUモードでも OpenCL overlay を許可（既定有効）: `video.allow_opencl_overlay_in_cpu_mode: true` かつスモーク合格時に `overlay_opencl` を使用。
+  - CPUモードでも OpenCL overlay を許可（既定は無効）: `video.allow_opencl_overlay_in_cpu_mode: true` を設定し、スモーク合格時に `overlay_opencl` を使用。
   - FPSフィルタの最適化: speedプリセットでは背景スケール時の `fps=` フィルタを省略（`video.apply_fps_filter: false`）し、出力側の `-r` によるCFR固定に任せます。
   - `video.profile_first_clips: 4` で計測クリップ数を変更可能。
   - CPU overlay が支配的な場合は、フィルタ経路をCPUに統一（`set_hw_filter_mode('cpu')`）し、以降の安定性と一貫性を優先します（NVENCエンコードは継続）。

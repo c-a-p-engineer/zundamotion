@@ -1,0 +1,84 @@
+meta:
+  title: "Copetan 全表情サンプル"
+  version: 3
+
+# 目パチ/口パクの簡易アニメを有効化（差分PNGがあるため適用されます）
+video:
+  fps: 30
+  face_anim:
+    mouth_fps: 15
+    mouth_thr_half: 0.2
+    mouth_thr_open: 0.5
+    blink_min_interval: 2.0
+    blink_max_interval: 5.0
+    blink_close_frames: 2
+
+# 行間でキャラクター状態を引き継ぐ（VNモード）
+defaults:
+  characters_persist: true
+  characters:
+    copetan:
+      # 好みのVOICEVOX話者IDに変更可（例: 3=ずんだもん）
+      speaker_id: 3
+      speed: 1.0
+      pitch: 0.0
+
+scenes:
+  - id: copetan_expressions
+    bg: "assets/bg/room.png"
+    lines:
+      # 1) デフォルト
+      - text: "こんにちは、こぴぺたんです。これはデフォルトの表情だよ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "default"
+            enter: true
+            enter_duration: 0.4
+            anchor: bottom_center
+            position: {x: 0, y: -20}
+            scale: 0.85
+
+      # 2) にっこり
+      - text: "にっこり笑顔のこぴぺたん、どうかな？"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "smile"
+
+      # 3) ぷんすか（怒り）
+      - text: "むむっ、ちょっと怒ってるよ。ちゃんと聞いてね！"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "angry"
+
+      # 4) どや顔（smug）
+      - text: "ふふん、今日はボクの見せ場なんだ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "smug"
+
+      # 5) しょんぼり（sad）
+      - text: "うう…少ししょんぼり…。でも、がんばるよ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "sad"
+
+      # 6) びっくり（surprised）
+      - text: "わっ！びっくりした！でも楽しかったね。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "surprised"
+
+      # おしまい（退場）
+      - text: "それじゃあ、またね！"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            leave: true
+            leave_duration: 0.4
+

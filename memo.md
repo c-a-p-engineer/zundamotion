@@ -27,5 +27,5 @@
 ### キャラクターの背景透過png作成
 
 ```
-python remove_bg_ai.py --input /workspace/assets/characters/zundamon --output /workspace/assets/characters/zundamon --model isnet-anime  --force-gpu --recursive
+python remove_bg_ai.py --input /workspace/assets/characters/copetan/temp --output /workspace/assets/characters/copetan/temp --model isnet-anime  --force-gpu --recursive
 ```
