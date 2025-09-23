@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from tqdm import tqdm
+import os
+import sys
 
 from zundamotion.cache import CacheManager
 from zundamotion.components.video import VideoRenderer
@@ -375,7 +377,11 @@ class VideoPhase:
         total_scenes = len(scenes)
 
         with tqdm(
-            total=total_scenes, desc="Scene Rendering", unit="scene"
+            total=total_scenes,
+            desc="Scene Rendering",
+            unit="scene",
+            leave=False,
+            disable=(os.getenv("TQDM_DISABLE") == "1" or not sys.stderr.isatty()),
         ) as pbar_scenes:
             for scene_idx, scene in enumerate(scenes):
                 scene_id = scene["id"]
@@ -1269,6 +1275,12 @@ class VideoPhase:
                     except Exception:
                         pass
                 pbar_scenes.update(1)
+
+        # Ensure a clean newline after closing the progress bar
+        try:
+            tqdm.write("", file=sys.stderr)
+        except Exception:
+            pass
 
         end_time = time.time()  # End timing
         duration = end_time - start_time

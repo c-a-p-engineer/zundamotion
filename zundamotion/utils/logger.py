@@ -1,14 +1,16 @@
+import inspect
 import json
 import logging
-import queue
 import os
+import queue
 import sys
 import time
-import inspect
+import atexit
+from contextlib import suppress
 from datetime import datetime
 from functools import wraps
-from typing import Any, Dict, Optional
 from logging.handlers import QueueHandler, QueueListener
+from typing import Any, Dict, Optional
 
 from tqdm import tqdm
 
@@ -54,17 +56,20 @@ class KVFormatter(logging.Formatter):
 
 
 class TqdmLoggingHandler(logging.Handler):
-    """A logging handler that writes via tqdm.write to avoid breaking progress bars."""
+    """A logging handler that writes via tqdm.write to stderr to avoid breaking progress bars."""
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = self.format(record)
-            # tqdm.write ensures new line handling that preserves active bars
-            tqdm.write(msg)
+            # Write alongside tqdm bars (which default to stderr) to keep streams consistent
+            tqdm.write(msg, file=sys.stderr)
         except Exception:  # pragma: no cover (best-effort logging)
-            # Fallback to plain stdout to avoid losing logs
-            sys.stdout.write(getattr(record, "getMessage", lambda: str(record))())
-            sys.stdout.write("\n")
+            # Fallback to plain stderr to avoid losing logs
+            try:
+                sys.stderr.write(getattr(record, "getMessage", lambda: str(record))())
+                sys.stderr.write("\n")
+            except Exception:
+                pass
 
 
 class ProgressLogger:
@@ -158,10 +163,16 @@ def setup_logging(
     logger.addHandler(qh)
     logger.propagate = False
 
-    listener = QueueListener(q, console_handler, file_handler, respect_handler_level=True)
+    listener = QueueListener(
+        q, console_handler, file_handler, respect_handler_level=True
+    )
     listener.start()
     # Attach listener to logger for potential teardown if needed
     logger._queue_listener = listener  # type: ignore[attr-defined]
+
+    # Track handlers for shutdown cleanup
+    logger._console_handler = console_handler  # type: ignore[attr-defined]
+    logger._file_handler = file_handler  # type: ignore[attr-defined]
 
     # Suppress other loggers if not in debug mode
     if not debug_mode:  # debug_mode が False の場合のみ抑制
@@ -178,7 +189,71 @@ def setup_logging(
         progress_logger.addHandler(console_handler)
         progress_logger.propagate = False
 
+    # As an additional safety net, register cleanup on interpreter exit
+    try:
+        atexit.register(shutdown_logging)
+    except Exception:
+        pass
+
     return logger
+
+
+def shutdown_logging() -> None:
+    """Stop logging queue listener and close handlers safely."""
+    zunda_logger = logging.getLogger("zundamotion")
+
+    listener = getattr(zunda_logger, "_queue_listener", None)
+    if listener is not None:
+        with suppress(Exception):
+            listener.stop()
+
+    # Close handlers attached to zundamotion logger
+    for handler_attr in ("_console_handler", "_file_handler"):
+        handler = getattr(zunda_logger, handler_attr, None)
+        if handler is not None:
+            with suppress(Exception):
+                handler.flush()
+            with suppress(Exception):
+                handler.close()
+
+    for handler in list(zunda_logger.handlers):
+        with suppress(Exception):
+            handler.flush()
+        with suppress(Exception):
+            handler.close()
+        zunda_logger.removeHandler(handler)
+
+    # Proactively close any active tqdm instances and restore terminal state
+    try:
+        # Close and clear any live progress bars to ensure clean prompt
+        inst = getattr(tqdm, "_instances", None)
+        if inst is not None:
+            try:
+                for bar in list(inst):
+                    with suppress(Exception):
+                        bar.close()
+                inst.clear()
+            except Exception:
+                pass
+        # Ensure cursor is visible and end on a fresh line
+        try:
+            sys.stderr.write("\x1b[?25h\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
+        with suppress(Exception):
+            sys.stdout.flush()
+        # As a last resort, reset terminal modes (echo, cooked) if available
+        try:
+            if sys.stdin and sys.stdin.isatty():
+                import subprocess as _sp
+                _sp.run(["stty", "sane"], check=False, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    logging.shutdown()
 
 
 class KVLogger(logging.Logger):

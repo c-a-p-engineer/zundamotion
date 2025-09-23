@@ -1,3 +1,5 @@
+import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -25,7 +27,13 @@ class BGMPhase:
         """Phase 3: Apply BGM to each scene clip."""
         final_clips_for_concat: List[Path] = []
         total_scenes = len(scenes)
-        with tqdm(total=total_scenes, desc="BGM Application", unit="scene") as pbar_bgm:
+        with tqdm(
+            total=total_scenes,
+            desc="BGM Application",
+            unit="scene",
+            leave=False,
+            disable=(os.getenv("TQDM_DISABLE") == "1" or not sys.stderr.isatty()),
+        ) as pbar_bgm:
             for scene_idx, scene in enumerate(scenes):
                 pbar_bgm.set_description(
                     f"BGM Application (Scene {scene_idx + 1}/{total_scenes}: '{scene['id']}')"
@@ -77,4 +85,9 @@ class BGMPhase:
                 else:
                     final_clips_for_concat.append(scene_clip_path)
                 pbar_bgm.update(1)
+        # Ensure a clean newline after closing the progress bar
+        try:
+            tqdm.write("", file=sys.stderr)
+        except Exception:
+            pass
         return final_clips_for_concat

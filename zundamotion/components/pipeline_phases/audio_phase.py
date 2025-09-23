@@ -1,5 +1,7 @@
 import hashlib
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Tuple  # Add this import
 from typing import Any, Dict, List, Optional
@@ -53,7 +55,13 @@ class AudioPhase:
         line_data_map: Dict[str, Dict[str, Any]] = {}
         total_lines = sum(len(s.get("lines", [])) for s in scenes)
 
-        with tqdm(total=total_lines, desc="Audio Generation", unit="line") as pbar:
+        with tqdm(
+            total=total_lines,
+            desc="Audio Generation",
+            unit="line",
+            leave=False,
+            disable=(os.getenv("TQDM_DISABLE") == "1" or not sys.stderr.isatty()),
+        ) as pbar:
             for scene_idx, scene in enumerate(scenes):
                 scene_id = scene["id"]
                 bg = scene.get("bg", self.config.get("background", {}).get("default"))
@@ -284,4 +292,9 @@ class AudioPhase:
                         "face_anim": face_anim,
                     }
                     pbar.update(1)
+        # Ensure a clean newline after closing the progress bar
+        try:
+            tqdm.write("", file=sys.stderr)
+        except Exception:
+            pass
         return line_data_map, self.used_voicevox_info

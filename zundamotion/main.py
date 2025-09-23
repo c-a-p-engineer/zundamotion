@@ -14,7 +14,12 @@ import asyncio
 
 from zundamotion.exceptions import ValidationError
 from zundamotion.pipeline import run_generation
-from zundamotion.utils.logger import KVLogger, get_logger, setup_logging
+from zundamotion.utils.logger import (
+    KVLogger,
+    get_logger,
+    setup_logging,
+    shutdown_logging,
+)
 
 
 async def main() -> None:
@@ -196,6 +201,8 @@ async def main() -> None:
             },
         )
         sys.exit(1)
+    finally:
+        shutdown_logging()
 
 
 if __name__ == "__main__":
