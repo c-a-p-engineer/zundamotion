@@ -53,7 +53,9 @@ subtitle:
     border_width: 0           # 0で枠線なし
     border_opacity: 0.9       # 枠線の透過率(0.0-1.0)
     image: null               # 画像パスを指定すると背景に貼り付けられる
-  line_spacing_offset_per_line: 64 # Additional vertical offset per line for multi-line text (e.g., same as font_size)
+  line_spacing_offset_per_line: 0  # Extra pixels added between lines (kept for backward compatibility)
+  line_spacing_multiplier: 1.15    # Multiplier for natural line height (>=1.0)
+  text_align: center               # left | center | right
   x: "(w-text_w)/2"
   y: "h-100-text_h/2" # Center text block 100px from bottom, adjusting for total text height
   # 読みの表示方法（インラインマークアップ時）: none | paren

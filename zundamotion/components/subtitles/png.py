@@ -472,6 +472,18 @@ def _render_subtitle_png(
         line_spacing_extra = 0
     if line_spacing_extra < 0:
         line_spacing_extra = 0
+    try:
+        line_spacing_multiplier = float(style_.get("line_spacing_multiplier", 1.0) or 1.0)
+    except (TypeError, ValueError):
+        line_spacing_multiplier = 1.0
+    if line_spacing_multiplier < 1.0:
+        line_spacing_multiplier = 1.0
+
+    align_raw = str(
+        style_.get("text_align", style_.get("align", "center")) or "center"
+    ).strip().lower()
+    if align_raw not in {"left", "center", "right"}:
+        align_raw = "center"
 
     font = _load_font_with_fallback(font_path, font_size)
 
@@ -521,8 +533,18 @@ def _render_subtitle_png(
         line_heights.append(line_h)
         line_bboxes.append(bbox)
 
-    if line_spacing_extra and len(lines) > 1:
-        text_h += line_spacing_extra * (len(lines) - 1)
+    spacing_offsets: list[int] = []
+    if len(lines) > 1:
+        spacing_ratio = line_spacing_multiplier - 1.0
+        for idx in range(len(lines) - 1):
+            extra = line_spacing_extra
+            if spacing_ratio > 0.0:
+                multiplier_gap = int(round(line_heights[idx] * spacing_ratio))
+                if multiplier_gap > 0:
+                    extra += multiplier_gap
+            spacing_offsets.append(max(0, extra))
+        if spacing_offsets:
+            text_h += sum(spacing_offsets)
 
     img_w = max(1, int(text_w + pad_left + pad_right))
     img_h = max(1, int(text_h + pad_top + pad_bottom))
@@ -539,10 +561,15 @@ def _render_subtitle_png(
         bbox = line_bboxes[i]
         x0, y0, x1, _ = bbox
         line_w = x1 - x0
-        if text_w > 0:
-            baseline_x = pad_left + (text_w - line_w) / 2 - x0
-        else:
+        if align_raw == "left":
             baseline_x = float(pad_left - x0)
+        elif align_raw == "right":
+            baseline_x = pad_left + max(0.0, text_w - line_w) - x0
+        else:
+            if text_w > 0:
+                baseline_x = pad_left + (text_w - line_w) / 2 - x0
+            else:
+                baseline_x = float(pad_left - x0)
         baseline_y = current_y - y0
         draw.text(
             (baseline_x, baseline_y),
@@ -553,8 +580,8 @@ def _render_subtitle_png(
             stroke_fill=stroke_color,
         )
         current_y += line_heights[i]
-        if line_spacing_extra and i < len(lines) - 1:
-            current_y += line_spacing_extra
+        if i < len(lines) - 1 and spacing_offsets:
+            current_y += spacing_offsets[i]
 
     img.save(out_path_str)
     return img_w, img_h

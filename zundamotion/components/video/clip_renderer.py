@@ -14,6 +14,8 @@ from ...utils.ffmpeg_ops import calculate_overlay_position, normalize_media
 from ...utils.ffmpeg_capabilities import _dump_cuda_diag_once
 from ...utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from ...utils.logger import logger
+from .clip.characters import collect_character_inputs, build_character_overlays
+from .clip.face import apply_face_overlays
 
 if TYPE_CHECKING:
     from .renderer import VideoRenderer
@@ -179,75 +181,16 @@ async def render_clip(
             insert_audio_index = insert_ffmpeg_index
 
     # 4) Characters (optional)
-    character_indices: Dict[int, int] = {}
-    char_effective_scale: Dict[int, float] = {}
-    # record character overlay placement for later face animation overlays
-    char_overlay_placement: Dict[str, Dict[str, str]] = {}
-    any_character_visible = False
-    for i, char_config in enumerate(characters_config):
-        if not char_config.get("visible", False):
-            continue
-        any_character_visible = True
-        char_name = char_config.get("name")
-        char_expression = char_config.get("expression", "default")
-        if not char_name:
-            logger.warning("Skipping character with missing name.")
-            continue
-        # Resolve character base image with new expression-first layout and legacy fallbacks
-        def _resolve_char_base_image(name: str, expr: str) -> Optional[Path]:
-            base_dir = Path(f"assets/characters/{name}")
-            candidates = [
-                base_dir / expr / "base.png",           # new: <name>/<expr>/base.png
-                base_dir / f"{expr}.png",                # legacy: <name>/<expr>.png
-                base_dir / "default" / "base.png",       # new default: <name>/default/base.png
-                base_dir / "default.png",                # legacy default: <name>/default.png
-            ]
-            for c in candidates:
-                try:
-                    if c.exists():
-                        return c
-                except Exception:
-                    pass
-            return None
-
-        char_image_path = _resolve_char_base_image(str(char_name), str(char_expression))
-        if not char_image_path:
-            logger.warning(
-                "Character image not found for %s/%s (and default). Skipping.",
-                char_name,
-                char_expression,
-            )
-            continue
-        # Pre-scale character image via Pillow cache when enabled
-        effective_scale = 1.0
-        try:
-            scale_cfg = float(char_config.get("scale", 1.0))
-        except Exception:
-            scale_cfg = 1.0
-        use_char_cache = os.environ.get("CHAR_CACHE_DISABLE", "0") != "1"
-        if use_char_cache and abs(scale_cfg - 1.0) > 1e-6:
-            try:
-                thr_env = os.environ.get("CHAR_ALPHA_THRESHOLD")
-                thr = int(thr_env) if (thr_env and thr_env.isdigit()) else 128
-                scaled_path = await renderer.face_cache.get_scaled_overlay(
-                    char_image_path, float(scale_cfg), thr
-                )
-                character_indices[i] = len(input_layers)
-                cmd.extend(["-loop", "1", "-i", str(scaled_path.resolve())])
-                input_layers.append({"type": "video", "index": len(input_layers)})
-                effective_scale = 1.0  # already applied by cache
-            except Exception:
-                character_indices[i] = len(input_layers)
-                cmd.extend(["-loop", "1", "-i", str(char_image_path.resolve())])
-                input_layers.append({"type": "video", "index": len(input_layers)})
-                effective_scale = scale_cfg
-        else:
-            character_indices[i] = len(input_layers)
-            cmd.extend(["-loop", "1", "-i", str(char_image_path.resolve())])
-            input_layers.append({"type": "video", "index": len(input_layers)})
-            effective_scale = scale_cfg
-        # Keep the per-index effective scale for later filter decisions
-        char_effective_scale[i] = float(effective_scale)
+    char_inputs = await collect_character_inputs(
+        renderer=renderer,
+        characters_config=characters_config,
+        cmd=cmd,
+        input_layers=input_layers,
+    )
+    character_indices = char_inputs.indices
+    char_effective_scale = char_inputs.effective_scales
+    any_character_visible = char_inputs.any_visible
+    char_metadata = char_inputs.metadata
 
     # ---- ここで GPU フィルタ使用可否を判定 --------------------------------
     # RGBAを含むオーバーレイ（字幕PNG/立ち絵/挿入画像）が1つでもあれば CPU 合成へ（実験フラグで緩和）
@@ -416,450 +359,38 @@ async def render_clip(
             overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
 
     # 立ち絵 overlay
-    # For character pre-scaling via Pillow cache (values filled above)
-    preproc_alpha_thr = 128
-    try:
-        thr_env = os.environ.get("CHAR_ALPHA_THRESHOLD")
-        if thr_env and thr_env.isdigit():
-            preproc_alpha_thr = int(thr_env)
-    except Exception:
-        preproc_alpha_thr = 128
-
-    for i, char_config in enumerate(characters_config):
-        if not char_config.get("visible", False) or i not in character_indices:
-            continue
-        ffmpeg_index = character_indices[i]
-        scale = float(
-            char_effective_scale.get(i, float(char_config.get("scale", 1.0)))
-        )
-        anchor = char_config.get("anchor", "bottom_center")
-        pos = char_config.get("position", {"x": "0", "y": "0"})
-        x_base, y_base = calculate_overlay_position(
-            "W",
-            "H",
-            "w",
-            "h",
-            anchor,
-            str(pos.get("x", "0")),
-            str(pos.get("y", "0")),
-        )
-        enter_duration = 0.3
-        try:
-            enter_duration = float(char_config.get("enter_duration", 0.3))
-        except Exception:
-            enter_duration = 0.3
-        leave_duration = 0.3
-        try:
-            leave_duration = float(char_config.get("leave_duration", 0.3))
-        except Exception:
-            leave_duration = 0.3
-        enter_val = char_config.get("enter")
-        leave_val = char_config.get("leave")
-        enter_effect = ""
-        leave_effect = ""
-        if enter_val:
-            enter_effect = (
-                str(enter_val).lower() if not isinstance(enter_val, bool) else "fade"
-            )
-        if leave_val:
-            leave_effect = (
-                str(leave_val).lower() if not isinstance(leave_val, bool) else "fade"
-            )
-        fade = ""
-        x_expr, y_expr = x_base, y_base
-        if enter_effect == "fade":
-            fade += f",fade=t=in:st=0:d={enter_duration}:alpha=1"
-        if leave_effect == "fade":
-            fade += (
-                f",fade=t=out:st={max(0.0, duration - leave_duration)}:d={leave_duration}:alpha=1"
-            )
-        if enter_effect == "slide_left":
-            x_expr = (
-                f"if(lt(t,{enter_duration}), -w+({x_base}+w)*t/{enter_duration}, {x_expr})"
-            )
-        elif enter_effect == "slide_right":
-            x_expr = (
-                f"if(lt(t,{enter_duration}), W+({x_base}-W)*t/{enter_duration}, {x_expr})"
-            )
-        elif enter_effect == "slide_top":
-            y_expr = (
-                f"if(lt(t,{enter_duration}), -h+({y_base}+h)*t/{enter_duration}, {y_expr})"
-            )
-        elif enter_effect == "slide_bottom":
-            y_expr = (
-                f"if(lt(t,{enter_duration}), H+({y_base}-H)*t/{enter_duration}, {y_expr})"
-            )
-        leave_start = max(0.0, duration - leave_duration)
-        if leave_effect == "slide_left":
-            x_expr = (
-                f"if(gt(t,{leave_start}), {x_base} + (-w-{x_base})*(t-{leave_start})/{leave_duration}, {x_expr})"
-            )
-        elif leave_effect == "slide_right":
-            x_expr = (
-                f"if(gt(t,{leave_start}), {x_base} + (W-{x_base})*(t-{leave_start})/{leave_duration}, {x_expr})"
-            )
-        elif leave_effect == "slide_top":
-            y_expr = (
-                f"if(gt(t,{leave_start}), {y_base} + (-h-{y_base})*(t-{leave_start})/{leave_duration}, {y_expr})"
-            )
-        elif leave_effect == "slide_bottom":
-            y_expr = (
-                f"if(gt(t,{leave_start}), {y_base} + (H-{y_base})*(t-{leave_start})/{leave_duration}, {y_expr})"
-            )
-
-        # ffmpegのfiltergraphでは`,`がフィルタ区切りと解釈されるため
-        # 式中に含まれるカンマをエスケープする
-        def _esc_commas(expr: str) -> str:
-            return expr.replace(",", "\\,")
-
-        x_expr = _esc_commas(x_expr)
-        y_expr = _esc_commas(y_expr)
-
-        if use_cuda_filters:
-            # 想定上ここには来ない（uses_alpha_overlay True → CPU 合成）
-            filter_complex_parts.append(
-                f"[{ffmpeg_index}:v]format=rgba{fade},hwupload_cuda,{renderer.scale_filter}=iw*{scale}:ih*{scale}[char_scaled_{i}]"
-            )
-            overlay_streams.append(f"[char_scaled_{i}]")
-            overlay_filters.append(f"overlay_cuda=x={x_expr}:y={y_expr}")
-        elif renderer.gpu_overlay_backend == "opencl" and not _force_cpu and (
-            get_hw_filter_mode() != "cpu" or renderer.allow_opencl_overlay_in_cpu_mode
-        ):
-            # 前段で Pillow による事前スケールが有効な場合、scale は 1.0 に縮退
-            if os.environ.get("CHAR_CACHE_DISABLE", "0") != "1":
-                try:
-                    from .face_overlay_cache import FaceOverlayCache
-
-                    cache = renderer.face_cache  # same cache instance
-                    # 事前スケール済み PNG を別入力として差し替え（ffmpeg_index の実入力を置換）
-                    filter_complex_parts.append(
-                        f"[{ffmpeg_index}:v]format=rgba{fade},hwupload[char_gpu_{i}]"
-                    )
-                    overlay_streams.append(f"[char_gpu_{i}]")
-                    overlay_filters.append(
-                        f"overlay_opencl=x={x_expr}:y={y_expr}"
-                    )
-                    char_effective_scale[i] = 1.0
-                except Exception:
-                    # フォールバック: CPU スケール→GPUへ
-                    filter_complex_parts.append(
-                        f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale},format=rgba{fade},hwupload[char_gpu_{i}]"
-                    )
-                    overlay_streams.append(f"[char_gpu_{i}]")
-                    overlay_filters.append(
-                        f"overlay_opencl=x={x_expr}:y={y_expr}"
-                    )
-                    char_effective_scale[i] = 1.0
-        else:
-            # CPU 経路: 事前スケールが有効なら scale を省いて format のみ
-            if os.environ.get("CHAR_CACHE_DISABLE", "0") != "1" and abs(scale - 1.0) < 1e-6:
-                filter_complex_parts.append(
-                    f"[{ffmpeg_index}:v]format=rgba{fade}[char_scaled_{i}]"
-                )
-            else:
-                filter_complex_parts.append(
-                    f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}:flags={renderer.scale_flags},format=rgba{fade}[char_scaled_{i}]"
-                )
-            overlay_streams.append(f"[char_scaled_{i}]")
-            overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
-
-        # Remember placement for face animation use keyed by char name
-        try:
-            # Compute numeric top-left for stable face overlays to avoid anchor jitter
-            def _to_num(v: Any) -> float:
-                try:
-                    return float(v)
-                except Exception:
-                    return 0.0
-            xn = yn = 0.0
-            try:
-                from PIL import Image as _PILImage
-                w0, h0 = _PILImage.open(char_image_path).size
-            except Exception:
-                w0, h0 = 0, 0
-            try:
-                vw, vh = renderer.video_params.width, renderer.video_params.height
-                sx = _to_num(pos.get("x", "0"))
-                sy = _to_num(pos.get("y", "0"))
-                # Use original config scale for face overlay reference, not effective (pre-scaled) scale
-                try:
-                    scale_orig = float(char_config.get("scale", 1.0))
-                except Exception:
-                    scale_orig = float(scale)
-                cw = w0 * float(scale_orig)
-                ch = h0 * float(scale_orig)
-                a = str(anchor)
-                if a == "top_left":
-                    xn, yn = sx, sy
-                elif a == "top_center":
-                    xn, yn = (vw - cw) / 2 + sx, sy
-                elif a == "top_right":
-                    xn, yn = vw - cw + sx, sy
-                elif a == "middle_left":
-                    xn, yn = sx, (vh - ch) / 2 + sy
-                elif a == "middle_center":
-                    xn, yn = (vw - cw) / 2 + sx, (vh - ch) / 2 + sy
-                elif a == "middle_right":
-                    xn, yn = vw - cw + sx, (vh - ch) / 2 + sy
-                elif a == "bottom_left":
-                    xn, yn = sx, vh - ch + sy
-                elif a == "bottom_center":
-                    xn, yn = (vw - cw) / 2 + sx, vh - ch + sy
-                elif a == "bottom_right":
-                    xn, yn = vw - cw + sx, vh - ch + sy
-            except Exception:
-                pass
-            char_overlay_placement[str(char_name)] = {
-                "x_expr": x_expr,
-                "y_expr": y_expr,
-                "enter_effect": enter_effect,
-                "enter_duration": f"{enter_duration:.3f}",
-                "leave_effect": leave_effect,
-                "fade": fade,
-                "scale_orig": str(scale_orig),
-                "scale_eff": str(scale),
-                "x_num": str(int(round(xn))),
-                "y_num": str(int(round(yn))),
-                "expression": str(char_expression),
-            }
-        except Exception:
-            pass
-
-    # Helper: build enable expr from segments
-    def _enable_expr(
-        segments: List[Dict[str, Any]], *, start_offset: float = 0.0
-    ) -> Optional[str]:
-        try:
-            parts: List[str] = []
-            for seg in segments:
-                end = float(seg.get("end", 0))
-                start = float(seg.get("start", 0))
-                if start_offset > 0.0:
-                    if end <= start_offset:
-                        continue
-                    if start < start_offset:
-                        start = start_offset
-                if end <= start:
-                    continue
-                parts.append(f"between(t,{start:.3f},{end:.3f})")
-            if not parts:
-                return None
-            return "+".join(parts)
-        except Exception:
-            return None
+    use_opencl_overlays = (
+        renderer.gpu_overlay_backend == "opencl"
+        and not _force_cpu
+        and (get_hw_filter_mode() != "cpu" or renderer.allow_opencl_overlay_in_cpu_mode)
+    )
+    char_overlay_placement = build_character_overlays(
+        renderer=renderer,
+        characters_config=characters_config,
+        duration=duration,
+        character_indices=character_indices,
+        char_effective_scale=char_effective_scale,
+        filter_complex_parts=filter_complex_parts,
+        overlay_streams=overlay_streams,
+        overlay_filters=overlay_filters,
+        use_cuda_filters=use_cuda_filters,
+        use_opencl=use_opencl_overlays,
+        metadata=char_metadata,
+    )
 
     # Face animation overlays (mouth/eyes) for the speaking character
-    if face_anim and isinstance(face_anim, dict) and face_anim.get("target_name"):
-        target_name = str(face_anim.get("target_name"))
-        # Find placement: from rendered characters, or from original line config if character pre-composited in base
-        placement = char_overlay_placement.get(target_name)
-        if not placement and subtitle_line_config:
-            try:
-                for ch in (subtitle_line_config.get("characters") or []):
-                    if ch.get("name") == target_name:
-                        scale = float(ch.get("scale", 1.0))
-                        anchor = ch.get("anchor", "bottom_center")
-                        pos = ch.get("position", {"x": "0", "y": "0"}) or {}
-                        x_expr, y_expr = calculate_overlay_position(
-                            "W",
-                            "H",
-                            "w",
-                            "h",
-                            str(anchor),
-                            str(pos.get("x", "0")),
-                            str(pos.get("y", "0")),
-                        )
-                        enter_val = ch.get("enter")
-                        enter_effect = (
-                            str(enter_val).lower()
-                            if enter_val and not isinstance(enter_val, bool)
-                            else ("fade" if enter_val else "")
-                        )
-                        enter_dur = 0.0
-                        try:
-                            enter_dur = float(ch.get("enter_duration", 0.0))
-                        except Exception:
-                            enter_dur = 0.0
-                        placement = {
-                            "x_expr": x_expr,
-                            "y_expr": y_expr,
-                            "scale": str(scale),
-                            "enter_effect": enter_effect,
-                            "enter_duration": f"{enter_dur:.3f}",
-                            "expression": str(ch.get("expression", "default")),
-                        }
-                        break
-            except Exception:
-                placement = None
-
-        if placement:
-            scale = placement.get("scale_orig") or placement.get("scale") or "1.0"
-            x_fix = placement.get("x_num") or placement.get("x_expr") or "0"
-            y_fix = placement.get("y_num") or placement.get("y_expr") or "0"
-            enter_eff = str(placement.get("enter_effect") or "")
-            enter_duration_val = 0.0
-            try:
-                enter_duration_val = float(placement.get("enter_duration", 0.0) or 0.0)
-            except Exception:
-                enter_duration_val = 0.0
-            fade_str = placement.get("fade", "")
-            use_dynamic = enter_eff.startswith("slide")
-            x_pos = placement.get("x_expr") if use_dynamic else x_fix
-            y_pos = placement.get("y_expr") if use_dynamic else y_fix
-
-            # Asset discovery
-            base_dir = Path(f"assets/characters/{target_name}")
-            expr = str(placement.get("expression") or "default")
-            expr_dir = base_dir / expr
-            # Prefer expression-local mouth/eyes, then legacy common directories,
-            # then legacy style mouth/<expr> and eyes/<expr> as a last resort.
-            mouth_dir_candidates = [
-                expr_dir / "mouth",
-                base_dir / "mouth",
-                base_dir / "mouth" / expr,
-            ]
-            eyes_dir_candidates = [
-                expr_dir / "eyes",
-                base_dir / "eyes",
-                base_dir / "eyes" / expr,
-            ]
-            def _first_dir(dirs: List[Path]) -> Path:
-                for d in dirs:
-                    try:
-                        if d.exists() and d.is_dir():
-                            return d
-                    except Exception:
-                        pass
-                # fallback to base_dir to build non-existing files below (exists checks later)
-                return base_dir
-            mouth_dir = _first_dir(mouth_dir_candidates)
-            eyes_dir = _first_dir(eyes_dir_candidates)
-
-            # File candidates: expression-local first, then common directory
-            def _pick_file(expr_dir: Path, common_dir: Path, fname: str) -> Path:
-                cand1 = expr_dir / fname
-                cand2 = common_dir / fname
-                return cand1 if cand1.exists() else cand2
-
-            mouth_close = _pick_file(expr_dir / "mouth", base_dir / "mouth", "close.png")
-            mouth_half = _pick_file(expr_dir / "mouth", base_dir / "mouth", "half.png")
-            mouth_open = _pick_file(expr_dir / "mouth", base_dir / "mouth", "open.png")
-            eyes_open = _pick_file(expr_dir / "eyes", base_dir / "eyes", "open.png")
-            eyes_close = _pick_file(expr_dir / "eyes", base_dir / "eyes", "close.png")
-
-            # Debug info
-            try:
-                m_segments = face_anim.get("mouth") or []
-                e_segments = face_anim.get("eyes") or []
-                logger.debug(
-                    "[FaceAnim] target=%s scale=%s mouth_pngs(close=%s,half=%s,open=%s) eyes_pngs(open=%s,close=%s) segs(m=%d,e=%d)",
-                    target_name,
-                    scale,
-                    mouth_close.exists(),
-                    mouth_half.exists(),
-                    mouth_open.exists(),
-                    eyes_open.exists(),
-                    eyes_close.exists(),
-                    len(m_segments) if isinstance(m_segments, list) else 0,
-                    len(e_segments) if isinstance(e_segments, list) else 0,
-                )
-            except Exception:
-                pass
-
-            # Only enable when assets exist
-            # add inputs lazily and build filters
-            def _add_image_input(path: Path) -> Optional[int]:
-                if path.exists():
-                    cmd.extend(["-loop", "1", "-i", str(path.resolve())])
-                    idx = len(input_layers)
-                    input_layers.append({"type": "video", "index": idx})
-                    return idx
-                return None
-
-            # Prepare overlay chain; prefer preprocessed cached PNG, fallback to inline filter
-            preprocessed_inputs: set[int] = set()
-            async def _add_preprocessed_overlay(path: Path, scale_val: float) -> Optional[int]:
-                try:
-                    if os.environ.get("FACE_CACHE_DISABLE", "0") == "1":
-                        return _add_image_input(path)
-                    thr_env = os.environ.get("FACE_ALPHA_THRESHOLD")
-                    thr = int(thr_env) if (thr_env and thr_env.isdigit()) else 128
-                    cached = await renderer.face_cache.get_scaled_overlay(path, float(scale_val), thr)
-                    idx = _add_image_input(cached)
-                    if idx is not None:
-                        preprocessed_inputs.add(idx)
-                    return idx
-                except Exception:
-                    return _add_image_input(path)
-
-            def _prep_overlay(idx: int, scale_val: float, out_label: str, fade_add: str = "") -> None:
-                if idx in preprocessed_inputs:
-                    filter_complex_parts.append(
-                        f"[{idx}:v]format=rgba{fade_add}[{out_label}]"
-                    )
-                else:
-                    filter_complex_parts.append(
-                        f"[{idx}:v]format=rgba{fade_add},scale=iw*{scale_val}:ih*{scale_val}[{out_label}]"
-                    )
-
-            # Eyes: show only 'close' during blink to avoid doubling base open eyes
-            eyes_segments = face_anim.get("eyes") or []
-            eyes_close_expr = _enable_expr(eyes_segments) if eyes_segments else None
-            if eyes_close.exists() and eyes_close_expr:
-                idx = await _add_preprocessed_overlay(eyes_close, float(scale))
-                if idx is not None:
-                    label = f"eyes_close_scaled_{idx}"
-                    _prep_overlay(idx, float(scale), label, fade_str)
-                    overlay_streams.append(f"[{label}]")
-                    overlay_filters.append(
-                        f"overlay=x={x_pos}:y={y_pos}:enable='{eyes_close_expr}'"
-                    )
-
-            # Mouth: overlay only 'half'/'open' states; avoid baseline 'close' to prevent doubling
-            mouth_segments = face_anim.get("mouth") or []
-            half_expr = open_expr = None
-            if isinstance(mouth_segments, list) and mouth_segments:
-                half_segments = [s for s in mouth_segments if s.get("state") == "half"]
-                open_segments = [s for s in mouth_segments if s.get("state") == "open"]
-                delayed_effects = {
-                    "fade",
-                    "slide_left",
-                    "slide_right",
-                    "slide_top",
-                    "slide_bottom",
-                }
-                requires_delay = enter_eff in delayed_effects and enter_duration_val > 0.0
-                start_offset = enter_duration_val if requires_delay else 0.0
-                if start_offset > 0.0:
-                    logger.debug(
-                        "[FaceAnim] Deferring mouth animation until %.2fs due to enter=%s",
-                        start_offset,
-                        enter_eff,
-                    )
-                if half_segments:
-                    half_expr = _enable_expr(half_segments, start_offset=start_offset)
-                if open_segments:
-                    open_expr = _enable_expr(open_segments, start_offset=start_offset)
-
-            if mouth_half.exists() and half_expr:
-                idx = await _add_preprocessed_overlay(mouth_half, float(scale))
-                if idx is not None:
-                    label = f"mouth_half_scaled_{idx}"
-                    _prep_overlay(idx, float(scale), label, fade_str)
-                    overlay_streams.append(f"[{label}]")
-                    overlay_filters.append(
-                        f"overlay=x={x_pos}:y={y_pos}:enable='{half_expr}'"
-                    )
-
-            if mouth_open.exists() and open_expr:
-                idx = await _add_preprocessed_overlay(mouth_open, float(scale))
-                if idx is not None:
-                    label = f"mouth_open_scaled_{idx}"
-                    _prep_overlay(idx, float(scale), label, fade_str)
-                    overlay_streams.append(f"[{label}]")
-                    overlay_filters.append(
-                        f"overlay=x={x_pos}:y={y_pos}:enable='{open_expr}'"
-                    )
+    await apply_face_overlays(
+        renderer=renderer,
+        face_anim=face_anim,
+        subtitle_line_config=subtitle_line_config,
+        char_overlay_placement=char_overlay_placement,
+        duration=duration,
+        cmd=cmd,
+        input_layers=input_layers,
+        filter_complex_parts=filter_complex_parts,
+        overlay_streams=overlay_streams,
+        overlay_filters=overlay_filters,
+    )
 
     # オーバーレイを連結
     if overlay_streams:

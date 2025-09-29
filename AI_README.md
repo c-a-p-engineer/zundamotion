@@ -59,11 +59,17 @@ Zundamotionは、YAML台本・アセット（音声/BGM/背景/立ち絵/挿入�
 │   │   ├── config/           # YAMLローダ/マージ/検証
 │   │   ├── subtitles/        # 字幕生成とPNGレンダリング
 │   │   ├── video/            # VideoRenderer とオーバーレイMixin
+│   │   │   ├── clip_renderer.py
+│   │   │   └── clip/         # クリップ処理ヘルパー（characters.py, face.py）
 │   │   └── pipeline_phases/  # 各フェーズ
 │   │       ├── audio_phase.py
-│   │       ├── video_phase.py
 │   │       ├── bgm_phase.py
-│   │       └── finalize_phase.py
+│   │       ├── finalize_phase.py
+│   │       └── video_phase/  # VideoPhase パッケージ
+│   │           ├── __init__.py
+│   │           ├── character_tracker.py
+│   │           ├── main.py
+│   │           └── scene_renderer.py
 │   ├── reporting/voice_report_generator.py
 │   ├── templates/config.yaml # 既定設定
 │   └── utils/ffmpeg_audio.py, ffmpeg_capabilities.py, ffmpeg_ops.py, ffmpeg_params.py, ffmpeg_hw.py, ffmpeg_probe.py, ffmpeg_runner.py, logger.py
@@ -103,7 +109,7 @@ CLI主なオプション（main.py実装）:
 - パイプライン: `zundamotion/pipeline.py`（Audio→Video→BGM→Finalize）
 - 音声: `components/audio/`, `components/pipeline_phases/audio_phase.py`
 - 字幕: `components/subtitles/`
-- 動画: `components/video/`, `components/pipeline_phases/video_phase.py`
+- 動画: `components/video/`, `components/pipeline_phases/video_phase/`
 - BGM: `components/pipeline_phases/bgm_phase.py`
 - 最終化: `components/pipeline_phases/finalize_phase.py`
 - キャッシュ: `cache.py`
