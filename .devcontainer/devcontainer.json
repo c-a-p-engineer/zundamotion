@@ -29,6 +29,7 @@
     "vscode": {
       "extensions": [
         "saoudrizwan.claude-dev",
+        "openai.chatgpt",
         "google.geminicodeassist",
         "ms-python.python",
         "ms-python.vscode-pylance",

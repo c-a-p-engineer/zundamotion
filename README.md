@@ -132,6 +132,7 @@ scenes:
 ├── output/                 # 最終的な出力動画
 ├── scripts/                # サンプルスクリプトや設定ファイル
 │   └── sample.yaml         # サンプルスクリプト
+├── tools/                  # 補助ツール（rembg背景除去など）
 ├── zundamotion/            # メインアプリケーションのソースコード
 │   ├── __init__.py
 │   ├── cache.py            # キャッシュ管理 (`CacheManager` クラス)
@@ -472,24 +473,24 @@ lines:
 
 写真や複雑な背景では、AIベースの除去が高精度です。
 
-- ファイル: `remove_bg_ai.py`
+- ファイル: `tools/remove_bg_ai.py`
 - 依存関係: `pip install rembg`（GPU利用時は `onnxruntime-gpu` を別途インストール）
 
 使い方:
 
 ```bash
 # 一括処理（デフォルトモデル: isnet-general-use）
-python remove_bg_ai.py --input ./path/to/input_images --output ./path/to/output_png
+python tools/remove_bg_ai.py --input ./path/to/input_images --output ./path/to/output_png
 
 # サブフォルダも含めて処理
-python remove_bg_ai.py --input ./in --output ./out --recursive
+python tools/remove_bg_ai.py --input ./in --output ./out --recursive
 
 # モデル切替（アニメ調に強い）
-python remove_bg_ai.py --input ./in --output ./out --model isnet-anime
+python tools/remove_bg_ai.py --input ./in --output ./out --model isnet-anime
 
 # CPU/GPUを強制（GPUが不可ならCPUにフォールバック）
-python remove_bg_ai.py --input ./in --output ./out --force-cpu
-python remove_bg_ai.py --input ./in --output ./out --force-gpu
+python tools/remove_bg_ai.py --input ./in --output ./out --force-cpu
+python tools/remove_bg_ai.py --input ./in --output ./out --force-gpu
 ```
 
 モジュールとしても利用でき、`remove_background_in_directory` 関数を使ってプログラムから直接ディレクトリを処理できます。

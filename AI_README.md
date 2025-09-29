@@ -67,11 +67,12 @@ Zundamotionは、YAML台本・アセット（音声/BGM/背景/立ち絵/挿入�
 │   ├── reporting/voice_report_generator.py
 │   ├── templates/config.yaml # 既定設定
 │   └── utils/ffmpeg_audio.py, ffmpeg_capabilities.py, ffmpeg_ops.py, ffmpeg_params.py, ffmpeg_hw.py, ffmpeg_probe.py, ffmpeg_runner.py, logger.py
+├── tools/                    # 補助ツール（背景除去など）
 ├── .devcontainer/            # DevContainer（FFmpeg/NVENC/依存関係）
 └── requirements.txt          # ローカル実行用依存
 
 その他:
-- `remove_bg_ai.py`           # rembgによる背景除去スクリプト
+- `tools/remove_bg_ai.py`     # rembgによる背景除去スクリプト
 ```
 
 注意:

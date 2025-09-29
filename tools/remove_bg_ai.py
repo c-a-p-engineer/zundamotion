@@ -2,8 +2,8 @@
 """rembg を用いてフォルダ内の画像背景を一括除去するスクリプト。
 
 使い方:
-  python remove_bg_ai.py --input <in_dir> --output <out_dir> [--recursive]
-                         [--model isnet-general-use|isnet-anime|u2net|u2netp|u2net_human_seg]
+  python tools/remove_bg_ai.py --input <in_dir> --output <out_dir> [--recursive]
+                               [--model isnet-general-use|isnet-anime|u2net|u2netp|u2net_human_seg]
 
 注意:
   - 出力は常に透過PNG。
