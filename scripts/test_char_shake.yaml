@@ -1,0 +1,42 @@
+meta:
+  title: "char:shake_char effect demo"
+  version: 1
+
+video:
+  fps: 30
+
+defaults:
+  characters:
+    zundamon:
+      speaker_id: 3
+      scale: 0.85
+
+scenes:
+  - id: shake_demo
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "高速揺れのテストです。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            visible: true
+            anchor: bottom_center
+            effects:
+              - type: "char:shake_char"
+                amplitude:
+                  x: 22
+                  y: 14
+                freq: 9.0
+                easing:
+                  type: ease_in_out
+                  power: 1.2
+      - text: "設定未指定の場合のデフォルト揺れです。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            visible: true
+            anchor: bottom_center
+            effects:
+              - "char:shake_char"

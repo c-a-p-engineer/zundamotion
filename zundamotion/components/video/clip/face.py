@@ -89,6 +89,7 @@ async def apply_face_overlays(
                     "enter_effect": enter_effect,
                     "enter_duration": f"{enter_duration:.3f}",
                     "expression": str(character.get("expression", "default")),
+                    "dynamic_position": False,
                 }
                 break
         except Exception:
@@ -111,7 +112,10 @@ async def apply_face_overlays(
     except Exception:
         enter_duration_val = 0.0
     fade_str = placement.get("fade", "")
-    use_dynamic = enter_effect.startswith("slide")
+    dynamic_flag = placement.get("dynamic_position")
+    if isinstance(dynamic_flag, str):
+        dynamic_flag = dynamic_flag.lower() in {"1", "true", "yes", "on"}
+    use_dynamic = bool(dynamic_flag) or enter_effect.startswith("slide")
     x_pos = placement.get("x_expr") if use_dynamic else x_fix
     y_pos = placement.get("y_expr") if use_dynamic else y_fix
 
@@ -251,4 +255,3 @@ async def apply_face_overlays(
                 overlay_filters.append(
                     f"overlay=x={x_pos}:y={y_pos}:enable='{open_expr}'"
                 )
-

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ...utils.logger import logger
+from .effects import resolve_character_effects
 
 
 @dataclass
@@ -171,6 +172,7 @@ def build_character_overlays(
 
         fade = ""
         x_expr, y_expr = x_base, y_base
+        position_dynamic = False
 
         if enter_effect == "fade":
             fade += f",fade=t=in:st=0:d={enter_duration}:alpha=1"
@@ -184,35 +186,60 @@ def build_character_overlays(
             x_expr = (
                 f"if(lt(t,{enter_duration}), -w+({x_base}+w)*t/{enter_duration}, {x_expr})"
             )
+            position_dynamic = True
         elif enter_effect == "slide_right":
             x_expr = (
                 f"if(lt(t,{enter_duration}), W+({x_base}-W)*t/{enter_duration}, {x_expr})"
             )
+            position_dynamic = True
         elif enter_effect == "slide_top":
             y_expr = (
                 f"if(lt(t,{enter_duration}), -h+({y_base}+h)*t/{enter_duration}, {y_expr})"
             )
+            position_dynamic = True
         elif enter_effect == "slide_bottom":
             y_expr = (
                 f"if(lt(t,{enter_duration}), H+({y_base}-H)*t/{enter_duration}, {y_expr})"
             )
+            position_dynamic = True
 
         if leave_effect == "slide_left":
             x_expr = (
                 f"if(gt(t,{leave_start}), {x_base} + (-w-{x_base})*(t-{leave_start})/{leave_duration}, {x_expr})"
             )
+            position_dynamic = True
         elif leave_effect == "slide_right":
             x_expr = (
                 f"if(gt(t,{leave_start}), {x_base} + (W-{x_base})*(t-{leave_start})/{leave_duration}, {x_expr})"
             )
+            position_dynamic = True
         elif leave_effect == "slide_top":
             y_expr = (
                 f"if(gt(t,{leave_start}), {y_base} + (-h-{y_base})*(t-{leave_start})/{leave_duration}, {y_expr})"
             )
+            position_dynamic = True
         elif leave_effect == "slide_bottom":
             y_expr = (
                 f"if(gt(t,{leave_start}), {y_base} + (H-{y_base})*(t-{leave_start})/{leave_duration}, {y_expr})"
             )
+            position_dynamic = True
+
+        # Character-specific effects (e.g., dynamic shake)
+        effect_snippet = resolve_character_effects(
+            effects=char_config.get("effects"),
+            base_x_expr=x_expr,
+            base_y_expr=y_expr,
+            duration=duration,
+        )
+        if effect_snippet:
+            if effect_snippet.filter_chain:
+                filter_complex_parts.extend(effect_snippet.filter_chain)
+            overlay_kwargs = effect_snippet.overlay_kwargs
+            if "x" in overlay_kwargs:
+                x_expr = overlay_kwargs["x"]
+            if "y" in overlay_kwargs:
+                y_expr = overlay_kwargs["y"]
+            position_dynamic = position_dynamic or effect_snippet.dynamic
 
         def _escape_commas(expr: str) -> str:
             return expr.replace(",", "\\,")
@@ -278,6 +305,7 @@ def build_character_overlays(
                 fade=fade,
                 duration=duration,
                 scale=scale,
+                dynamic_position=position_dynamic,
             )
         )
 
@@ -296,6 +324,7 @@ def _build_face_placement(
     fade: str,
     duration: float,
     scale: float,
+    dynamic_position: bool,
 ) -> Dict[str, Dict[str, str]]:
     try:
         name = str(char_config.get("name") or char_data.get("name") or "")
@@ -382,6 +411,7 @@ def _build_face_placement(
             "x_num": str(int(round(x_num))),
             "y_num": str(int(round(y_num))),
             "expression": str(char_config.get("expression", char_data.get("expression", "default"))),
+            "dynamic_position": dynamic_position,
         }
 
         return {name: placement}

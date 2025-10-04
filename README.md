@@ -75,6 +75,28 @@ characters:
     scale: 0.8
 ```
 
+### キャラクターエフェクト
+
+`characters[*].effects` に立ち絵用の時間変化エフェクトを追加できます（リストで順序適用）。
+初期実装として `char:shake_char` をサポートしており、発話の勢いを出す高速揺れ演出を生成します。
+
+```yaml
+characters:
+  - name: "zundamon"
+    expression: "normal"
+    effects:
+      - type: "char:shake_char"
+        amplitude: {x: 20, y: 12}  # 揺れ幅（ピクセル）
+        freq: 9.0                  # サイン波の周波数（Hz）
+        easing:
+          type: ease_in_out        # 振幅を入出で滑らかにゼロへ
+          power: 1.2
+```
+
+`char:shake_char` は `x/y` をサイン波でモジュレーションし、デフォルトで位相差を付けた楕円軌道になります。
+振幅は `easing` で時間に応じて減衰（`ease_in_out`, `ease_out`, `ease_in`, `constant` など）させられ、揺れ幅や周波数を細かく調整可能です。
+
+
 ### VNモード（キャラクター持続表示）
 
 `defaults.characters_persist: true` を指定すると、シーン内でキャラクターの表示状態が持続し、各行では差分のみを記述できます。

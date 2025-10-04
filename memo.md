@@ -26,7 +26,7 @@
 
 ```
 添付画像で1px単位でキャラクターを解析して把握してください。
-背景はクロマキー合成用に影などの考慮はしないで、単色で #ffffffff に統一してください。
+可能であれば背景は透過、出来なければ背景はクロマキー合成用に影などの考慮はしないで、単色で #ffffffff に統一してください。
 キャラクターの大きさ、位置は決して変更しないでください。
 足、腰、肩の位置を完全に固定。
 目の色の変更はしないこと。
@@ -45,8 +45,14 @@
 
 ## コマンド
 
+## テスト用
+
+```
+python -m zundamotion.main scripts/sample.yaml --no-cache
+```
+
 ### キャラクターの背景透過png作成
 
 ```
-python remove_bg_ai.py --input /workspace/assets/characters/copetan/temp --output /workspace/assets/characters/copetan/temp --model isnet-anime  --force-gpu --recursive
+python ./tools/remove_bg_ai.py --input /workspace/assets/characters/copetan/default --output /workspace/assets/characters/copetan/default --model isnet-anime  --force-gpu --recursive
 ```
