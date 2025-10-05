@@ -18,7 +18,6 @@ defaults:
   characters_persist: true
   characters:
     copetan:
-      # 好みのVOICEVOX話者IDに変更可（例: 3=ずんだもん）
       speaker_id: 3
       speed: 1.0
       pitch: 0.0
@@ -27,8 +26,7 @@ scenes:
   - id: copetan_expressions
     bg: "assets/bg/room.png"
     lines:
-      # 1) デフォルト
-      - text: "こんにちは、こぴぺたんです。これはデフォルトの表情だよ。"
+      - text: "やっほー、こぴぺたんです！まずはいつもの顔だよ。"
         speaker_name: "copetan"
         characters:
           - name: "copetan"
@@ -39,46 +37,52 @@ scenes:
             position: {x: 0, y: -20}
             scale: 0.85
 
-      # 2) にっこり
-      - text: "にっこり笑顔のこぴぺたん、どうかな？"
+      - text: "にぱっと笑うと、みんなも元気になるかな？"
         speaker_name: "copetan"
         characters:
           - name: "copetan"
             expression: "smile"
 
-      # 3) ぷんすか（怒り）
-      - text: "むむっ、ちょっと怒ってるよ。ちゃんと聞いてね！"
+      - text: "むむ、これがぷんすか顔。いたずらはほどほどにね。"
         speaker_name: "copetan"
         characters:
           - name: "copetan"
             expression: "angry"
 
-      # 4) どや顔（smug）
-      - text: "ふふん、今日はボクの見せ場なんだ。"
+      - text: "肩をすくめた呆れ顔。あきれてるけど、ちょっと優しさもあるよ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "exasperated"
+
+      - text: "わわっ、恥ずかしくてほっぺが真っ赤だよ…。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "embarrassed_blush"
+
+      - text: "あわあわ、冷や汗ダラダラ！焦っちゃう展開もあるよね。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "flustered_coldsweat"
+
+      - text: "ふふん、得意げに決めポーズ！どう？すごいでしょ？"
         speaker_name: "copetan"
         characters:
           - name: "copetan"
             expression: "smug"
 
-      # 5) しょんぼり（sad）
-      - text: "うう…少ししょんぼり…。でも、がんばるよ。"
+      - text: "しょんぼりモード…。でも最後は笑顔に戻れるといいな。"
         speaker_name: "copetan"
         characters:
           - name: "copetan"
             expression: "sad"
 
-      # 6) びっくり（surprised）
-      - text: "わっ！びっくりした！でも楽しかったね。"
+      - text: "また遊ぼうね！"
         speaker_name: "copetan"
         characters:
           - name: "copetan"
-            expression: "surprised"
-
-      # おしまい（退場）
-      - text: "それじゃあ、またね！"
-        speaker_name: "copetan"
-        characters:
-          - name: "copetan"
+            expression: "default"
             leave: true
             leave_duration: 0.4
-

@@ -583,6 +583,23 @@ lines:
 - ずんだもんのささやき表情: `assets/characters/zundamon/whisper.png`
 
 もし指定された表情の画像ファイルが存在しない場合、システムは自動的に `assets/characters/{キャラクター名}/default.png` を探してフォールバックします。
+
+### Copetan 表情セット
+
+Copetan は 8 種類の表情を `assets/characters/copetan/<expression>/` に配置しています（`base.png`, `eyes/`, `mouth/` をセットで管理）。どの表情がどのフォルダか分かるよう、手元のサンプルを一覧化しました。
+
+| 表情ID | ディレクトリ | ニュアンス | 備考 |
+| --- | --- | --- | --- |
+| `default` | `assets/characters/copetan/default/` | きょとんとした通常ポーズ | 迷った時のフォールバック表情 |
+| `smile` | `assets/characters/copetan/smile/` | 口角を上げた素直な笑顔 | 喜び・挨拶シーン向け |
+| `angry` | `assets/characters/copetan/angry/` | 眉を吊り上げたぷんすか顔 | グーの手で抗議中 |
+| `exasperated` | `assets/characters/copetan/exasperated/` | 両手を広げた呆れ顔 | 旧ディレクトリ名 `deadpan` から改名 |
+| `embarrassed_blush` | `assets/characters/copetan/embarrassed_blush/` | 顔を真っ赤にしてしどろもどろ | 照れ・動揺の場面 |
+| `flustered_coldsweat` | `assets/characters/copetan/flustered_coldsweat/` | 冷や汗をかいた焦り顔 | 緊張・想定外の状況向け |
+| `sad` | `assets/characters/copetan/sad/` | しょんぼり落ち込む表情 | 涙目で頼りない印象 |
+| `smug` | `assets/characters/copetan/smug/` | 得意げなニヤリ顔 | 口元に余裕の笑み |
+
+> `exasperated` 以外の表情名はフォルダ命名と YAML の表情 ID が一致しています。台本内で `expression:` に上記 ID を指定することで、該当フォルダの差分素材が読み込まれます。
 そのため、各キャラクターには少なくとも `default.png` を用意しておくことを推奨します。
 
 ### 口パク/目パチ用の差分PNG（任意）
