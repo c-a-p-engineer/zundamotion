@@ -75,6 +75,8 @@ lines:
 ### 立ち絵アニメーション
 
 - `char:shake_char`: `amplitude`, `freq`, `easing`, `phase_offset` などで揺れを制御。
+- `char:bob_char`: `y` 軸のみを低周波サインでバウンス。`amplitude`, `freq`, `offset.y`, `phase_offset(_deg)`, `easing` で揺れ幅や開始位相、収束カーブを調整できる。サンプル: `scripts/test_char_bob.yaml`。
+- `char:sway_char`: `x` 軸のみをゆっくり揺らす。`amplitude`, `freq`, `offset.x`, `phase_offset(_deg)`, `easing` で横揺れの幅や方向、時間経過による収束を制御できる。サンプル: `scripts/test_char_sway.yaml`。
 - 今後追加されたアニメーションはここへ追記してください。
 
 ## 画面全体エフェクト（screen_effects）
@@ -165,6 +167,6 @@ video:
 - `insert` と `fg_overlays` は併用可能。優先順位は行→シーン→字幕の順。
 - `wait` 行はタイムラインにも反映され、動画全体の尺調整に便利。
 - `config.yaml` 側の `system.timeline` / `system.subtitle_file` でタイムライン・字幕の自動出力を制御。
-- サンプル台本: `scripts/sample.yaml`, `scripts/sample_effects.yaml`, `scripts/sample_screen_shake.yaml`。
+- サンプル台本: `scripts/sample.yaml`, `scripts/sample_effects.yaml`, `scripts/sample_screen_shake.yaml`, `scripts/test_char_bob.yaml`, `scripts/test_char_sway.yaml`。
 
 > 新しい演出・アニメーションを追加した際は、サンプル台本を用意し、このチートシートに対応情報を追記してください。

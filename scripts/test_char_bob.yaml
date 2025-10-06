@@ -1,0 +1,70 @@
+meta:
+  title: "char:bob_char effect demo"
+  version: 1
+
+video:
+  fps: 30
+
+defaults:
+  characters_persist: true
+  characters:
+    zundamon:
+      speaker_id: 3
+      scale: 0.85
+      anchor: bottom_center
+
+scenes:
+  - id: bob_showcase
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "デフォルト設定のボブで自然な呼吸感を出しています。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            visible: true
+            expression: "normal"
+            effects:
+              - "char:bob_char"
+      - text: "振幅と周波数を下げて、落ち着いた頷きとしています。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            effects:
+              - type: "char:bob_char"
+                amplitude: 18
+                freq: 0.8
+                easing:
+                  type: ease_in_out
+                  power: 1.8
+      - text: "少し身長を低く見せつつ、位相をずらして上からスタート。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            effects:
+              - type: "char:bob_char"
+                amplitude: 14
+                freq: 1.4
+                offset:
+                  y: -24
+                phase_offset_deg: 90
+                easing: linear
+      - text: "横揺れと組み合わせると、柔らかな重心移動になります。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            effects:
+              - type: "char:shake_char"
+                amplitude:
+                  x: 18
+                  y: 0
+                freq: 6.0
+                easing: ease_out
+              - type: "char:bob_char"
+                amplitude: 10
+                freq: 1.6
+                easing:
+                  type: ease_in
+                  power: 1.4

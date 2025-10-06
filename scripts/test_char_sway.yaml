@@ -1,0 +1,69 @@
+meta:
+  title: "char:sway_char effect demo"
+  version: 1
+
+video:
+  fps: 30
+
+defaults:
+  characters_persist: true
+  characters:
+    zundamon:
+      speaker_id: 3
+      scale: 0.85
+      anchor: bottom_center
+
+scenes:
+  - id: sway_showcase
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "デフォルト設定のスウェイで軽い重心移動を付けています。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            visible: true
+            expression: "normal"
+            effects:
+              - "char:sway_char"
+      - text: "振幅を大きくしてゆったりした横揺れにしました。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "smile"
+            effects:
+              - type: "char:sway_char"
+                amplitude:
+                  x: 28
+                freq: 0.7
+                easing:
+                  type: ease_in_out
+                  power: 1.6
+      - text: "中央位置を少し右に寄せ、位相をずらして戻りから始めています。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            effects:
+              - type: "char:sway_char"
+                amplitude: 18
+                offset:
+                  x: 32
+                phase_offset_deg: 180
+                easing: linear
+      - text: "ボブと組み合わせると柔らかな八の字揺れになります。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            effects:
+              - type: "char:sway_char"
+                amplitude:
+                  x: 16
+                freq: 1.3
+                easing:
+                  type: ease_in
+                  power: 1.4
+              - type: "char:bob_char"
+                amplitude: 10
+                freq: 1.3
+                phase_offset_deg: 90

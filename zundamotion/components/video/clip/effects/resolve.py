@@ -65,6 +65,10 @@ def resolve_character_effects(
         effect_type = effect["type"]
         if effect_type == "char:shake_char":
             snippet = _resolve_char_shake(effect, current_x, current_y, duration)
+        elif effect_type == "char:bob_char":
+            snippet = _resolve_char_bob(effect, current_y, duration)
+        elif effect_type == "char:sway_char":
+            snippet = _resolve_char_sway(effect, current_x, duration)
         else:
             logger.debug("[Effects] Unsupported character effect type: %s", effect_type)
             continue
@@ -173,16 +177,16 @@ def _extract_frequency(effect: Dict[str, Any], default: float) -> float:
         return default
 
 
-def _extract_easing(effect: Dict[str, Any]) -> tuple[str, float]:
+def _extract_easing(effect: Dict[str, Any], default: str = "ease_in_out") -> tuple[str, float]:
     """Parse easing configuration for shake envelope."""
 
-    easing_cfg = effect.get("easing", "ease_in_out")
-    easing_type = "ease_in_out"
+    easing_cfg = effect.get("easing", default)
+    easing_type = default
     easing_power = 1.0
     if isinstance(easing_cfg, str):
-        easing_type = easing_cfg.strip().lower() or "ease_in_out"
+        easing_type = easing_cfg.strip().lower() or default
     elif isinstance(easing_cfg, dict):
-        easing_type = str(easing_cfg.get("type", "ease_in_out")).strip().lower()
+        easing_type = str(easing_cfg.get("type", default)).strip().lower()
         try:
             easing_power = float(easing_cfg.get("power", 1.0))
         except Exception:
@@ -223,6 +227,68 @@ def _extract_phase_shift(effect: Dict[str, Any], default: float) -> float:
         except Exception:
             return default
     return default
+
+
+def _resolve_char_bob(
+    effect: Dict[str, Any],
+    base_y_expr: str,
+    duration: float,
+) -> Optional[FilterSnippet]:
+    """Apply a gentle vertical bobbing motion to the character overlay."""
+
+    _, amp_y = _extract_amplitudes(effect, default=12.0)
+    freq = _extract_frequency(effect, default=1.2)
+    easing_type, easing_power = _extract_easing(effect, default="constant")
+    envelope_expr = _build_envelope_expr(duration, easing_type, easing_power)
+    phase_shift_rad = _extract_phase_shift(effect, default=0.0)
+    _, offset_y = _extract_offsets(effect)
+
+    omega = 2.0 * math.pi * freq
+    omega_str = f"{omega:.6f}"
+    phase_str = f"{phase_shift_rad:.6f}"
+    amp_y_str = f"{amp_y:.6f}"
+    offset_y_str = f"{offset_y:.6f}"
+
+    y_expr = (
+        f"({base_y_expr})+({offset_y_str})+({amp_y_str}*{envelope_expr}*sin({omega_str}*t+{phase_str}))"
+    )
+
+    return FilterSnippet(
+        filter_chain=[],
+        overlay_kwargs={"y": y_expr},
+        dynamic=amp_y > 0.0,
+    )
+
+
+def _resolve_char_sway(
+    effect: Dict[str, Any],
+    base_x_expr: str,
+    duration: float,
+) -> Optional[FilterSnippet]:
+    """Apply a gentle horizontal sway motion to the character overlay."""
+
+    amp_x, _ = _extract_amplitudes(effect, default=16.0)
+    freq = _extract_frequency(effect, default=1.0)
+    easing_type, easing_power = _extract_easing(effect, default="constant")
+    envelope_expr = _build_envelope_expr(duration, easing_type, easing_power)
+    phase_shift_rad = _extract_phase_shift(effect, default=0.0)
+    offset_x, _ = _extract_offsets(effect)
+
+    omega = 2.0 * math.pi * freq
+    omega_str = f"{omega:.6f}"
+    phase_str = f"{phase_shift_rad:.6f}"
+    amp_x_str = f"{amp_x:.6f}"
+    offset_x_str = f"{offset_x:.6f}"
+
+    x_expr = (
+        f"({base_x_expr})+({offset_x_str})+({amp_x_str}*{envelope_expr}*sin({omega_str}*t+{phase_str}))"
+    )
+
+    return FilterSnippet(
+        filter_chain=[],
+        overlay_kwargs={"x": x_expr},
+        dynamic=amp_x > 0.0,
+    )
 
 
 def _extract_offsets(effect: Dict[str, Any]) -> tuple[float, float]:
