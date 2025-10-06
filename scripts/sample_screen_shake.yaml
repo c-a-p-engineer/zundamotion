@@ -1,0 +1,51 @@
+meta:
+  title: "screen:shake_screen demo"
+  version: 1
+
+video:
+  fps: 30
+
+defaults:
+  characters:
+    zundamon:
+      speaker_id: 3
+      scale: 0.85
+      anchor: bottom_center
+      expression: normal
+
+scenes:
+  - id: shake_showcase
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "クライマックスの爆発！ 画面全体が揺れる演出です。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "excited"
+            visible: true
+            anchor: bottom_center
+        screen_effects:
+          - type: "screen:shake_screen"
+            amplitude:
+              x: 32
+              y: 20
+            freq: 9.0
+            easing:
+              type: ease_in_out
+              power: 1.1
+            padding: 24
+      - text: "徐々に収束する穏やかな揺れも指定できます。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            visible: true
+            anchor: bottom_center
+        screen_effects:
+          - type: "screen:shake_screen"
+            amplitude: 18
+            freq: 6.5
+            easing: ease_out
+            offset:
+              y: -6
+            padding: 18

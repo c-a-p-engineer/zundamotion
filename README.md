@@ -57,72 +57,13 @@ lines:
 
 ### キャラクター登場/退場アニメーション
 
-`characters` ブロックの `enter`/`leave` で登場・退場アニメーションを指定できます。
-`true` または `"fade"` でフェードイン/アウト（既定0.3秒、`enter_duration`/`leave_duration` で秒数変更）。
-`"slide_left"` / `"slide_right"` / `"slide_top"` / `"slide_bottom"` で各方向にスライドイン・アウトします。
-指定したアニメーションは口パク・目パチなどの顔パーツにも同期し、登場直後のゴーストを防ぎます。
-登場アニメーションが指定されている場合、音声はアニメーション完了後に再生され、退場アニメーションは音声終了後に実行されます。
-
-```yaml
-characters:
-  - name: "zundamon"
-    expression: "normal"
-    enter: slide_left     # 左からスライドイン
-    enter_duration: 0.5   # アニメーション秒数
-    leave: fade           # フェードアウト
-    leave_duration: 0.5
-    anchor: bottom_center
-    scale: 0.8
-```
-
-### キャラクターエフェクト
-
-`characters[*].effects` に立ち絵用の時間変化エフェクトを追加できます（リストで順序適用）。
-初期実装として `char:shake_char` をサポートしており、発話の勢いを出す高速揺れ演出を生成します。
-
-```yaml
-characters:
-  - name: "zundamon"
-    expression: "normal"
-    effects:
-      - type: "char:shake_char"
-        amplitude: {x: 20, y: 12}  # 揺れ幅（ピクセル）
-        freq: 9.0                  # サイン波の周波数（Hz）
-        easing:
-          type: ease_in_out        # 振幅を入出で滑らかにゼロへ
-          power: 1.2
-```
-
-`char:shake_char` は `x/y` をサイン波でモジュレーションし、デフォルトで位相差を付けた楕円軌道になります。
-振幅は `easing` で時間に応じて減衰（`ease_in_out`, `ease_out`, `ease_in`, `constant` など）させられ、揺れ幅や周波数を細かく調整可能です。
-
-
-### VNモード（キャラクター持続表示）
-
-`defaults.characters_persist: true` を指定すると、シーン内でキャラクターの表示状態が持続し、各行では差分のみを記述できます。
-`characters` ブロックには `enter`/`leave`/`exit`、`position` や `anchor` を差分指定して登場位置や退場を表現できます。
-
-```yaml
-defaults:
-  characters_persist: true
-scenes:
-  - lines:
-      - text: "ずんだもん登場"
-        speaker_name: "zundamon"
-        characters:
-          - name: "zundamon"
-            enter: true
-            anchor: bottom_center
-            position: {x: -480, y: -20}
-      - text: "次の行でも表示が続くのだ"
-        speaker_name: "zundamon"
-```
-
 - **DevContainer対応**: VSCode DevContainerをサポートしており、どこでも一貫した開発環境を簡単に構築できます。
 - **外部設定ファイル**: `config.yaml`を通じて、キャッシュディレクトリや動画拡張子などのシステム設定を柔軟に変更できます。
 - **タイムライン出力**: 動画の各シーンやセリフの開始時刻を記録し、YouTubeのチャプターなどに利用できるタイムラインファイルを自動生成します。出力形式はMarkdown (`.md`)、CSV (`.csv`)、またはその両方を選択できます。
 - **字幕ファイル出力**: 焼き込み字幕とは別に、`.srt`または`.ass`形式の独立した字幕ファイルを動画と同時に出力します。これにより、YouTubeへのアップロードや、他言語への翻訳作業が容易になります。
 - **キャラクターごとのデフォルト設定**: 台本ファイル内でキャラクターごとのデフォルト設定（話者ID、ピッチ、速度など）を定義できます。これにより、セリフごとの記述を簡潔にし、台本の可読性を向上させます。設定は「セリフごとの指定 > キャラクターごとのデフォルト > グローバルなデフォルト」の順に優先されます。
+
+> 台本（YAML）の具体的な記述例は `scripts/script_cheatsheet.md` に集約しています。
 
 ---
 

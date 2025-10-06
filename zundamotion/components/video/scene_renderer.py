@@ -10,6 +10,7 @@ from ...exceptions import PipelineError
 from ...utils.ffmpeg_hw import get_profile_flags
 from ...utils.ffmpeg_ops import calculate_overlay_position, normalize_media
 from ...utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
+from .clip.effects import resolve_screen_effects
 
 if TYPE_CHECKING:
     from .renderer import VideoRenderer
@@ -260,16 +261,41 @@ async def render_wait_clip(
         ]
     )
 
-    pre_scaled = bool(background_config.get("pre_scaled", False))
-    if pre_scaled:
-        filter_complex = f"[0:v]trim=duration={duration},format=yuv420p[final_v]"
-    else:
-        filter_complex = (
-            f"[0:v]scale={width}:{height}:flags={renderer.scale_flags},"
-            f"trim=duration={duration},format=yuv420p[final_v]"
-        )
+    screen_effects = None
+    try:
+        if isinstance(line_config, dict):
+            screen_effects = line_config.get("screen_effects")
+    except Exception:
+        screen_effects = None
 
-    cmd.extend(["-filter_complex", filter_complex])
+    filter_parts: List[str] = []
+    current_label = "[0:v]"
+
+    pre_scaled = bool(background_config.get("pre_scaled", False))
+    if not pre_scaled:
+        filter_parts.append(
+            f"{current_label}scale={width}:{height}:flags={renderer.scale_flags}[wait_scaled]"
+        )
+        current_label = "[wait_scaled]"
+
+    filter_parts.append(f"{current_label}trim=duration={duration}[wait_trim]")
+    current_label = "[wait_trim]"
+
+    screen_snippet = resolve_screen_effects(
+        effects=screen_effects,
+        input_label=current_label,
+        duration=duration,
+        width=width,
+        height=height,
+        id_prefix="screenw",
+    )
+    if screen_snippet:
+        filter_parts.extend(screen_snippet.filter_chain)
+        current_label = screen_snippet.output_label
+
+    filter_parts.append(f"{current_label}format=yuv420p[final_v]")
+
+    cmd.extend(["-filter_complex", ";".join(filter_parts)])
     cmd.extend(["-map", "[final_v]", "-map", "1:a"])
     cmd.extend(["-t", str(duration)])
     cmd.extend(renderer.video_params.to_ffmpeg_opts(renderer.hw_kind))

@@ -16,6 +16,7 @@ from ...utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from ...utils.logger import logger
 from .clip.characters import collect_character_inputs, build_character_overlays
 from .clip.face import apply_face_overlays
+from .clip.effects import resolve_screen_effects
 
 if TYPE_CHECKING:
     from .renderer import VideoRenderer
@@ -31,6 +32,7 @@ async def render_clip(
     subtitle_text: Optional[str] = None,
     subtitle_line_config: Optional[Dict[str, Any]] = None,
     insert_config: Optional[Dict[str, Any]] = None,
+    screen_effects: Optional[List[Any]] = None,
     subtitle_png_path: Optional[Path] = None,
     face_anim: Optional[Dict[str, Any]] = None,
     _force_cpu: bool = False,
@@ -465,6 +467,19 @@ async def render_clip(
         except Exception as e:
             logger.warning("Failed to build subtitle overlay snippet: %s", e)
             subtitle_snippet = None
+
+    # 画面全体エフェクト（最終合成ストリーム向け）
+    screen_effect_snippet = resolve_screen_effects(
+        effects=screen_effects,
+        input_label=current_video_stream,
+        duration=duration,
+        width=width,
+        height=height,
+        id_prefix="screen",
+    )
+    if screen_effect_snippet:
+        filter_complex_parts.extend(screen_effect_snippet.filter_chain)
+        current_video_stream = screen_effect_snippet.output_label
 
     # 最終フォーマット変換（CUDA使用がどこかであれば hwdownload を挟む）
     used_any_cuda = use_cuda_filters or (
