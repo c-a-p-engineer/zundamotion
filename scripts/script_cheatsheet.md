@@ -79,6 +79,19 @@ lines:
 - `char:sway_char`: `x` 軸のみをゆっくり揺らす。`amplitude`, `freq`, `offset.x`, `phase_offset(_deg)`, `easing` で横揺れの幅や方向、時間経過による収束を制御できる。サンプル: `scripts/test_char_sway.yaml`。
 - 今後追加されたアニメーションはここへ追記してください。
 
+## 字幕エフェクト（`subtitle.effects`）
+
+```yaml
+lines:
+  - text: "着地時に字幕を強調"
+    subtitle:
+      effects:
+        - type: "text:bounce_text"
+          amplitude: 40         # バウンドの高さ（ピクセル）
+```
+
+- `text:bounce_text`: `abs(sin)` ベースの常時バウンド。設定は `amplitude`（px）だけで、値が大きいほど跳ね上がりが大きくなります。サンプル: `scripts/test_text_bounce.yaml`。
+
 ## 画面全体エフェクト（screen_effects）
 
 シーン最終合成後に適用されるフィルタ。複数指定で後段適用。
@@ -167,6 +180,6 @@ video:
 - `insert` と `fg_overlays` は併用可能。優先順位は行→シーン→字幕の順。
 - `wait` 行はタイムラインにも反映され、動画全体の尺調整に便利。
 - `config.yaml` 側の `system.timeline` / `system.subtitle_file` でタイムライン・字幕の自動出力を制御。
-- サンプル台本: `scripts/sample.yaml`, `scripts/sample_effects.yaml`, `scripts/sample_screen_shake.yaml`, `scripts/test_char_bob.yaml`, `scripts/test_char_sway.yaml`。
+- サンプル台本: `scripts/sample.yaml`, `scripts/sample_effects.yaml`, `scripts/sample_screen_shake.yaml`, `scripts/test_char_bob.yaml`, `scripts/test_char_sway.yaml`, `scripts/test_text_bounce.yaml`。
 
 > 新しい演出・アニメーションを追加した際は、サンプル台本を用意し、このチートシートに対応情報を追記してください。

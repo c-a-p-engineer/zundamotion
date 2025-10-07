@@ -1,0 +1,43 @@
+meta:
+  title: "text:bounce_text effect demo"
+  version: 1
+
+video:
+  fps: 30
+
+defaults:
+  subtitle:
+    font_color: "#FFFFFF"
+    stroke_color: "#000000"
+
+scenes:
+  - id: bounce_text_showcase
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "デフォルト設定のジャンプで字幕を弾ませます。"
+        speaker_name: "zundamon"
+        speaker_id: 3
+        subtitle:
+          effects:
+            - type: "text:bounce_text"
+      - text: "振幅を大きめにしてダイナミックに弾ませています。"
+        speaker_name: "zundamon"
+        speaker_id: 3
+        subtitle:
+          effects:
+            - type: "text:bounce_text"
+              amplitude: 48
+      - text: "振幅を控えめにして軽い跳ねにしています。"
+        speaker_name: "zundamon"
+        speaker_id: 3
+        subtitle:
+          effects:
+            - type: "text:bounce_text"
+              amplitude: 20
+      - text: "最小振幅で細やかなバウンドを維持しています。"
+        speaker_name: "zundamon"
+        speaker_id: 3
+        subtitle:
+          effects:
+            - type: "text:bounce_text"
+              amplitude: 12
