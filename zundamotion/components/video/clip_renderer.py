@@ -16,7 +16,7 @@ from ...utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from ...utils.logger import logger
 from .clip.characters import collect_character_inputs, build_character_overlays
 from .clip.face import apply_face_overlays
-from .clip.effects import resolve_screen_effects
+from .clip.effects import resolve_background_effects, resolve_screen_effects
 
 if TYPE_CHECKING:
     from .renderer import VideoRenderer
@@ -32,6 +32,7 @@ async def render_clip(
     subtitle_text: Optional[str] = None,
     subtitle_line_config: Optional[Dict[str, Any]] = None,
     insert_config: Optional[Dict[str, Any]] = None,
+    background_effects: Optional[List[Any]] = None,
     screen_effects: Optional[List[Any]] = None,
     subtitle_png_path: Optional[Path] = None,
     face_anim: Optional[Dict[str, Any]] = None,
@@ -194,6 +195,8 @@ async def render_clip(
     any_character_visible = char_inputs.any_visible
     char_metadata = char_inputs.metadata
 
+    background_effects = background_effects or background_config.get("effects")
+
     # ---- ここで GPU フィルタ使用可否を判定 --------------------------------
     # RGBAを含むオーバーレイ（字幕PNG/立ち絵/挿入画像）が1つでもあれば CPU 合成へ（実験フラグで緩和）
     # RGBA を含むオーバーレイ（字幕PNG/立ち絵/挿入画像）が1つでもあれば CPU 合成へ（実験フラグで緩和）
@@ -229,6 +232,16 @@ async def render_clip(
         and (not _force_cpu)
         and ((global_mode != "cpu") or allow_in_cpu_mode)
     )
+
+    background_effects_active = bool(background_effects)
+    if background_effects_active:
+        if use_cuda_filters or use_gpu_scale_only:
+            logger.info(
+                "[Effects] Background effects requested; falling back to CPU-compatible overlay path."
+            )
+        use_cuda_filters = False
+        use_gpu_scale_only = False
+
     if use_cuda_filters:
         logger.info(
             "[Filters] CUDA path: scaling/overlay on GPU (no RGBA overlays)"
@@ -269,6 +282,7 @@ async def render_clip(
     # 背景スケール
     pre_scaled = bool(background_config.get("pre_scaled", False))
     fps_part = f",fps={fps}" if renderer.apply_fps_filter else ""
+    opencl_upload_label: Optional[str] = None
     if pre_scaled:
         # すでに width/height/fps に整形済みのベース映像（シーンベース）
         # 無駄な再スケールを避けるため passthrough
@@ -303,14 +317,33 @@ async def render_clip(
             filter_complex_parts.append(
                 f"[0:v]scale={width}:{height}:flags={renderer.scale_flags}{fps_part}[bg]"
             )
-            filter_complex_parts.append("[bg]format=rgba,hwupload[bg_gpu]")
-            current_video_stream = "[bg_gpu]"
+            opencl_upload_label = "[bg_gpu]"
         else:
             filter_complex_parts.append(
                 f"[0:v]scale={width}:{height}:flags={renderer.scale_flags}{fps_part}[bg]"
             )
-    if not (renderer.gpu_overlay_backend == "opencl" and not _force_cpu and (get_hw_filter_mode() != "cpu" or renderer.allow_opencl_overlay_in_cpu_mode)):
-        current_video_stream = "[bg]"
+
+    bg_stream_label = "[bg]"
+    bg_effect_snippet = resolve_background_effects(
+        effects=background_effects,
+        input_label=bg_stream_label,
+        duration=duration,
+        width=width,
+        height=height,
+        id_prefix="bg",
+    )
+    if bg_effect_snippet:
+        filter_complex_parts.extend(bg_effect_snippet.filter_chain)
+        if bg_effect_snippet.output_label:
+            bg_stream_label = bg_effect_snippet.output_label
+
+    if opencl_upload_label:
+        filter_complex_parts.append(
+            f"{bg_stream_label}format=rgba,hwupload{opencl_upload_label}"
+        )
+        current_video_stream = opencl_upload_label
+    else:
+        current_video_stream = bg_stream_label
     overlay_streams: List[str] = []
     overlay_filters: List[str] = []
 

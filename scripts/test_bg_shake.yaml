@@ -1,0 +1,48 @@
+meta:
+  title: "bg:shake_bg demo"
+  version: 1
+
+video:
+  fps: 30
+
+defaults:
+  characters:
+    zundamon:
+      speaker_id: 3
+      speed: 1.1
+      pitch: 0.05
+      subtitle:
+        font_color: "#90EE90" # LightGreen
+        stroke_color: "white"
+
+scenes:
+  - id: bg_shake_intro
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "背景だけを使ったカメラ揺れエフェクトです。"
+        speaker_name: "zundamon"
+        characters:
+          - name: "zundamon"
+            expression: "normal"
+            enter: true
+            enter_duration: 0.5 # 登場→0.5秒後に音声開始
+            anchor: bottom_center
+            scale: 0.8
+        background_effects:
+          - type: "bg:shake_bg"
+            amplitude:
+              x: 28
+              y: 18
+            freq: 7.5
+            easing:
+              type: ease_out
+              power: 1.25
+      - wait: 1.2
+        background_effects:
+          - type: "bg:shake_bg"
+            amplitude: {x: 12, y: 6}
+            freq: 5.0
+            easing: ease_in
+            offset:
+              x: -4
+              y: 2

@@ -7,6 +7,7 @@ configuration into FFmpeg filter graph snippets and overlay expressions.
 from .resolve import (
     FilterSnippet,
     ScreenEffectSnippet,
+    resolve_background_effects,
     resolve_character_effects,
     resolve_screen_effects,
 )
@@ -14,6 +15,7 @@ from .resolve import (
 __all__ = [
     "FilterSnippet",
     "ScreenEffectSnippet",
+    "resolve_background_effects",
     "resolve_character_effects",
     "resolve_screen_effects",
 ]

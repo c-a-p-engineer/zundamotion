@@ -14,6 +14,7 @@ class FilterSnippet:
     filter_chain: List[str]
     overlay_kwargs: Dict[str, str]
     dynamic: bool = False
+    output_label: Optional[str] = None
 
 
 @dataclass
@@ -95,6 +96,63 @@ def resolve_character_effects(
             filter_chain=filter_chain,
             overlay_kwargs=overlay_kwargs,
             dynamic=dynamic,
+        )
+
+    return None
+
+
+def resolve_background_effects(
+    *,
+    effects: Optional[Iterable[Any]],
+    input_label: str,
+    duration: float,
+    width: int,
+    height: int,
+    id_prefix: str = "bg",
+) -> Optional[FilterSnippet]:
+    """Resolve background-specific effects applied before overlay composition."""
+
+    if not effects:
+        return None
+
+    filter_chain: List[str] = []
+    current_label = input_label
+    dynamic = False
+
+    for idx, raw in enumerate(effects, start=1):
+        effect = _normalize_effect(raw)
+        if not effect:
+            continue
+
+        effect_type = effect["type"]
+        if effect_type == "bg:shake_bg":
+            snippet = _resolve_background_shake(
+                effect,
+                input_label=current_label,
+                duration=duration,
+                width=width,
+                height=height,
+                index=idx,
+                id_prefix=id_prefix,
+            )
+        else:
+            logger.debug("[Effects] Unsupported background effect type: %s", effect_type)
+            continue
+
+        if not snippet:
+            continue
+
+        filter_chain.extend(snippet.filter_chain)
+        if snippet.output_label:
+            current_label = snippet.output_label
+        dynamic = dynamic or snippet.dynamic
+
+    if filter_chain and current_label != input_label:
+        return FilterSnippet(
+            filter_chain=filter_chain,
+            overlay_kwargs={},
+            dynamic=dynamic,
+            output_label=current_label,
         )
 
     return None
@@ -306,6 +364,87 @@ def _extract_offsets(effect: Dict[str, Any]) -> tuple[float, float]:
             offset_y = 0.0
         return offset_x, offset_y
     return 0.0, 0.0
+
+
+def _resolve_background_shake(
+    effect: Dict[str, Any],
+    *,
+    input_label: str,
+    duration: float,
+    width: int,
+    height: int,
+    index: int,
+    id_prefix: str,
+) -> Optional[FilterSnippet]:
+    """Translate the background stream using padding + crop (FFmpeg lacks translate)."""
+
+    amp_x, amp_y = _extract_amplitudes(effect, default=24.0)
+    freq = _extract_frequency(effect, default=8.0)
+    easing_type, easing_power = _extract_easing(effect)
+    envelope_expr = _build_envelope_expr(duration, easing_type, easing_power)
+    phase_shift_rad = _extract_phase_shift(effect, default=math.pi / 2.0)
+    offset_x, offset_y = _extract_offsets(effect)
+
+    dynamic = amp_x > 0.0 or amp_y > 0.0
+
+    if (not dynamic) and abs(offset_x) < 1e-6 and abs(offset_y) < 1e-6:
+        return None
+
+    padding_extra = 0.0
+    try:
+        padding_extra = max(0.0, float(effect.get("padding", 0.0)))
+    except Exception:
+        padding_extra = 0.0
+
+    required_pad_x = max(abs(offset_x) + amp_x, 0.0) + padding_extra
+    required_pad_y = max(abs(offset_y) + amp_y, 0.0) + padding_extra
+
+    pad_x = int(math.ceil(required_pad_x))
+    pad_y = int(math.ceil(required_pad_y))
+
+    if pad_x == 0 and (abs(offset_x) > 0.0 or dynamic):
+        pad_x = 1
+    if pad_y == 0 and (abs(offset_y) > 0.0 or dynamic):
+        pad_y = 1
+
+    omega = 2.0 * math.pi * freq
+    omega_str = f"{omega:.6f}"
+    phase_str = f"{phase_shift_rad:.6f}"
+
+    shift_x_expr = (
+        f"({offset_x:.6f})+({amp_x:.6f}*{envelope_expr}*sin({omega_str}*t))"
+    )
+    shift_y_expr = (
+        f"({offset_y:.6f})+({amp_y:.6f}*{envelope_expr}*sin({omega_str}*t+{phase_str}))"
+    )
+
+    clamp_max_x = pad_x * 2
+    clamp_max_y = pad_y * 2
+    x_expr = f"min(max({pad_x}-({shift_x_expr}),0),{clamp_max_x})"
+    y_expr = f"min(max({pad_y}-({shift_y_expr}),0),{clamp_max_y})"
+
+    def _escape_commas(expr: str) -> str:
+        return expr.replace(",", "\\,")
+
+    x_expr_escaped = _escape_commas(x_expr)
+    y_expr_escaped = _escape_commas(y_expr)
+
+    pad_label = f"[{id_prefix}_pad_{index}]"
+    crop_label = f"[{id_prefix}_shake_{index}]"
+
+    pad_filter = (
+        f"{input_label}pad=iw+{pad_x*2}:ih+{pad_y*2}:{pad_x}:{pad_y}:color=0x00000000{pad_label}"
+    )
+    crop_filter = (
+        f"{pad_label}crop={width}:{height}:{x_expr_escaped}:{y_expr_escaped}{crop_label}"
+    )
+
+    return FilterSnippet(
+        filter_chain=[pad_filter, crop_filter],
+        overlay_kwargs={},
+        dynamic=dynamic,
+        output_label=crop_label,
+    )
 
 
 def resolve_screen_effects(

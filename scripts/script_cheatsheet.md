@@ -106,6 +106,23 @@ screen_effects:
 - `screen:shake_screen`: 画面全体の揺れ。振幅・周波数・減衰 (`easing`) の調整が可能。必要量を自動で `pad` → `crop` し、`padding` を指定すると余白を追加できます。
 - 今後追加された screen エフェクトはここに追記してください。
 
+## 背景エフェクト（`background_effects`）
+
+```yaml
+lines:
+  - text: "背景だけ揺らすカメラ振動"
+    background_effects:
+      - type: "bg:shake_bg"
+        amplitude: {x: 28, y: 18}
+        freq: 7.5
+        easing:
+          type: ease_out
+          power: 1.2
+```
+
+- `background_effects` はシーン合成前の背景ストリームに適用され、立ち絵や字幕の座標には影響しません。
+- `bg:shake_bg`: `pad`→`crop` チェーンで背景のみを平行移動します。`amplitude`, `freq`, `easing`, `offset`, `padding` が指定でき、サンプルは `scripts/test_bg_shake.yaml` を参照してください。
+
 ## 画像・動画の挿入（`insert`）
 
 ```yaml

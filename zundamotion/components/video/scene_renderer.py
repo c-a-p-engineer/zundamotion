@@ -10,7 +10,7 @@ from ...exceptions import PipelineError
 from ...utils.ffmpeg_hw import get_profile_flags
 from ...utils.ffmpeg_ops import calculate_overlay_position, normalize_media
 from ...utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
-from .clip.effects import resolve_screen_effects
+from .clip.effects import resolve_background_effects, resolve_screen_effects
 
 if TYPE_CHECKING:
     from .renderer import VideoRenderer
@@ -262,11 +262,14 @@ async def render_wait_clip(
     )
 
     screen_effects = None
+    background_effects = None
     try:
         if isinstance(line_config, dict):
             screen_effects = line_config.get("screen_effects")
+            background_effects = line_config.get("background_effects")
     except Exception:
         screen_effects = None
+        background_effects = None
 
     filter_parts: List[str] = []
     current_label = "[0:v]"
@@ -277,6 +280,19 @@ async def render_wait_clip(
             f"{current_label}scale={width}:{height}:flags={renderer.scale_flags}[wait_scaled]"
         )
         current_label = "[wait_scaled]"
+
+    bg_snippet = resolve_background_effects(
+        effects=background_effects,
+        input_label=current_label,
+        duration=duration,
+        width=width,
+        height=height,
+        id_prefix="bgw",
+    )
+    if bg_snippet:
+        filter_parts.extend(bg_snippet.filter_chain)
+        if bg_snippet.output_label:
+            current_label = bg_snippet.output_label
 
     filter_parts.append(f"{current_label}trim=duration={duration}[wait_trim]")
     current_label = "[wait_trim]"

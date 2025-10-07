@@ -607,6 +607,7 @@ class SceneRenderer:
                         "video_params": self.video_params.__dict__,
                         "audio_params": self.audio_params.__dict__,
                         "screen_effects": line_config.get("screen_effects"),
+                        "background_effects": line_config.get("background_effects"),
                     }
 
                     async def wait_creator_func(output_path: Path) -> Path:
@@ -720,6 +721,7 @@ class SceneRenderer:
                     "blink_max_interval": anim_meta.get("blink_max_interval"),
                     "blink_close_frames": anim_meta.get("blink_close_frames"),
                     "screen_effects": line_config.get("screen_effects"),
+                    "background_effects": line_config.get("background_effects"),
                 }
 
                 async def clip_creator_func(output_path: Path) -> Path:
@@ -730,6 +732,7 @@ class SceneRenderer:
                         characters_config=effective_characters,
                         output_filename=output_path.stem,
                         insert_config=effective_insert,
+                        background_effects=line_config.get("background_effects"),
                         screen_effects=line_config.get("screen_effects"),
                         face_anim=face_anim,
                         audio_delay=pre_dur,
