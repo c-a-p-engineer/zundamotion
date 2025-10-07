@@ -1,0 +1,41 @@
+meta:
+  title: "Copetan 全表情サンプル"
+  version: 3
+
+# 目パチ/口パクの簡易アニメを有効化（差分PNGがあるため適用されます）
+video:
+  fps: 30
+  face_anim:
+    mouth_fps: 15
+    mouth_thr_half: 0.2
+    mouth_thr_open: 0.5
+    blink_min_interval: 2.0
+    blink_max_interval: 5.0
+    blink_close_frames: 2
+
+# 行間でキャラクター状態を引き継ぐ（VNモード）
+defaults:
+  characters_persist: true
+  characters:
+    engy:
+      speaker_id: 8
+      speed: 1.15
+      pitch: 0.05
+
+scenes:
+  - id: engy_expressions
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "わたしぃ、エンジー・ニアって言うのー、よろしくね！お兄ちゃんたち！"
+        speaker_name: "engy"
+        characters:
+          - name: "engy"
+            expression: "default"
+            enter: true
+            enter_duration: 0.4
+            anchor: bottom_center
+            position: {x: 0, y: -20}
+            scale: 0.85
+            visible: true
+      - text: "まだデフォルト顔しかないのー、もっと色々な表情欲しいよねー"
+        speaker_name: "engy"

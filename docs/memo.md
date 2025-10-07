@@ -50,11 +50,11 @@
 ## テスト用
 
 ```
-python -m zundamotion.main scripts/sample.yaml --no-cache
+python -m zundamotion.main --no-cache scripts/sample.yaml
 ```
 
 ### キャラクターの背景透過png作成
 
 ```
-python ./tools/remove_bg_ai.py --input /workspace/assets/characters/copetan/smug --output /workspace/assets/characters/copetan/smug --model isnet-anime  --force-gpu --recursive
+python ./tools/remove_bg_ai.py --input /workspace/assets/characters/engy/default --output /workspace/assets/characters/engy/default --model isnet-anime --force-gpu --recursive
 ```
