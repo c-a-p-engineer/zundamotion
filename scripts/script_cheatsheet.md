@@ -74,9 +74,9 @@ lines:
 
 ### 立ち絵アニメーション
 
-- `char:shake_char`: `amplitude`, `freq`, `easing`, `phase_offset` などで揺れを制御。
-- `char:bob_char`: `y` 軸のみを低周波サインでバウンス。`amplitude`, `freq`, `offset.y`, `phase_offset(_deg)`, `easing` で揺れ幅や開始位相、収束カーブを調整できる。サンプル: `scripts/test_char_bob.yaml`。
-- `char:sway_char`: `x` 軸のみをゆっくり揺らす。`amplitude`, `freq`, `offset.x`, `phase_offset(_deg)`, `easing` で横揺れの幅や方向、時間経過による収束を制御できる。サンプル: `scripts/test_char_sway.yaml`。
+- `char:shake_char`: ランダム風の揺れ。`amplitude`, `freq`, `easing`, `phase_offset` などで制御。
+- `char:bob_char`: 上下バウンド。`amplitude`, `freq`, `offset.y`, `phase_offset(_deg)`, `easing` を指定。サンプル: `scripts/test_char_bob.yaml`。
+- `char:sway_char`: 左右スイング。`amplitude`, `freq`, `offset.x`, `phase_offset(_deg)`, `easing` を調整。サンプル: `scripts/test_char_sway.yaml`。
 - 今後追加されたアニメーションはここへ追記してください。
 
 ## 字幕エフェクト（`subtitle.effects`）
@@ -94,23 +94,17 @@ lines:
 
 ## 画面全体エフェクト（screen_effects）
 
-シーン最終合成後に適用されるフィルタ。複数指定で後段適用。
-
 ```yaml
 screen_effects:
   - type: "screen:shake_screen"
-    amplitude: {x: 32, y: 20}      # ピクセル揺れ幅
-    freq: 9.0                      # 周波数(Hz)
-    easing:
-      type: ease_in_out
-      power: 1.1
-    offset:
-      y: -6                        # 静的オフセット
-    padding: 24                    # 上下左右に確保する余白
+    amplitude: {x: 24, y: 18}
+    freq: 8.0
+    easing: ease_out
+    padding: 24
 ```
 
-- 画面からはみ出さないよう必要量を自動で `pad` → `crop` します。
-- `padding` を追加すると揺れ幅より広い余白を確保できます。
+- `screen:shake_screen`: 画面全体の揺れ。振幅・周波数・減衰 (`easing`) の調整が可能。必要量を自動で `pad` → `crop` し、`padding` を指定すると余白を追加できます。
+- 今後追加された screen エフェクトはここに追記してください。
 
 ## 画像・動画の挿入（`insert`）
 
