@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import asyncio
 import json
 import os
 import subprocess
@@ -43,6 +44,17 @@ class FinalizePhase:
         self.hw_encoder = hw_encoder
         self.quality = quality
         self.final_copy_only = final_copy_only  # 追加
+        transitions_cfg = (config.get("transitions") or {})
+        wait_value = transitions_cfg.get("wait_padding_seconds", 2.0)
+        try:
+            wait_seconds = float(wait_value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "FinalizePhase: Invalid transitions.wait_padding_seconds=%s. Falling back to 0.0s.",
+                wait_value,
+            )
+            wait_seconds = 0.0
+        self.transition_wait_padding = max(0.0, wait_seconds)
 
     @time_log(logger)
     async def run(  # async を追加
@@ -61,12 +73,33 @@ class FinalizePhase:
 
         # 1) シーン間トランジションの適用（先行シーンの transition を次シーンとの境界に適用）
         processed_paths: List[Path] = list(scene_video_paths)
+
+        duration_tasks = [get_media_duration(str(p)) for p in processed_paths]
+        scene_durations: List[float] = []
+        if duration_tasks:
+            duration_results = await asyncio.gather(*duration_tasks, return_exceptions=True)
+            for path, result in zip(processed_paths, duration_results):
+                if isinstance(result, Exception):
+                    logger.warning(
+                        "FinalizePhase: Failed to probe duration for %s (%s). Falling back to 0.0s.",
+                        path.name,
+                        result,
+                    )
+                    scene_durations.append(0.0)
+                else:
+                    try:
+                        scene_durations.append(float(result))
+                    except Exception:
+                        scene_durations.append(0.0)
+
         if len(processed_paths) >= 2:
             logger.info("FinalizePhase: Applying scene transitions where defined...")
             merged: List[Path] = []
             current: Path = processed_paths[0]
+            current_duration = scene_durations[0] if scene_durations else 0.0
             for i in range(len(processed_paths) - 1):
                 next_path = processed_paths[i + 1]
+                next_duration = scene_durations[i + 1] if i + 1 < len(scene_durations) else 0.0
                 scene = scenes[i] if i < len(scenes) else {}
                 transition_cfg = scene.get("transition") if isinstance(scene, dict) else None
 
@@ -79,15 +112,19 @@ class FinalizePhase:
                         t_dur = 1.0
 
                     # offset = 現在クリップの末尾から duration 秒前
-                    try:
-                        cur_dur = await get_media_duration(str(current))
-                    except Exception:
-                        cur_dur = 0.0
-                    offset = max(0.0, cur_dur - t_dur)
+                    offset = max(0.0, current_duration - t_dur)
 
                     out_path = self.temp_dir / f"transition_{i:03d}_{i+1:03d}.mp4"
+                    effective_gap = max(0.0, (self.transition_wait_padding * 2.0) - t_dur)
                     logger.info(
-                        f"FinalizePhase: Applying transition '{t_type}' (d={t_dur}s, offset={offset:.2f}s) between {current.name} -> {Path(next_path).name}"
+                        "FinalizePhase: Applying transition '%s' (d=%.2fs, offset=%.2fs, wait=%.2fs, effective_gap=%.2fs) between %s -> %s",
+                        t_type,
+                        t_dur,
+                        offset,
+                        self.transition_wait_padding,
+                        effective_gap,
+                        current.name,
+                        Path(next_path).name,
                     )
                     await apply_transition(
                         str(current),
@@ -98,12 +135,51 @@ class FinalizePhase:
                         offset,
                         self.video_params,
                         self.audio_params,
+                        wait_padding=self.transition_wait_padding,
                     )
+                    if (
+                        effective_gap > 0
+                        and timeline is not None
+                        and i + 1 < len(scenes)
+                    ):
+                        next_scene = scenes[i + 1]
+                        next_scene_id = str(next_scene.get("id", f"scene_{i+1}"))
+                        gap_start = timeline.get_scene_start_time(next_scene_id)
+                        if gap_start is not None:
+                            from_scene_id = str(scene.get("id", f"scene_{i}"))
+                            timeline.insert_gap(
+                                gap_start,
+                                effective_gap,
+                                description=(
+                                    f"Transition Gap ({from_scene_id} -> {next_scene_id})"
+                                ),
+                                metadata={
+                                    "type": "transition_gap",
+                                    "from_scene": from_scene_id,
+                                    "to_scene": next_scene_id,
+                                    "configured_wait_seconds": self.transition_wait_padding,
+                                    "transition_duration": t_dur,
+                                    "gap_seconds": effective_gap,
+                                },
+                            )
+                        else:
+                            logger.debug(
+                                "FinalizePhase: Could not locate start time for scene '%s' when inserting transition wait.",
+                                next_scene_id,
+                            )
                     current = out_path
+                    merged_duration = (
+                        current_duration
+                        + next_duration
+                        + (self.transition_wait_padding * 2.0)
+                        - t_dur
+                    )
+                    current_duration = max(0.0, merged_duration)
                 else:
                     # トランジション未指定なら、これまでの current を確定し次へ
                     merged.append(current)
                     current = next_path
+                    current_duration = next_duration
 
             # ループ終了後の最後の current を確定
             merged.append(current)

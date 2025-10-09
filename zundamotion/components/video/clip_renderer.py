@@ -11,6 +11,7 @@ from ...exceptions import PipelineError
 from ...utils.ffmpeg_audio import has_audio_stream
 from ...utils.ffmpeg_hw import get_hw_filter_mode, get_profile_flags, set_hw_filter_mode
 from ...utils.ffmpeg_ops import calculate_overlay_position, normalize_media
+from ...utils.subtitle_text import is_effective_subtitle_text
 from ...utils.ffmpeg_capabilities import _dump_cuda_diag_once
 from ...utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from ...utils.logger import logger
@@ -203,7 +204,7 @@ async def render_clip(
     uses_alpha_overlay = (
         any_character_visible
         or (insert_config and insert_is_image)
-        or (bool(subtitle_text) and str(subtitle_text).strip() != "")
+        or is_effective_subtitle_text(subtitle_text)
     )
     # If experimental flag is on, try GPU overlays even with RGBA inputs
     global_mode = get_hw_filter_mode()
@@ -460,13 +461,13 @@ async def render_clip(
 
     # 字幕スニペットを反映（存在時）
     subtitle_snippet = None
-    if subtitle_text and isinstance(subtitle_text, str) and subtitle_text.strip():
+    if is_effective_subtitle_text(subtitle_text):
         try:
             # この時点での字幕入力インデックスを確定
             subtitle_ffmpeg_index = len(input_layers)
             in_label_name = current_video_stream.strip("[]")
             extra_inputs, subtitle_snippet = await renderer.subtitle_gen.build_subtitle_overlay(
-                subtitle_text,
+                str(subtitle_text),
                 duration,
                 subtitle_line_config or {},
                 in_label=in_label_name,

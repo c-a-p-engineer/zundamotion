@@ -12,6 +12,7 @@ from zundamotion.cache import CacheManager
 from zundamotion.components.audio import AudioGenerator
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
+from zundamotion.utils.subtitle_text import is_effective_subtitle_text
 from zundamotion.utils.ffmpeg_params import AudioParams
 from zundamotion.utils.ffmpeg_probe import get_audio_duration
 from zundamotion.utils.text_processing import parse_reading_markup
@@ -116,6 +117,9 @@ class AudioPhase:
                         read_text = tts_from_markup
                         display_text = str(line.get("subtitle_text") or disp_from_markup)
                     text = display_text
+                    effective_subtitle_text = (
+                        display_text if is_effective_subtitle_text(display_text) else ""
+                    )
                     pbar.set_description(
                         f"Audio Generation (Scene '{scene_id}', Line {idx}: '{text[:30]}...')"
                     )
@@ -184,7 +188,9 @@ class AudioPhase:
 
                     character_name = line.get("speaker_name", "Unknown")
                     timeline.add_event(
-                        f'{character_name}: "{display_text}"', duration, text=display_text
+                        f'{character_name}: "{display_text}"',
+                        duration,
+                        text=(effective_subtitle_text or None),
                     )
 
                     # ------------------------------
@@ -286,7 +292,7 @@ class AudioPhase:
                         "type": "talk",
                         "audio_path": audio_path,
                         "duration": duration,
-                        "text": display_text,
+                        "text": effective_subtitle_text,
                         "tts_text": read_text,
                         "line_config": line,
                         "face_anim": face_anim,

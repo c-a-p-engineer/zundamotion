@@ -75,6 +75,7 @@ transition:
 - `duration`: 効果の長さ（秒）。
 - `easing`: 一部のトランジションは `easing` を追加可能（例: `ease_in_out`）。
 - シーン単位の指定で、次のシーンへ進む直前に適用されます。
+- クリップ間の音声かぶりを避けるため、トランジション適用時には `config.yaml` の `transitions.wait_padding_seconds`（デフォルト 2.0 秒）ぶんの自動 `wait` が挿入されます。
 - サンプル台本: [`sample_transitions.yaml`](./sample_transitions.yaml), [`sample_vn_minimal.yaml`](./sample_vn_minimal.yaml)。
 
 ## キャラクター表示
@@ -199,6 +200,7 @@ lines:
 
 - 複数指定可。セリフ開始からの相対秒で再生。
 - セリフ無し行でも `sound_effects` のみで使用可能。
+- `text: ""` の行は字幕が生成されず、効果音だけを再生できる。
 - サンプル: [`sample.yaml`](./sample.yaml)。
 
 ## 顔アニメ用差分素材

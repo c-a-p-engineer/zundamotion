@@ -35,6 +35,10 @@ video:
   # N 行未満ならベース生成をスキップし、背景をシーン単位で一度だけ正規化して各行へ伝搬（重複スケール回避）
   scene_base_min_lines: 6
 
+# Transition settings
+transitions:
+  wait_padding_seconds: 2.0  # Silence/stillness duration inserted before each transition boundary
+
 # Subtitle settings
 subtitle:
   font_path: "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf" # IPAexGothic font path

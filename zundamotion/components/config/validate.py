@@ -197,6 +197,23 @@ def validate_config(config: Dict[str, Any]) -> None:
                 "'defaults.characters_persist' must be a boolean."
             )
 
+    transitions_cfg = config.get("transitions")
+    if transitions_cfg is not None:
+        if not isinstance(transitions_cfg, dict):
+            raise ValidationError(
+                "'transitions' section must be a dictionary when provided."
+            )
+        wait_padding = transitions_cfg.get("wait_padding_seconds")
+        if wait_padding is not None:
+            if not isinstance(wait_padding, (int, float)):
+                raise ValidationError(
+                    "'transitions.wait_padding_seconds' must be a number."
+                )
+            if wait_padding < 0:
+                raise ValidationError(
+                    "'transitions.wait_padding_seconds' must be non-negative."
+                )
+
     scenes = script.get("scenes")
     if not isinstance(scenes, list):
         raise ValueError("Script must contain a 'scenes' list.")

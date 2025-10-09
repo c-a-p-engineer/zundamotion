@@ -163,8 +163,6 @@ async def concat_videos_copy(
     finally:
         if os.path.exists(list_file_path):
             os.remove(list_file_path)
-
-
 async def apply_transition(
     input_video1_path: str,
     input_video2_path: str,
@@ -175,11 +173,13 @@ async def apply_transition(
     video_params: VideoParams,
     audio_params: AudioParams,
     ffmpeg_path: str = "ffmpeg",
+    wait_padding: float = 0.0,
 ):
     """
     映像: xfade、音声: acrossfade でクロスフェード。
     - デコード＆フィルタ: CPU
     - エンコード: HW（存在すれば）/ CPU
+    - 映像/音声ともにトランジション直前後へ構成済みのウェイトを自動付与
     """
     has_a1 = await has_audio_stream(input_video1_path)
     has_a2 = await has_audio_stream(input_video2_path)
@@ -188,42 +188,69 @@ async def apply_transition(
     video_opts = video_params.to_ffmpeg_opts(hw_kind)
     audio_opts = audio_params.to_ffmpeg_opts()
 
+    wait_padding = max(0.0, wait_padding)
+    xfade_offset = max(0.0, offset + wait_padding)
+
     cmd = [ffmpeg_path, "-y", *get_profile_flags()]
     cmd.extend(_threading_flags(ffmpeg_path))
     cmd.extend(["-i", input_video1_path, "-i", input_video2_path])
 
-    vf = f"[0:v][1:v]xfade=transition={transition_type}:duration={duration}:offset={offset}[v]"
-    parts = [vf]
+    filter_parts = []
+
+    v0_label = "0:v"
+    v1_label = "1:v"
+    if wait_padding > 0:
+        filter_parts.append(
+            f"[0:v]tpad=stop_mode=clone:stop_duration={wait_padding:.3f}[v0pad]"
+        )
+        filter_parts.append(
+            f"[1:v]tpad=start_mode=clone:start_duration={wait_padding:.3f}[v1pad]"
+        )
+        v0_label = "v0pad"
+        v1_label = "v1pad"
+
+    filter_parts.append(
+        f"[{v0_label}][{v1_label}]xfade=transition={transition_type}:duration={duration}:offset={xfade_offset:.3f}[v]"
+    )
+
+    audio_channels = max(1, int(audio_params.channels))
+    channel_layout = "stereo" if audio_channels == 2 else f"{audio_channels}c"
 
     if has_a1 and has_a2:
-        af = (
+        delay_ms = int(round(wait_padding * 1000))
+        delay_values = "|".join(str(delay_ms) for _ in range(audio_channels)) or str(delay_ms)
+        filter_parts.append(
             f"[0:a]aresample=async=1:first_pts=0,"
-            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts=stereo[a0];"
-            f"[1:a]aresample=async=1:first_pts=0,"
-            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts=stereo[a1];"
-            f"[a0][a1]acrossfade=d={duration}:c1=tri:c2=tri[a]"
+            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts={channel_layout},"
+            f"apad=pad_dur={wait_padding:.3f}[a0pad]"
         )
-        parts.append(af)
-        cmd += ["-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]"]
+        filter_parts.append(
+            f"[1:a]aresample=async=1:first_pts=0,"
+            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts={channel_layout},"
+            f"adelay={delay_values},apad=pad_dur={wait_padding:.3f}[a1pad]"
+        )
+        filter_parts.append(
+            f"[a0pad][a1pad]acrossfade=d={duration}:c1=tri:c2=tri[a]"
+        )
+        cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[v]", "-map", "[a]"]
     elif has_a1:
-        af = (
+        filter_parts.append(
             f"[0:a]aresample=async=1:first_pts=0,"
-            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts=stereo,"
-            f"afade=t=out:st={offset}:d={duration}[a]"
+            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts={channel_layout},"
+            f"apad=pad_dur={wait_padding:.3f},"
+            f"afade=t=out:st={xfade_offset:.3f}:d={duration}[a]"
         )
-        parts.append(af)
-        cmd += ["-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]"]
+        cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[v]", "-map", "[a]"]
     elif has_a2:
-        delay_ms = int(offset * 1000)
-        af = (
+        delay_ms = int(round(xfade_offset * 1000))
+        filter_parts.append(
             f"[1:a]aresample=async=1:first_pts=0,"
-            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts=stereo,"
-            f"adelay={delay_ms}:all=1,afade=t=in:st=0:d={duration}[a]"
+            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts={channel_layout},"
+            f"adelay={delay_ms}:all=1,apad=pad_dur={wait_padding:.3f},afade=t=in:st=0:d={duration}[a]"
         )
-        parts.append(af)
-        cmd += ["-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]"]
+        cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[v]", "-map", "[a]"]
     else:
-        cmd += ["-filter_complex", vf, "-map", "[v]"]
+        cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[v]"]
 
     # 映像エンコード設定
     cmd.extend(video_opts)
@@ -235,8 +262,9 @@ async def apply_transition(
         logger.debug("FFmpeg stdout:\n%s", proc.stdout)
         logger.debug("FFmpeg stderr:\n%s", proc.stderr)
         logger.info(
-            "Applied '%s' transition with audio crossfade: %s + %s -> %s",
+            "Applied '%s' transition (wait_padding=%.2fs) with audio crossfade: %s + %s -> %s",
             transition_type,
+            wait_padding,
             input_video1_path,
             input_video2_path,
             output_path,

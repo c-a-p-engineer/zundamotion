@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from ....exceptions import PipelineError
 from ....utils.logger import logger
+from ....utils.subtitle_text import is_effective_subtitle_text
 from ...subtitles import SubtitlePNGRenderer
 
 
@@ -755,14 +756,15 @@ class SceneRenderer:
                     clip_path = await self.video_renderer.apply_foreground_overlays(
                         clip_path, fg_overlays
                     )
-                subtitle_entries.append(
-                    {
-                        "text": text,
-                        "line_config": line_config,
-                        "duration": duration,
-                        "start": start_time_by_idx[idx],
-                    }
-                )
+                if is_effective_subtitle_text(text):
+                    subtitle_entries.append(
+                        {
+                            "text": text,
+                            "line_config": line_config,
+                            "duration": duration,
+                            "start": start_time_by_idx[idx],
+                        }
+                    )
                 # Collect lightweight samples for auto-tune
                 try:
                     if (
@@ -770,7 +772,7 @@ class SceneRenderer:
                     and len(self.phase._profile_samples) < self.phase.profile_limit
                     ):
                         # Heuristic: subtitle or visible characters or image insert implies CPU overlay
-                        has_subtitle = bool((line_data.get("text") or "").strip())
+                        has_subtitle = is_effective_subtitle_text(line_data.get("text"))
                         any_chars = any(
                             (c or {}).get("visible", False)
                             for c in (line.get("characters", []) or [])
