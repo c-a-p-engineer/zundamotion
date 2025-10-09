@@ -7,7 +7,7 @@ video:
 
 defaults:
   characters:
-    zundamon:
+    copetan:
       speaker_id: 3
       scale: 0.85
 
@@ -16,10 +16,10 @@ scenes:
     bg: "assets/bg/room.png"
     lines:
       - text: "高速揺れのテストです。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             visible: true
             anchor: bottom_center
             effects:
@@ -32,10 +32,10 @@ scenes:
                   type: ease_in_out
                   power: 1.2
       - text: "設定未指定の場合のデフォルト揺れです。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             visible: true
             anchor: bottom_center
             effects:

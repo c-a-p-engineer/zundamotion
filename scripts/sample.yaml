@@ -15,15 +15,15 @@ video:
 
 defaults:
   characters:
-    zundamon:
+    copetan:
       speaker_id: 3
       speed: 1.1
       pitch: 0.05
       subtitle:
         font_color: "#90EE90" # LightGreen
         stroke_color: "white"
-    metan:
-      speaker_id: 6
+    engy:
+      speaker_id: 8
       speed: 0.95
       subtitle:
         font_color: "#E6E6FA" # Lavender
@@ -40,7 +40,7 @@ subtitle:
   reading_display: paren
 
 scenes:
-  - id: subtitle_zundamon
+  - id: subtitle_copetan
     bg: "assets/bg/room.png"
     fg_overlays:
       - id: sakura
@@ -75,29 +75,29 @@ scenes:
           start: 0.0
           duration: 5.0
     lines:
-      - text: "こんにちは！ずんだもんです。この字幕はキャラクターデフォルト色なのだ。"
-        speaker_name: "zundamon"
+      - text: "こんにちは！こぴぺたんです。この字幕はキャラクターデフォルト色なのだ。"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             enter: true
             enter_duration: 0.5 # 登場→0.5秒後に音声開始
             anchor: bottom_center
             scale: 0.8
 
       - text: "このセリフだけ、字幕の色を変えてみるのだ。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         subtitle:
           font_color: "yellow" # この行だけデフォルトを上書き
 
-      - text: "私は四国めたん。私の字幕もデフォルト設定よ。"
-        speaker_name: "metan"
+      - text: "私はエンジー。私の字幕もデフォルト設定よ。"
+        speaker_name: "engy"
         characters:
-          - name: "zundamon"
+          - name: "copetan"
             leave: slide_right
             leave_duration: 0.5
-          - name: "metan"
-            expression: "normal"
+          - name: "engy"
+            expression: "default"
             enter: slide_left
             anchor: bottom_center
             position:
@@ -106,16 +106,16 @@ scenes:
             scale: 0.8
 
       - text: "このプロジェクト、なかなか面白いじゃない。"
-        speaker_name: "metan"
+        speaker_name: "engy"
 
-  - id: voice_zundamon
+  - id: voice_copetan
     bg: "assets/bg/room.png"
     lines:
-      - text: "こんにちは！ずんだもんです。これは桜の前景とデフォルト設定で話しているのだ。"
-        speaker_name: "zundamon"
+      - text: "こんにちは！こぴぺたんです。これは桜の前景とデフォルト設定で話しているのだ。"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             visible: true
             anchor: "middle_left"
         fg_overlays:
@@ -148,20 +148,20 @@ scenes:
               duration: 4.0
 
       - text: "このセリフだけ、少しゆっくり話してみるのだ。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         speed: 0.9 # この行だけデフォルトを上書き
 
-      - text: "私は四国めたん。私もデフォルト設定よ。"
-        speaker_name: "metan"
+      - text: "私はエンジー。私もデフォルト設定よ。"
+        speaker_name: "engy"
         characters:
-          - name: "metan"
-            expression: "normal"
+          - name: "engy"
+            expression: "default"
             visible: true
             anchor: "middle_right"
             scale: 0.8
 
       - text: "このプロジェクト、なかなか面白いじゃない。"
-        speaker_name: "metan"
+        speaker_name: "engy"
         pitch: -0.1 # この行だけデフォルトを上書き
 
   - id: intro
@@ -175,7 +175,7 @@ scenes:
       - wait: 2
       - text: "背景ビデオと効果音、待機のテストなのだ！" # セリフテキスト (必須)
         speaker_id: 3 # 明示的にVOICEVOX ID 3 を指定
-        speaker_name: "zundamon" # 話しているキャラクターの名前
+        speaker_name: "copetan" # 話しているキャラクターの名前
         sound_effects: # セリフと同時に再生する効果音
           - path: "assets/se/rap_fanfare.mp3"
             start_time: 3.0 # セリフ開始と同時に再生
@@ -189,10 +189,10 @@ scenes:
             volume: 0.7 # (デフォルト: 1)
 
       - text: "これから自己紹介の動画をはじめるのだ。"
-        speaker_id: 3 # ずんだもんのスピーカーID
-        speaker_name: "zundamon" # 話しているキャラクターの名前
+        speaker_id: 3 # こぴぺたんのスピーカーID
+        speaker_name: "copetan" # 話しているキャラクターの名前
         characters: # キャラクター設定リスト
-          - name: "zundamon"
+          - name: "copetan"
             expression: "whisper" # voice_style: whisper を expression: whisper に変更
             position: {"x": "0", "y": "0"}
             scale: 0.8
@@ -200,11 +200,11 @@ scenes:
             visible: true
         speed: 1.1                      # 音声速度 (0.5-2.0, オプション)
       - text: "最後まで見てくれると嬉しいのだ！"
-        voice_style: whisper # キャラクター定義のwhisperスタイル（ID 22）を使用
-        speaker_name: "zundamon" # 話しているキャラクターの名前
+        voice_style: whisper # キャラクター定義のwhisperスタイルを使用
+        speaker_name: "copetan" # 話しているキャラクターの名前
         characters: # キャラクター設定リスト
-          - name: "zundamon"
-            expression: "normal" # 元のvoice_style: whisper から normal に戻す（例として）
+          - name: "copetan"
+            expression: "default" # 元のvoice_style: whisper から normal に戻す（例として）
             position: {"x": "0", "y": "0"}
             scale: 0.8
             anchor: "bottom_right"
@@ -221,60 +221,60 @@ scenes:
       volume: 0.2                       # BGM音量 (0.0-1.0, オプション)
     lines:
       - wait: 2
-      - text: "私はメタンよ" # セリフテキスト (必須)
-        speaker_id: 6 # 明示的にVOICEVOX ID 6 を指定
-        speaker_name: "metan" # 話しているキャラクターの名前
+      - text: "私はエンジーよ" # セリフテキスト (必須)
+        speaker_id: 8 # 明示的にVOICEVOX ID 8 を指定
+        speaker_name: "engy" # 話しているキャラクターの名前
         characters: # キャラクター設定リスト
-          - name: "metan"
-            expression: "normal" # voice_style: normal を expression: normal に変更
+          - name: "engy"
+            expression: "default" # voice_style: normal を expression: normal に変更
             position: {"x": "0", "y": "0"} # アンカーポイントからのオフセット (ピクセル単位)
             scale: 0.8
             anchor: "middle_center"
             visible: true
       - text: "趣味は新しいツールを試すこと！"
-        speaker_id: 6 # メタンのスピーカーID
-        speaker_name: "metan" # 話しているキャラクターの名前
+        speaker_id: 8 # エンジーのスピーカーID
+        speaker_name: "engy" # 話しているキャラクターの名前
         characters: # キャラクター設定リスト
-          - name: "metan"
-            expression: "normal" # voice_style: normal を expression: normal に変更
+          - name: "engy"
+            expression: "default" # voice_style: normal を expression: normal に変更
             position: {"x": "0", "y": "0"}
             scale: 0.8
             anchor: "bottom_center"
             visible: true
         speed: 0.95                     # 音声速度 (0.5-2.0, オプション)
       - text: "このチャンネルでは、便利なスクリプトや動画制作のコツを紹介するのよ。"
-        speaker_id: 6 # 明示的にVOICEVOX ID 6 を指定
-        speaker_name: "metan" # 話しているキャラクターの名前
+        speaker_id: 8 # 明示的にVOICEVOX ID 8 を指定
+        speaker_name: "engy" # 話しているキャラクターの名前
 
   # 読み分けデモ（インライン/行オプション）
   - id: reading_demo
     bg: "assets/bg/room.png"
     lines:
-      - speaker_name: "zundamon"
+      - speaker_name: "copetan"
         # インライン読みマークアップ: [表示|読み] と 波括弧: 表示{読み}
         text: "それ[本気|ホンキ]？[本気|マジ]？ 本気{マジ}でいく？"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             visible: true
             anchor: "bottom_center"
             position: {"x": "0", "y": "0"}
             scale: 0.8
 
-      - speaker_name: "zundamon"
+      - speaker_name: "copetan"
         # 行全体の読みを差し替える例（インライン無しでもOK）
         text: "本気です！"
         reading: "マジです！"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             visible: true
             anchor: "bottom_center"
             position: {"x": "0", "y": "0"}
             scale: 0.8
         characters: # キャラクター設定リスト
-          - name: "metan"
-            expression: "normal" # voice_style: normal を expression: normal に変更
+          - name: "engy"
+            expression: "default" # voice_style: normal を expression: normal に変更
             position: {"x": "0", "y": "0"}
             scale: 0.8
             anchor: "bottom_center"
@@ -293,15 +293,15 @@ scenes:
       - wait: 2
       - text: "今日は見てくれて、ありがとうなのだ！" # セリフテキスト (必須)
         speaker_id: 3 # キャラクター名 (必須, assets/characters/以下にディレクトリが存在すること)
-        speaker_name: "zundamon" # 話しているキャラクターの名前
+        speaker_name: "copetan" # 話しているキャラクターの名前
         characters: # キャラクター設定リスト
-          - name: "zundamon"
-            expression: "normal" # expression を normal に設定
+          - name: "copetan"
+            expression: "default" # expression を normal に設定
             position: {"x": "300", "y": "500"}
             visible: true
       - text: "（画像を右下に小さく表示するのだ）"
         speaker_id: 3
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         insert:
           path: "assets/bg/room.png"
           duration: 3.0
@@ -310,7 +310,7 @@ scenes:
           position: {"x": "-20", "y": "-20"}
       - text: "（動画を再生するのだ！）"
         speaker_id: 3
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         insert:
           path: "assets/bg/countdown.mp4"
           scale: 0.8
@@ -318,11 +318,11 @@ scenes:
           position: {"x": "20", "y": "20"}
           volume: 0.2
       - text: "チャンネル登録と高評価、よろしくお願いします！"
-        speaker_id: 3 # ずんだもんのスピーカーID
-        speaker_name: "zundamon" # 話しているキャラクターの名前
+        speaker_id: 3 # こぴぺたんのスピーカーID
+        speaker_name: "copetan" # 話しているキャラクターの名前
         characters: # キャラクター設定リスト
-          - name: "zundamon"
-            expression: "normal" # expression を normal に設定
+          - name: "copetan"
+            expression: "default" # expression を normal に設定
             position: {"x": "300", "y": "500"}
             visible: true
         speed: 1.05                     # 音声速度 (0.5-2.0, オプション)

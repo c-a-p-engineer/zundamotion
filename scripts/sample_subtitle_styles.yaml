@@ -5,7 +5,7 @@ meta:
 defaults:
   characters_persist: true
   characters:
-    zundamon:
+    copetan:
       speaker_id: 3
 
 scenes:
@@ -13,10 +13,10 @@ scenes:
     bg: "assets/bg/room.png"
     lines:
       - text: "基本の字幕。標準の半透明黒背景を確認します。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
 
       - text: "角丸と太めの枠線、広めの余白を指定した例です。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         subtitle:
           background:
             color: "#0041FF"
@@ -28,7 +28,7 @@ scenes:
             padding: {left: 96, right: 96, top: 32, bottom: 32}
 
       - text: "背景を薄くしてアクセントカラーの枠を付けます。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         subtitle:
           background:
             color: "#111111"
@@ -42,7 +42,7 @@ scenes:
       - text: |-
           背景画像を貼り付けたサンプルです。
           透過率を調整しつつ角丸で切り抜きます。
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         subtitle:
           background:
             image: "assets/bg/room.png"
@@ -53,7 +53,7 @@ scenes:
             padding: {x: 56, y: 24}
 
       - text: "背景を完全にオフにしてテキストのみ表示する例です。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         subtitle:
           box_color: null
           background:

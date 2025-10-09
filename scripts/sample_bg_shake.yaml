@@ -7,7 +7,7 @@ video:
 
 defaults:
   characters:
-    zundamon:
+    copetan:
       speaker_id: 3
       speed: 1.1
       pitch: 0.05
@@ -20,10 +20,10 @@ scenes:
     bg: "assets/bg/room.png"
     lines:
       - text: "背景だけを使ったカメラ揺れエフェクトです。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             enter: true
             enter_duration: 0.5 # 登場→0.5秒後に音声開始
             anchor: bottom_center

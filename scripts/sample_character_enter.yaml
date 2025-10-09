@@ -4,67 +4,67 @@ meta:
 
 defaults:
   characters:
-    zundamon:
+    copetan:
       speaker_id: 3
-    metan:
-      speaker_id: 6
+    engy:
+      speaker_id: 8
 
 scenes:
-  - id: enter_demo
+  - id: character_entry_showcase
     bg: "assets/bg/room.png"
     lines:
       - text: "フェードイン"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             enter: true
             enter_duration: 0.5  # 登場完了後に音声開始
             anchor: middle_left
             scale: 0.8
       - text: "フェードアウト"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
+          - name: "copetan"
             leave: true
             leave_duration: 0.5  # 音声終了後に退場
       - text: "左からスライド"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             enter: slide_left
             enter_duration: 0.5
             anchor: middle_left
             scale: 0.8
       - text: "右からスライド"
-        speaker_name: "metan"
+        speaker_name: "engy"
         characters:
-          - name: "metan"
-            expression: "normal"
+          - name: "engy"
+            expression: "default"
             enter: slide_right
             enter_duration: 0.5
             anchor: middle_right
             scale: 0.8
       - text: "クールな僕は無言で去るぜ！"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
       - text: ""
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
+          - name: "copetan"
             leave: slide_left
             leave_duration: 0.5
             anchor: middle_left
-      - text: "ずんんだもんを追いかけるわ"
-        speaker_name: "metan"
+      - text: "こぴぺたんを追いかけるわ"
+        speaker_name: "engy"
         characters:
-          - name: "metan"
+          - name: "engy"
       - text: "まてーーーー"
-        speaker_name: "metan"
+        speaker_name: "engy"
         characters:
-          - name: "metan"
-            expression: "normal"
+          - name: "engy"
+            expression: "default"
             leave: slide_left
-            enter_duration: 0.5
+            leave_duration: 0.5
             anchor: middle_right
             scale: 0.8

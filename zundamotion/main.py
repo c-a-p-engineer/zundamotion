@@ -1,6 +1,7 @@
 """コマンドラインから動画生成パイプラインを実行するエントリポイント。"""
 
 import argparse
+import os
 import sys
 import time
 import traceback
@@ -123,8 +124,9 @@ async def main() -> None:
 
     # Resolve default output if not explicitly provided
     if not args.output:
+        script_name = os.path.splitext(os.path.basename(args.script_path))[0]
         ts = time.strftime("%Y%m%d_%H%M%S")
-        args.output = f"output/final_{ts}.mp4"
+        args.output = f"output/{script_name}_{ts}.mp4"
 
     # Ensure output directory exists
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)

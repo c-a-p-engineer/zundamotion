@@ -8,7 +8,7 @@ video:
 defaults:
   characters_persist: true
   characters:
-    zundamon:
+    copetan:
       speaker_id: 3
       scale: 0.85
       anchor: bottom_center
@@ -18,17 +18,17 @@ scenes:
     bg: "assets/bg/room.png"
     lines:
       - text: "デフォルト設定のスウェイで軽い重心移動を付けています。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
+          - name: "copetan"
             visible: true
-            expression: "normal"
+            expression: "default"
             effects:
               - "char:sway_char"
       - text: "振幅を大きくしてゆったりした横揺れにしました。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
+          - name: "copetan"
             expression: "smile"
             effects:
               - type: "char:sway_char"
@@ -39,10 +39,10 @@ scenes:
                   type: ease_in_out
                   power: 1.6
       - text: "中央位置を少し右に寄せ、位相をずらして戻りから始めています。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             effects:
               - type: "char:sway_char"
                 amplitude: 18
@@ -51,10 +51,10 @@ scenes:
                 phase_offset_deg: 180
                 easing: linear
       - text: "ボブと組み合わせると柔らかな八の字揺れになります。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             effects:
               - type: "char:sway_char"
                 amplitude:

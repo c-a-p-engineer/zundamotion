@@ -15,27 +15,27 @@ scenes:
     bg: "assets/bg/room.png"
     lines:
       - text: "デフォルト設定のジャンプで字幕を弾ませます。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         speaker_id: 3
         subtitle:
           effects:
             - type: "text:bounce_text"
       - text: "振幅を大きめにしてダイナミックに弾ませています。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         speaker_id: 3
         subtitle:
           effects:
             - type: "text:bounce_text"
               amplitude: 48
       - text: "振幅を控えめにして軽い跳ねにしています。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         speaker_id: 3
         subtitle:
           effects:
             - type: "text:bounce_text"
               amplitude: 20
       - text: "最小振幅で細やかなバウンドを維持しています。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         speaker_id: 3
         subtitle:
           effects:

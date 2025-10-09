@@ -7,7 +7,7 @@ video:
 
 defaults:
   characters:
-    zundamon:
+    copetan:
       speaker_id: 3
       scale: 0.85
       anchor: bottom_center
@@ -18,9 +18,9 @@ scenes:
     bg: "assets/bg/room.png"
     lines:
       - text: "クライマックスの爆発！ 画面全体が揺れる演出です。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
+          - name: "copetan"
             expression: "excited"
             visible: true
             anchor: bottom_center
@@ -35,10 +35,10 @@ scenes:
               power: 1.1
             padding: 24
       - text: "徐々に収束する穏やかな揺れも指定できます。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             visible: true
             anchor: bottom_center
         screen_effects:

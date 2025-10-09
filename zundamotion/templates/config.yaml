@@ -65,7 +65,7 @@ subtitle:
 
 # Voice settings (VOICEVOX defaults)
 voice:
-  speaker_id: 1      # Zundamon (Normal)
+  speaker_id: 3      # Example: Copetan (normal voice)
   speed: 1.0
   pitch: 0.0
 
@@ -76,14 +76,14 @@ characters:
   # top_left, top_center, top_right, middle_left, middle_center, middle_right,
   # bottom_left, bottom_center, bottom_right
   default_anchor: "bottom_center"
-  zundamon:
-    default_speaker_id: 3 # VOICEVOXのずんだもんのデフォルトID
+  copetan:
+    default_speaker_id: 3 # 例: VOICEVOXでのこぴぺたん通常ボイスID
     voice_styles:
       normal: 3
       whisper: 22
       angry: 7
-  metan:
-    default_speaker_id: 6 # VOICEVOXの四国めたんのデフォルトID
+  engy:
+    default_speaker_id: 8 # 例: VOICEVOXでのエンジー通常ボイスID
 
 # BGM settings
 bgm:

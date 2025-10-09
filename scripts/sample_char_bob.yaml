@@ -8,7 +8,7 @@ video:
 defaults:
   characters_persist: true
   characters:
-    zundamon:
+    copetan:
       speaker_id: 3
       scale: 0.85
       anchor: bottom_center
@@ -18,18 +18,18 @@ scenes:
     bg: "assets/bg/room.png"
     lines:
       - text: "デフォルト設定のボブで自然な呼吸感を出しています。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
+          - name: "copetan"
             visible: true
-            expression: "normal"
+            expression: "default"
             effects:
               - "char:bob_char"
       - text: "振幅と周波数を下げて、落ち着いた頷きとしています。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             effects:
               - type: "char:bob_char"
                 amplitude: 18
@@ -38,10 +38,10 @@ scenes:
                   type: ease_in_out
                   power: 1.8
       - text: "少し身長を低く見せつつ、位相をずらして上からスタート。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             effects:
               - type: "char:bob_char"
                 amplitude: 14
@@ -51,10 +51,10 @@ scenes:
                 phase_offset_deg: 90
                 easing: linear
       - text: "横揺れと組み合わせると、柔らかな重心移動になります。"
-        speaker_name: "zundamon"
+        speaker_name: "copetan"
         characters:
-          - name: "zundamon"
-            expression: "normal"
+          - name: "copetan"
+            expression: "default"
             effects:
               - type: "char:shake_char"
                 amplitude:

@@ -1,0 +1,63 @@
+meta:
+  title: "シーントランジション比較サンプル"
+  version: 1
+
+defaults:
+  characters:
+    copetan:
+      speaker_id: 3
+    engy:
+      speaker_id: 8
+
+scenes:
+  - id: fade_intro
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "ここからフェードアウトするのだ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "default"
+            enter: true
+            anchor: bottom_center
+            position:
+              x: -380
+              y: -40
+            scale: 0.85
+      - text: "次のシーンとの切り替えに注目してね。"
+        speaker_name: "engy"
+        characters:
+          - name: "engy"
+            expression: "default"
+            enter: true
+            anchor: bottom_center
+            position:
+              x: 380
+              y: -40
+            scale: 0.85
+    transition:
+      type: "fade"
+      duration: 1.0
+
+  - id: wipe_demo
+    bg: "assets/bg/street.png"
+    lines:
+      - wait: 0.5
+      - text: "ここではワイプ系のトランジションを試すのよ。"
+        speaker_name: "engy"
+      - text: "トランジションの種類は `type` で切り替えるのだ。"
+        speaker_name: "copetan"
+    transition:
+      type: "wipeleft"
+      duration: 0.9
+
+  - id: dissolve_outro
+    bg: "assets/bg/sunset.png"
+    lines:
+      - text: "最後はクロスディゾルブで柔らかく締めるのだ。"
+        speaker_name: "copetan"
+      - text: "お疲れさま、またね！"
+        speaker_name: "engy"
+    transition:
+      type: "dissolve"
+      duration: 0.8

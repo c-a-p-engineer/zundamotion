@@ -45,9 +45,9 @@ Zundamotionは、VOICEVOXによる高品質な音声合成とFFmpegを用いた�
 ```yaml
 lines:
   - text: "これから自己紹介の動画をはじめるのだ。"
-    speaker_name: "zundamon"
+    speaker_name: "copetan"
     characters: # キャラクター設定リスト
-      - name: "zundamon"
+      - name: "copetan"
         expression: "whisper"
         position: {"x": "0", "y": "0"}
         scale: 0.8
@@ -205,7 +205,7 @@ scenes:
       fade_in_duration: 2.0             # フェードインの長さ (秒, オプション)
       fade_out_duration: 1.5            # フェードアウトの長さ (秒, オプション)
     lines:
-      - text: "こんにちは！ずんだもんです。"
+      - text: "こんにちは！こぴぺたんです。"
 
 ### 🔤 読み分け（音声と字幕の分離）
 
@@ -216,7 +216,7 @@ scenes:
   - id: example
     bg: "assets/bg/room.png"
     lines:
-      - speaker_name: zundamon
+      - speaker_name: copetan
         text: "本気"            # 字幕に表示する文字列（タイムラインもこちらを使用）
         reading: "マジ"         # 音声合成で読む文字列（省略時は text を使用）
         # 必要に応じて字幕だけ個別に差し替えたい場合:
@@ -428,7 +428,7 @@ lines:
 
 ```yaml
 lines:
-  - text: "こんにちは！ずんだもんです。"
+  - text: "こんにちは！こぴぺたんです。"
     speaker_id: 3
     sound_effects: # セリフと同時に再生する効果音
       - path: "assets/se/rap_fanfare.mp3"
@@ -516,14 +516,14 @@ lines:
 
 ## 🖼️ キャラクター画像の設定
 
-キャラクター画像は、`assets/characters/` ディレクトリ以下に、キャラクター名と表情ごとに配置します。
-ファイルパスは `assets/characters/{キャラクター名}/{表情}.png` の形式に従います。
+キャラクター画像は、`assets/characters/` ディレクトリ以下に、キャラクター名と表情ごとのフォルダを用意して配置します。
+各表情フォルダには少なくとも `base.png` を置き、必要に応じて `eyes/` や `mouth/` の差分を追加します（後述）。
 
 **例:**
-- ずんだもんの通常の表情: `assets/characters/zundamon/normal.png`
-- ずんだもんのささやき表情: `assets/characters/zundamon/whisper.png`
+- こぴぺたんの通常の表情: `assets/characters/copetan/default/base.png`
+- こぴぺたんの笑顔の表情: `assets/characters/copetan/smile/base.png`
 
-もし指定された表情の画像ファイルが存在しない場合、システムは自動的に `assets/characters/{キャラクター名}/default.png` を探してフォールバックします。
+もし指定された表情の画像ファイルが存在しない場合、システムは自動的に `assets/characters/{キャラクター名}/default/base.png` を探してフォールバックします。
 
 ### Copetan 表情セット
 
@@ -541,7 +541,7 @@ Copetan は 8 種類の表情を `assets/characters/copetan/<expression>/` に�
 | `smug` | `assets/characters/copetan/smug/` | 得意げなニヤリ顔 | 口元に余裕の笑み |
 
 > `exasperated` 以外の表情名はフォルダ命名と YAML の表情 ID が一致しています。台本内で `expression:` に上記 ID を指定することで、該当フォルダの差分素材が読み込まれます。
-そのため、各キャラクターには少なくとも `default.png` を用意しておくことを推奨します。
+そのため、各キャラクターには少なくとも `default/base.png` を用意しておくことを推奨します。
 
 ### 口パク/目パチ用の差分PNG（任意）
 
@@ -570,18 +570,18 @@ video:
 
 #### 差分PNG配置ガイド（具体例）
 
-- 準備するファイル（ずんだもんの例）:
-  - `assets/characters/zundamon/default.png`（既存の立ち絵）
-  - `assets/characters/zundamon/mouth/close.png`
-  - `assets/characters/zundamon/mouth/half.png`
-  - `assets/characters/zundamon/mouth/open.png`
-  - `assets/characters/zundamon/eyes/open.png`
-  - `assets/characters/zundamon/eyes/close.png`
+- 準備するファイル（こぴぺたんの例）:
+  - `assets/characters/copetan/default/base.png`（既存の立ち絵）
+  - `assets/characters/copetan/default/mouth/close.png`
+  - `assets/characters/copetan/default/mouth/half.png`
+  - `assets/characters/copetan/default/mouth/open.png`
+  - `assets/characters/copetan/default/eyes/open.png`
+  - `assets/characters/copetan/default/eyes/close.png`
 - ファイル仕様:
-  - キャンバス: 立ち絵 `default.png` と同じ幅・高さ。
+  - キャンバス: 立ち絵 `default/base.png` と同じ幅・高さ。
   - 背景: 透明（PNGのアルファ）。
   - 描画範囲: 口/目の差分部分のみ描画し、それ以外は完全に透明にします。
-  - 位置合わせ: `default.png` に対してピクセル単位で一致させてください（同一座標系）。
+  - 位置合わせ: `default/base.png` に対してピクセル単位で一致させてください（同一座標系）。
   - ネーミング: 上記の固定ファイル名のみを参照します。大文字/拡張子違いは不可。
 - 動作メモ:
   - 口は `close` が常時、`half`/`open` は音量しきい値を満たす時間だけ重なります。
@@ -686,15 +686,15 @@ python -m zundamotion.main scripts/sample.yaml --no-subtitle-file
 ```yaml
 defaults:
   characters:
-    zundamon:
+    copetan:
       speaker_id: 3
       pitch: 0.1
       speed: 1.1
       subtitle:
         font_color: "#90EE90"
         stroke_color: "white"
-    metan:
-      speaker_id: 6
+    engy:
+      speaker_id: 8
       speed: 0.95
       subtitle:
         font_color: "#E6E6FA"
@@ -841,7 +841,7 @@ VOICEVOXの利用に関しては、キャラクターごとに商用利用の可
 ```
 assets/
   characters/
-    zundamon/
+    copetan/
       default/
         base.png
         mouth/
@@ -870,9 +870,9 @@ assets/
 
 移行について（このリポジトリの既存素材）
 
-- `assets/characters/zundamon/default/base.png` を作成し、既存の `default.png` を反映しました。
-- `assets/characters/zundamon/default/mouth/*` と `default/eyes/*` を既存の `mouth/*`, `eyes/*` からコピーして配置しました（互換のため元ファイルも残しています）。
-- `assets/characters/metan/default/base.png` を作成し、既存の `default.png` を反映しました（従来ファイルは互換のため残しています）。
+- Copetan と Engy の立ち絵は `default/` 配下に統一済みです（`base.png`＋`mouth/`＋`eyes/`）。
+- 旧来の `default.png` や `mouth/*` 直下のファイルは整理済みで、今後はディレクトリ構成版のみを管理対象とします。
+- ずんだもん／めたん素材はリポジトリから削除しました。必要に応じて各自のプロジェクトで管理してください。
 
 注意
 

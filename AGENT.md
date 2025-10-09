@@ -189,3 +189,7 @@ output_contract:
   constraints:
     - I/Oはモック/スタブで分離
     - 不明点は妥当な仮定を明示して前進
+
+# === Improvement Suggestions ===
+- 自動チェックでサンプルYAMLに登場するアセットパスと実ファイルを突き合わせる仕組みを追加したいです（CIで検知できると破損を早期に防げます）。
+- VOICEVOXスピーカーIDの最新対応表をドキュメント化し、Copetan/Engy以外を追加する際の手順を整理したいです。

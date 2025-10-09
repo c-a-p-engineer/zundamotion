@@ -1,0 +1,114 @@
+meta:
+  title: "VNモード定番サンプル"
+  version: 2
+
+defaults:
+  characters_persist: true
+  characters:
+    copetan:
+      speaker_id: 3
+      subtitle:
+        font_color: "#90EE90"
+        stroke_color: "#003300"
+    engy:
+      speaker_id: 8
+      subtitle:
+        font_color: "#E6E6FA"
+        stroke_color: "#1C1C1C"
+
+scenes:
+  - id: morning_scene
+    bg: "assets/bg/room.png"
+    bgm:
+      path: "assets/bgm/intro.wav"
+      volume: 0.12
+      fade_in_duration: 1.0
+    lines:
+      - text: "おはよう！こぴぺたんなのだ。今日も元気にいくのだ！"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "default"
+            enter: slide_left
+            enter_duration: 0.6
+            anchor: bottom_center
+            position:
+              x: -420
+              y: -40
+            scale: 0.85
+      - text: "私はエンジー。朝からテンションが高いわね。"
+        speaker_name: "engy"
+        characters:
+          - name: "engy"
+            expression: "default"
+            enter: slide_right
+            enter_duration: 0.6
+            anchor: bottom_center
+            position:
+              x: 420
+              y: -40
+            scale: 0.85
+      - text: "VNモードなら次の行でも立ち絵が残るのだ。"
+        speaker_name: "copetan"
+        subtitle:
+          font_color: "#FFFFFF"
+          stroke_color: "#444444"
+      - wait: 0.6
+      - text: "表情だけ差し替えたいときは差分だけ記述すればOKよ。"
+        speaker_name: "engy"
+        characters:
+          - name: "engy"
+            expression: "wink"
+      - text: "よーし、次のシーンへ移動するのだ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "smile"
+    transition:
+      type: "fade"
+      duration: 0.8
+
+  - id: evening_scene
+    bg: "assets/bg/sunset.png"
+    bgm:
+      path: "assets/bgm/sunset.wav"
+      volume: 0.18
+      fade_in_duration: 0.8
+      fade_out_duration: 0.8
+    lines:
+      - wait: 0.4
+      - text: "夕方の空がきれいね。背景が切り替わっても立ち絵は維持されるわ。"
+        speaker_name: "engy"
+        characters:
+          - name: "engy"
+            expression: "smile"
+      - text: "画面全体エフェクトも上乗せできるのだ。"
+        speaker_name: "copetan"
+        screen_effects:
+          - type: "screen:shake_screen"
+            amplitude:
+              x: 12
+              y: 12
+            freq: 6.0
+            easing: ease_out
+            padding: 32
+      - text: "そろそろエンディングなのだ。"
+        speaker_name: "copetan"
+      - wait: 0.5
+      - text: "明日も一緒にがんばりましょう。"
+        speaker_name: "engy"
+        characters:
+          - name: "engy"
+            expression: "default"
+      - text: "またね！"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            leave: slide_left
+            leave_duration: 0.6
+          - name: "engy"
+            leave: slide_right
+            leave_duration: 0.6
+    transition:
+      type: "dissolve"
+      duration: 0.8
