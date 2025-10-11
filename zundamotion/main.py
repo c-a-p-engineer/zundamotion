@@ -13,7 +13,7 @@ if str(project_root) not in sys.path:
 
 import asyncio
 
-from zundamotion.exceptions import ValidationError
+from zundamotion.exceptions import DependencyError, ValidationError
 from zundamotion.pipeline import run_generation
 from zundamotion.utils.logger import (
     KVLogger,
@@ -21,6 +21,7 @@ from zundamotion.utils.logger import (
     setup_logging,
     shutdown_logging,
 )
+from zundamotion.utils.dependency_checks import ensure_ffmpeg_dependencies
 
 
 async def main() -> None:
@@ -122,6 +123,19 @@ async def main() -> None:
     setup_logging(log_json=args.log_json, log_kv=args.log_kv)
     logger: KVLogger = get_logger()  # Explicitly type hint logger as KVLogger
 
+    # Ensure FFmpeg/ffprobe dependencies are available before proceeding
+    try:
+        await ensure_ffmpeg_dependencies(logger)
+    except DependencyError as e:
+        logger.kv_error(
+            "必須依存ツールの検証に失敗したため処理を中断します。",
+            kv_pairs={
+                "Event": "DependencyCheckFailed",
+                "Message": str(e),
+            },
+        )
+        sys.exit(1)
+
     # Resolve default output if not explicitly provided
     if not args.output:
         script_name = os.path.splitext(os.path.basename(args.script_path))[0]
@@ -164,6 +178,24 @@ async def main() -> None:
                 "Duration": f"{elapsed_time:.2f}s",
             },
         )
+    except DependencyError as e:
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        logger.kv_error(
+            "依存関係エラーにより処理を中断しました。",
+            kv_pairs={
+                "Event": "DependencyError",
+                "Message": str(e),
+            },
+        )
+        logger.kv_error(
+            f"Total execution time before error: {elapsed_time:.2f} seconds.",
+            kv_pairs={
+                "Event": "TotalExecutionTimeOnError",
+                "Duration": f"{elapsed_time:.2f}s",
+            },
+        )
+        sys.exit(1)
     except ValidationError as e:
         end_time = time.time()  # Record end time even on error
         elapsed_time = end_time - start_time

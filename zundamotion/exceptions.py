@@ -41,3 +41,14 @@ class CacheError(Exception):
 
     def __str__(self):
         return f"Cache Error: {self.message}"
+
+
+class DependencyError(Exception):
+    """外部コマンドなど環境依存ツールの未整備を表す例外。"""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+    def __str__(self) -> str:
+        return f"Dependency Error: {self.message}"

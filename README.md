@@ -144,6 +144,7 @@ lines:
 ### 1. 必要ツールのインストール
 - [Docker](https://www.docker.com/get-started/)
 - [FFmpeg](https://ffmpeg.org/download.html) (システムにインストールされている必要があります)
+  - CLI起動時に`ffmpeg`/`ffprobe`のバージョンを自動検証し、FFmpeg 7.x未満や未インストールの場合は実行前にエラーで停止します。
 - [VS Code](https://code.visualstudio.com/)
 - [Remote - Containers 拡張機能](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) (VS Code)
 
