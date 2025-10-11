@@ -1,8 +1,93 @@
+import re
 from pathlib import Path
 from typing import Any, Dict
 
 from ...exceptions import ValidationError
 
+
+BACKGROUND_FIT_CHOICES = {
+    "stretch",
+    "contain",
+    "cover",
+    "fit_width",
+    "fit_height",
+}
+
+ANCHOR_CHOICES = {
+    "top_left",
+    "top_center",
+    "top_right",
+    "middle_left",
+    "middle_center",
+    "middle_right",
+    "bottom_left",
+    "bottom_center",
+    "bottom_right",
+}
+
+HEX_COLOR_RE = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+RGB_COLOR_RE = re.compile(r"^rgba?\(.*\)$", re.IGNORECASE)
+HSL_COLOR_RE = re.compile(r"^hsla?\(.*\)$", re.IGNORECASE)
+
+
+def _is_valid_color_string(value: str) -> bool:
+    if HEX_COLOR_RE.match(value):
+        return True
+    if RGB_COLOR_RE.match(value) or HSL_COLOR_RE.match(value):
+        return True
+    if value.lower().startswith("0x"):
+        try:
+            int(value[2:], 16)
+            return True
+        except ValueError:
+            return False
+    if value.isalpha():
+        return True
+    return False
+
+
+def _validate_background_options(
+    cfg: Dict[str, Any], container_id: str
+) -> None:
+    fit = cfg.get("fit")
+    if fit is not None:
+        if not isinstance(fit, str):
+            raise ValidationError(
+                f"Background fit for {container_id} must be a string."
+            )
+        if fit.lower() not in BACKGROUND_FIT_CHOICES:
+            raise ValidationError(
+                f"Background fit for {container_id} must be one of {sorted(BACKGROUND_FIT_CHOICES)}."
+            )
+
+    fill_color = cfg.get("fill_color")
+    if fill_color is not None:
+        if not isinstance(fill_color, str) or not _is_valid_color_string(fill_color):
+            raise ValidationError(
+                f"Background fill_color for {container_id} must be a valid color string."
+            )
+
+    anchor = cfg.get("anchor")
+    if anchor is not None:
+        if not isinstance(anchor, str) or anchor not in ANCHOR_CHOICES:
+            raise ValidationError(
+                f"Background anchor for {container_id} must be one of {sorted(ANCHOR_CHOICES)}."
+            )
+
+    position = cfg.get("position")
+    if position is not None:
+        if not isinstance(position, dict):
+            raise ValidationError(
+                f"Background position for {container_id} must be a dictionary."
+            )
+        for axis in ("x", "y"):
+            val = position.get(axis)
+            if val is None:
+                continue
+            if not isinstance(val, (int, float, str)):
+                raise ValidationError(
+                    f"Background position '{axis}' for {container_id} must be a number or string expression."
+                )
 
 def _validate_fg_overlays(container: Dict[str, Any], container_id: str) -> None:
     """Validate foreground overlay configuration for a scene or line.
@@ -185,6 +270,22 @@ def validate_config(config: Dict[str, Any]) -> None:
     ValidationError
         If domain-specific checks fail.
     """
+    video_cfg = config.get("video", {}) or {}
+    fit_mode = video_cfg.get("background_fit")
+    if fit_mode is not None:
+        if not isinstance(fit_mode, str):
+            raise ValidationError("'video.background_fit' must be a string.")
+        if fit_mode.lower() not in BACKGROUND_FIT_CHOICES:
+            raise ValidationError(
+                f"'video.background_fit' must be one of {sorted(BACKGROUND_FIT_CHOICES)}."
+            )
+
+    background_cfg = config.get("background", {}) or {}
+    if background_cfg:
+        if not isinstance(background_cfg, dict):
+            raise ValidationError("'background' section must be a dictionary.")
+        _validate_background_options(background_cfg, "global background")
+
     script = config.get("script")
     if not isinstance(script, dict):
         raise ValueError("Script data must be a dictionary under the 'script' key.")
@@ -223,6 +324,15 @@ def validate_config(config: Dict[str, Any]) -> None:
             raise ValidationError(f"Scene at index {scene_idx} must be a dictionary.")
 
         scene_id = scene.get("id", f"scene_{scene_idx}")
+        scene_background_cfg = scene.get("background")
+        if scene_background_cfg is not None:
+            if not isinstance(scene_background_cfg, dict):
+                raise ValidationError(
+                    f"Scene '{scene_id}' background must be a dictionary."
+                )
+            _validate_background_options(
+                scene_background_cfg, f"scene '{scene_id}' background"
+            )
         cp = scene.get("characters_persist")
         if cp is not None and not isinstance(cp, bool):
             raise ValidationError(
@@ -323,6 +433,17 @@ def validate_config(config: Dict[str, Any]) -> None:
             if not isinstance(line, dict):
                 raise ValidationError(
                     f"Line at scene '{scene_id}', index {line_idx} must be a dictionary."
+                )
+
+            line_background = line.get("background")
+            if line_background is not None:
+                if not isinstance(line_background, dict):
+                    raise ValidationError(
+                        f"Background override for scene '{scene_id}', line {line_idx} must be a dictionary."
+                    )
+                _validate_background_options(
+                    line_background,
+                    f"scene '{scene_id}', line {line_idx} background",
                 )
 
             _validate_fg_overlays(line, f"scene '{scene_id}', line {line_idx}")

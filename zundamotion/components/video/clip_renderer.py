@@ -10,7 +10,15 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from ...exceptions import PipelineError
 from ...utils.ffmpeg_audio import has_audio_stream
 from ...utils.ffmpeg_hw import get_hw_filter_mode, get_profile_flags, set_hw_filter_mode
-from ...utils.ffmpeg_ops import calculate_overlay_position, normalize_media
+from ...utils.ffmpeg_ops import (
+    BACKGROUND_FIT_STRETCH,
+    DEFAULT_BACKGROUND_ANCHOR,
+    DEFAULT_BACKGROUND_FILL_COLOR,
+    build_background_filter_complex,
+    build_background_fit_steps,
+    calculate_overlay_position,
+    normalize_media,
+)
 from ...utils.subtitle_text import is_effective_subtitle_text
 from ...utils.ffmpeg_capabilities import _dump_cuda_diag_once
 from ...utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
@@ -21,6 +29,14 @@ from .clip.effects import resolve_background_effects, resolve_screen_effects
 
 if TYPE_CHECKING:
     from .renderer import VideoRenderer
+
+
+def _to_offset_expr(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return str(value)
+    if value is None:
+        return "0"
+    return str(value)
 
 
 async def render_clip(
@@ -73,6 +89,42 @@ async def render_clip(
         raise ValueError("Background path is missing.")
     bg_path = Path(bg_path_str)
 
+    video_defaults = renderer.config.get("video", {}) or {}
+    background_defaults = renderer.config.get("background", {}) or {}
+    background_fit = str(
+        background_config.get(
+            "fit",
+            video_defaults.get("background_fit", BACKGROUND_FIT_STRETCH),
+        )
+    ).lower()
+    fill_color = str(
+        background_config.get(
+            "fill_color",
+            background_defaults.get("fill_color", DEFAULT_BACKGROUND_FILL_COLOR),
+        )
+        or DEFAULT_BACKGROUND_FILL_COLOR
+    )
+    anchor = (
+        background_config.get(
+            "anchor",
+            background_defaults.get("anchor", DEFAULT_BACKGROUND_ANCHOR),
+        )
+        or DEFAULT_BACKGROUND_ANCHOR
+    )
+    raw_position = background_config.get("position")
+    if not isinstance(raw_position, dict):
+        raw_position = background_defaults.get("position")
+        if not isinstance(raw_position, dict):
+            raw_position = {}
+    offset_x_expr = _to_offset_expr(raw_position.get("x"))
+    offset_y_expr = _to_offset_expr(raw_position.get("y"))
+    position_exprs = {"x": offset_x_expr, "y": offset_y_expr}
+    requires_cpu_fit = (
+        background_fit != BACKGROUND_FIT_STRETCH
+        or offset_x_expr != "0"
+        or offset_y_expr != "0"
+    )
+
     if background_config.get("type") == "video":
         try:
             # ループ済みシーンBGなど、既に正規化済みの入力はスキップ
@@ -99,6 +151,11 @@ async def render_clip(
                             audio_params=renderer.audio_params,
                             cache_manager=renderer.cache_manager,
                             ffmpeg_path=renderer.ffmpeg_path,
+                            fit_mode=background_fit,
+                            fill_color=fill_color,
+                            anchor=anchor,
+                            position=position_exprs,
+                            scale_flags=renderer.scale_flags,
                         )
 
                     # cache_manager.get_or_create は Path を返すことを期待
@@ -243,6 +300,14 @@ async def render_clip(
         use_cuda_filters = False
         use_gpu_scale_only = False
 
+    if requires_cpu_fit and (use_cuda_filters or use_gpu_scale_only):
+        logger.info(
+            "[Filters] Background fit '%s' requires CPU filters; disabling GPU background scaling.",
+            background_fit,
+        )
+        use_cuda_filters = False
+        use_gpu_scale_only = False
+
     if use_cuda_filters:
         logger.info(
             "[Filters] CUDA path: scaling/overlay on GPU (no RGBA overlays)"
@@ -282,13 +347,13 @@ async def render_clip(
 
     # 背景スケール
     pre_scaled = bool(background_config.get("pre_scaled", False))
-    fps_part = f",fps={fps}" if renderer.apply_fps_filter else ""
     opencl_upload_label: Optional[str] = None
     if pre_scaled:
         # すでに width/height/fps に整形済みのベース映像（シーンベース）
         # 無駄な再スケールを避けるため passthrough
         filter_complex_parts.append("[0:v]null[bg]")
     else:
+        fit_steps_cpu: Optional[List[str]] = None
         if use_cuda_filters:
             # CUDA: 一旦GPUへ上げてスケール＋fps。RGBA→NV12 変換はCUDA側に任せる。
             filter_complex_parts.append("[0:v]format=rgba,hwupload_cuda[hw_bg_in]")
@@ -313,16 +378,42 @@ async def render_clip(
                 filter_complex_parts.append(
                     "[bg_gpu_scaled]hwdownload,format=rgba[bg]"
                 )
-        elif renderer.gpu_overlay_backend == "opencl" and not _force_cpu and (get_hw_filter_mode() != "cpu" or renderer.allow_opencl_overlay_in_cpu_mode):
-            # OpenCL: 背景のスケールはCPUで行い、その後にGPUへアップロードして合成に回す
-            filter_complex_parts.append(
-                f"[0:v]scale={width}:{height}:flags={renderer.scale_flags}{fps_part}[bg]"
-            )
-            opencl_upload_label = "[bg_gpu]"
         else:
-            filter_complex_parts.append(
-                f"[0:v]scale={width}:{height}:flags={renderer.scale_flags}{fps_part}[bg]"
+            fit_steps_cpu = build_background_fit_steps(
+                width=width,
+                height=height,
+                fit_mode=background_fit,
+                fill_color=fill_color,
+                anchor=str(anchor),
+                offset_x=offset_x_expr,
+                offset_y=offset_y_expr,
+                scale_flags=renderer.scale_flags,
             )
+            if (
+                renderer.gpu_overlay_backend == "opencl"
+                and not _force_cpu
+                and (get_hw_filter_mode() != "cpu" or renderer.allow_opencl_overlay_in_cpu_mode)
+            ):
+                filter_complex_parts.extend(
+                    build_background_filter_complex(
+                        input_label="0:v",
+                        output_label="bg",
+                        steps=fit_steps_cpu,
+                        apply_fps=renderer.apply_fps_filter,
+                        fps=fps,
+                    )
+                )
+                opencl_upload_label = "[bg_gpu]"
+            else:
+                filter_complex_parts.extend(
+                    build_background_filter_complex(
+                        input_label="0:v",
+                        output_label="bg",
+                        steps=fit_steps_cpu,
+                        apply_fps=renderer.apply_fps_filter,
+                        fps=fps,
+                    )
+                )
 
     bg_stream_label = "[bg]"
     bg_effect_snippet = resolve_background_effects(

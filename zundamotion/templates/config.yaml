@@ -21,6 +21,7 @@ video:
   width: 1920
   height: 1080
   fps: 30
+  background_fit: stretch     # stretch | contain | cover | fit_width | fit_height
   # Performance tuning
   auto_tune: true             # Profile initial clips and adjust threads/workers
   profile_first_clips: 4      # Number of clips to profile for auto_tune
@@ -100,6 +101,8 @@ bgm:
 # Background settings
 background:
   default: "assets/bg/default.png"
+  fill_color: "#000000"       # Letterbox color applied for contain/fit modes
+  anchor: "middle_center"     # Base alignment when padding/cropping backgrounds
 
 # character presist
 defaults:

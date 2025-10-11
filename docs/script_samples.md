@@ -18,6 +18,7 @@ Zundamotion に同梱されている YAML 台本サンプルを用途別に整�
 | [`sample_char_sway.yaml`](../scripts/sample_char_sway.yaml) | `char:sway_char` の挙動 | オフセット調整と `char:bob_char` 併用 |
 | [`sample_bg_shake.yaml`](../scripts/sample_bg_shake.yaml) | 背景のみの揺れ | `bg:shake_bg` の `offset`/`padding` チューニング |
 | [`sample_text_bounce.yaml`](../scripts/sample_text_bounce.yaml) | 字幕バウンド演出 | `text:bounce_text` の振幅差分 |
+| [`sample_vertical.yaml`](../scripts/sample_vertical.yaml) | 縦長キャンバスの背景フィット | `background_fit` と `fill_color` の組み合わせ |
 | [`copetan_all_expressions.yaml`](../scripts/copetan_all_expressions.yaml) | Copetan の表情一覧 | `characters_persist` + 表情差分と口パク設定 |
 | [`engy_all_expressions.yaml`](../scripts/engy_all_expressions.yaml) | Engy の表情テンプレート | キャラクター固有のデフォルト話速・ピッチを含む |
 

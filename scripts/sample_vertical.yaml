@@ -1,0 +1,64 @@
+meta:
+  title: "縦長キャンバスと背景フィット設定サンプル"
+  version: 3
+
+video:
+  width: 1080
+  height: 1920
+  fps: 30
+  background_fit: contain
+
+background:
+  default: "assets/bg/street.png"
+  fill_color: "#0F172A"
+  anchor: "middle_center"
+
+defaults:
+  characters:
+    copetan:
+      speaker_id: 3
+      subtitle:
+        font_color: "#F5F5F5"
+        stroke_color: "#1E293B"
+
+# Subtitle settings
+subtitle:
+  font_size: 48
+  max_chars_per_line: 20 # Widen lines (~1.5x) for fewer breaks
+
+scenes:
+  - id: vertical_intro
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "縦長動画キャンバスでも背景を自動でレターボックスに合わせられます。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "default"
+            visible: true
+            anchor: bottom_center
+            position: {x: 0, y: -80}
+            scale: 0.95
+      - wait: {duration: 1.4}
+      - text: "`background_fit: contain` なら余白に `background.fill_color` が塗られます。"
+        speaker_name: "copetan"
+      - text: "シーン単位や行単位でフィットモードを切り替えることもできます。"
+        speaker_name: "copetan"
+        background:
+          fit: cover
+          anchor: top_center
+          position: {y: -120}
+  - id: skyline_pan
+    bg: "assets/bg/sunset.png"
+    lines:
+      - text: "`fit_height` を指定すると高さを優先し、左右に余白を付けたまま表示できます。"
+        speaker_name: "copetan"
+        background:
+          fit: fit_height
+          anchor: middle_center
+      - text: "アンカーと `position` を調整すると、クロップ位置を細かく制御できます。"
+        speaker_name: "copetan"
+        background:
+          fit: cover
+          anchor: bottom_center
+          position: {y: -160}

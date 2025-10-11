@@ -8,9 +8,22 @@ from typing import Any, Dict, List, Optional
 from tqdm import tqdm
 
 from ....exceptions import PipelineError
+from ....utils.ffmpeg_ops import (
+    BACKGROUND_FIT_STRETCH,
+    DEFAULT_BACKGROUND_ANCHOR,
+    DEFAULT_BACKGROUND_FILL_COLOR,
+)
 from ....utils.logger import logger
 from ....utils.subtitle_text import is_effective_subtitle_text
 from ...subtitles import SubtitlePNGRenderer
+
+
+def _to_offset_expr(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return str(value)
+    if value is None:
+        return "0"
+    return str(value)
 
 
 class SceneRenderer:
@@ -47,6 +60,63 @@ class SceneRenderer:
         self.audio_params = phase.audio_params
         self.video_extensions = phase.video_extensions
         self._norm_char_entries = phase._norm_char_entries
+
+    def _resolve_background_layout(self, line_config: Dict[str, Any]) -> Dict[str, Any]:
+        video_defaults = self.config.get("video", {}) or {}
+        background_defaults = self.config.get("background", {}) or {}
+        scene_bg_cfg = self.scene.get("background")
+        if not isinstance(scene_bg_cfg, dict):
+            scene_bg_cfg = {}
+        line_bg_cfg = line_config.get("background") if isinstance(line_config, dict) else None
+        if not isinstance(line_bg_cfg, dict):
+            line_bg_cfg = {}
+
+        fit = str(
+            line_bg_cfg.get(
+                "fit",
+                scene_bg_cfg.get(
+                    "fit",
+                    video_defaults.get("background_fit", BACKGROUND_FIT_STRETCH),
+                ),
+            )
+        ).lower()
+        fill = str(
+            line_bg_cfg.get(
+                "fill_color",
+                scene_bg_cfg.get(
+                    "fill_color",
+                    background_defaults.get(
+                        "fill_color", DEFAULT_BACKGROUND_FILL_COLOR
+                    ),
+                ),
+            )
+            or DEFAULT_BACKGROUND_FILL_COLOR
+        )
+        anchor = (
+            line_bg_cfg.get(
+                "anchor",
+                scene_bg_cfg.get(
+                    "anchor",
+                    background_defaults.get("anchor", DEFAULT_BACKGROUND_ANCHOR),
+                ),
+            )
+            or DEFAULT_BACKGROUND_ANCHOR
+        )
+        raw_position = line_bg_cfg.get("position")
+        if not isinstance(raw_position, dict):
+            raw_position = scene_bg_cfg.get("position")
+            if not isinstance(raw_position, dict):
+                raw_position = background_defaults.get("position")
+                if not isinstance(raw_position, dict):
+                    raw_position = {}
+        offset_x = _to_offset_expr(raw_position.get("x"))
+        offset_y = _to_offset_expr(raw_position.get("y"))
+        return {
+            "fit": fit,
+            "fill_color": fill,
+            "anchor": str(anchor),
+            "position": {"x": offset_x, "y": offset_y},
+        }
 
     async def render_scene(self) -> List[Path]:
         scene = self.scene
@@ -289,11 +359,17 @@ class SceneRenderer:
             # 背景が静止画でも行数が複数ある場合は、背景のスケール/ループを一度だけ行う方が有利
             should_generate_base = True
 
+        base_bg_layout = self._resolve_background_layout({})
+
         if should_generate_base:
             try:
                 bg_config_for_base = {
                     "type": "video" if is_bg_video else "image",
                     "path": str(bg_image),
+                    "fit": base_bg_layout["fit"],
+                    "fill_color": base_bg_layout["fill_color"],
+                    "anchor": base_bg_layout["anchor"],
+                    "position": dict(base_bg_layout["position"]),
                 }
                 scene_base_filename = f"scene_base_{scene_id}"
                 if static_overlays:
@@ -324,11 +400,20 @@ class SceneRenderer:
                             video_params=self.video_params,
                             audio_params=self.audio_params,
                             cache_manager=self.cache_manager,
+                            fit_mode=base_bg_layout["fit"],
+                            fill_color=base_bg_layout["fill_color"],
+                            anchor=base_bg_layout["anchor"],
+                            position=base_bg_layout["position"],
+                            scale_flags=self.video_renderer.scale_flags,
                         )
                         scene_base_path = await self.video_renderer.render_looped_background_video(
                             str(normalized_bg_path),
                             scene_duration,
                             f"scene_bg_{scene_id}",
+                            fit_mode=base_bg_layout["fit"],
+                            fill_color=base_bg_layout["fill_color"],
+                            anchor=base_bg_layout["anchor"],
+                            position=base_bg_layout["position"],
                         )
                         if scene_base_path:
                             logger.debug(
@@ -347,6 +432,11 @@ class SceneRenderer:
                         video_params=self.video_params,
                         audio_params=self.audio_params,
                         cache_manager=self.cache_manager,
+                        fit_mode=base_bg_layout["fit"],
+                        fill_color=base_bg_layout["fill_color"],
+                        anchor=base_bg_layout["anchor"],
+                        position=base_bg_layout["position"],
+                        scale_flags=self.video_renderer.scale_flags,
                     )
                     logger.info(
                         "Scene %s: skipping base generation (static_overlays=%d, lines=%d < threshold=%d). Using pre-normalized background.",
@@ -533,6 +623,7 @@ class SceneRenderer:
                 duration = line_data["duration"]
                 pre_dur = float(line_data.get("pre_duration", 0.0))
                 line_config = line_data["line_config"]
+                bg_layout = self._resolve_background_layout(line_config)
 
                 # シーンベース or 連続ランのベースがあればそれを使用
                 run_base = None
@@ -547,6 +638,10 @@ class SceneRenderer:
                         "start_time": start_time_by_idx[idx],
                         "normalized": True,  # 正規化済み（ベース作成時）
                         "pre_scaled": True,  # width/height/fps 済み
+                        "fit": bg_layout["fit"],
+                        "fill_color": bg_layout["fill_color"],
+                        "anchor": bg_layout["anchor"],
+                        "position": dict(bg_layout["position"]),
                     }
                 elif run_base is not None and Path(run_base["path"]).exists():
                     # ラン内でのオフセットを算出（キャッシュ）
@@ -564,6 +659,10 @@ class SceneRenderer:
                         "start_time": float(run_base["offsets"][idx]),
                         "normalized": True,
                         "pre_scaled": True,
+                        "fit": bg_layout["fit"],
+                        "fill_color": bg_layout["fill_color"],
+                        "anchor": bg_layout["anchor"],
+                        "position": dict(bg_layout["position"]),
                     }
                 else:
                     # フォールバック（従来動作）: ベースなしで個別処理
@@ -578,18 +677,30 @@ class SceneRenderer:
                                 "start_time": start_time_by_idx[idx],
                                 "normalized": True,
                                 "pre_scaled": True,
+                                "fit": bg_layout["fit"],
+                                "fill_color": bg_layout["fill_color"],
+                                "anchor": bg_layout["anchor"],
+                                "position": dict(bg_layout["position"]),
                             }
                         else:
                             background_config = {
                                 "type": "video",
                                 "path": str(bg_image),
                                 "start_time": start_time_by_idx[idx],
+                                "fit": bg_layout["fit"],
+                                "fill_color": bg_layout["fill_color"],
+                                "anchor": bg_layout["anchor"],
+                                "position": dict(bg_layout["position"]),
                             }
                     else:
                         background_config = {
                             "type": "image",
                             "path": str(bg_image),
                             "start_time": start_time_by_idx[idx],
+                            "fit": bg_layout["fit"],
+                            "fill_color": bg_layout["fill_color"],
+                            "anchor": bg_layout["anchor"],
+                            "position": dict(bg_layout["position"]),
                         }
 
                 if line_data["type"] == "wait":
@@ -609,6 +720,7 @@ class SceneRenderer:
                         "audio_params": self.audio_params.__dict__,
                         "screen_effects": line_config.get("screen_effects"),
                         "background_effects": line_config.get("background_effects"),
+                        "background_layout": bg_layout,
                     }
 
                     async def wait_creator_func(output_path: Path) -> Path:
@@ -723,6 +835,7 @@ class SceneRenderer:
                     "blink_close_frames": anim_meta.get("blink_close_frames"),
                     "screen_effects": line_config.get("screen_effects"),
                     "background_effects": line_config.get("background_effects"),
+                    "background_layout": bg_layout,
                 }
 
                 async def clip_creator_func(output_path: Path) -> Path:

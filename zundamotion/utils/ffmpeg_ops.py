@@ -25,6 +25,203 @@ from .ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from .logger import logger
 
 
+BACKGROUND_FIT_STRETCH = "stretch"
+BACKGROUND_FIT_CONTAIN = "contain"
+BACKGROUND_FIT_COVER = "cover"
+BACKGROUND_FIT_WIDTH = "fit_width"
+BACKGROUND_FIT_HEIGHT = "fit_height"
+
+BACKGROUND_FIT_MODES = {
+    BACKGROUND_FIT_STRETCH,
+    BACKGROUND_FIT_CONTAIN,
+    BACKGROUND_FIT_COVER,
+    BACKGROUND_FIT_WIDTH,
+    BACKGROUND_FIT_HEIGHT,
+}
+
+DEFAULT_BACKGROUND_ANCHOR = "middle_center"
+DEFAULT_BACKGROUND_FILL_COLOR = "#000000"
+
+
+def _to_expr(value: Any) -> str:
+    """Convert numeric/string offsets into FFmpeg expression fragments."""
+
+    if value is None:
+        return "0"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return str(value)
+
+
+def _sanitize_anchor(anchor: Optional[str]) -> str:
+    if not anchor:
+        return DEFAULT_BACKGROUND_ANCHOR
+    return str(anchor)
+
+
+def build_background_fit_steps(
+    *,
+    width: int,
+    height: int,
+    fit_mode: str,
+    fill_color: str,
+    anchor: str,
+    offset_x: str,
+    offset_y: str,
+    scale_flags: str,
+) -> List[str]:
+    """Return sequential FFmpeg filters for the requested background fit mode."""
+
+    fit = (fit_mode or BACKGROUND_FIT_STRETCH).lower()
+    if fit not in BACKGROUND_FIT_MODES:
+        fit = BACKGROUND_FIT_STRETCH
+
+    steps: List[str] = []
+
+    if fit == BACKGROUND_FIT_STRETCH:
+        steps.append(f"scale={width}:{height}:flags={scale_flags}")
+        return steps
+
+    if fit == BACKGROUND_FIT_CONTAIN:
+        steps.append(
+            "scale="
+            f"{width}:{height}:flags={scale_flags}:force_original_aspect_ratio=decrease"
+        )
+        pad_x, pad_y = calculate_overlay_position(
+            str(width),
+            str(height),
+            "iw",
+            "ih",
+            anchor,
+            offset_x,
+            offset_y,
+        )
+        steps.append(
+            f"pad={width}:{height}:x={pad_x}:y={pad_y}:color={fill_color}"
+        )
+        return steps
+
+    if fit == BACKGROUND_FIT_COVER:
+        steps.append(
+            "scale="
+            f"{width}:{height}:flags={scale_flags}:force_original_aspect_ratio=increase"
+        )
+        crop_x, crop_y = calculate_overlay_position(
+            "iw",
+            "ih",
+            str(width),
+            str(height),
+            anchor,
+            offset_x,
+            offset_y,
+        )
+        steps.append(f"crop={width}:{height}:{crop_x}:{crop_y}")
+        return steps
+
+    if fit == BACKGROUND_FIT_WIDTH:
+        steps.append(f"scale={width}:-2:flags={scale_flags}")
+        crop_height = f"min({height},ih)"
+        crop_x, crop_y = calculate_overlay_position(
+            "iw",
+            "ih",
+            str(width),
+            crop_height,
+            anchor,
+            offset_x,
+            offset_y,
+        )
+        steps.append(f"crop={width}:{crop_height}:{crop_x}:{crop_y}")
+        pad_x, pad_y = calculate_overlay_position(
+            str(width),
+            str(height),
+            "iw",
+            "ih",
+            anchor,
+            offset_x,
+            offset_y,
+        )
+        steps.append(
+            f"pad={width}:{height}:x={pad_x}:y={pad_y}:color={fill_color}"
+        )
+        return steps
+
+    if fit == BACKGROUND_FIT_HEIGHT:
+        steps.append(f"scale=-2:{height}:flags={scale_flags}")
+        crop_width = f"min({width},iw)"
+        crop_x, crop_y = calculate_overlay_position(
+            "iw",
+            "ih",
+            crop_width,
+            str(height),
+            anchor,
+            offset_x,
+            offset_y,
+        )
+        steps.append(f"crop={crop_width}:{height}:{crop_x}:{crop_y}")
+        pad_x, pad_y = calculate_overlay_position(
+            str(width),
+            str(height),
+            "iw",
+            "ih",
+            anchor,
+            offset_x,
+            offset_y,
+        )
+        steps.append(
+            f"pad={width}:{height}:x={pad_x}:y={pad_y}:color={fill_color}"
+        )
+        return steps
+
+    # Fallback to stretch if an unknown mode somehow slipped through validation.
+    steps.append(f"scale={width}:{height}:flags={scale_flags}")
+    return steps
+
+
+def build_background_filter_complex(
+    *,
+    input_label: str,
+    output_label: str,
+    steps: List[str],
+    apply_fps: bool,
+    fps: int,
+) -> List[str]:
+    """Convert background fit steps into filter_complex statements."""
+
+    if not steps:
+        chain = f"[{input_label}]"
+        chain += f"fps={fps}" if apply_fps else "null"
+        chain += f"[{output_label}]"
+        return [chain]
+
+    parts: List[str] = []
+    current = input_label
+    for idx, step in enumerate(steps):
+        is_last = idx == len(steps) - 1
+        target = output_label if is_last else f"{output_label}_step{idx+1}"
+        expr = step
+        if is_last and apply_fps:
+            expr = f"{expr},fps={fps}"
+        parts.append(f"[{current}]{expr}[{target}]")
+        current = target
+    return parts
+
+
+def compose_background_filter_expression(
+    *,
+    steps: List[str],
+    apply_fps: bool,
+    fps: int,
+) -> str:
+    """Compose a -vf filter string for standalone background processing."""
+
+    if not steps:
+        return f"fps={fps}" if apply_fps else "null"
+    filters = steps.copy()
+    if apply_fps:
+        filters[-1] = f"{filters[-1]},fps={fps}"
+    return ",".join(filters)
+
+
 # =========================================================
 async def compare_media_params(file_paths: List[str]) -> bool:
     """
@@ -346,14 +543,29 @@ async def normalize_media(
     audio_params: AudioParams,
     cache_manager: Any,  # CacheManager の循環インポートを避けるため Any を使用
     ffmpeg_path: str = "ffmpeg",
+    *,
+    fit_mode: str = BACKGROUND_FIT_STRETCH,
+    fill_color: str = DEFAULT_BACKGROUND_FILL_COLOR,
+    anchor: str = DEFAULT_BACKGROUND_ANCHOR,
+    position: Optional[Dict[str, Any]] = None,
+    scale_flags: str = "lanczos",
 ) -> Path:
     """
     背景・挿入動画を指定されたパラメータに正規化し、キャッシュする。
     キャッシュがHITすれば、変換処理をスキップしてキャッシュパスを返す。
     """
+    pos_dict_raw = position or {}
+    offset_x = _to_expr(pos_dict_raw.get("x", "0"))
+    offset_y = _to_expr(pos_dict_raw.get("y", "0"))
+    fit_mode_norm = (fit_mode or BACKGROUND_FIT_STRETCH).lower()
+    anchor_norm = _sanitize_anchor(anchor)
+    fill_norm = fill_color or DEFAULT_BACKGROUND_FILL_COLOR
+    pos_norm = {"x": offset_x, "y": offset_y}
+
     # 入力が既に本プロジェクトの正規化仕様で生成されたMP4で、隣接する meta の target_spec が一致する場合は自己再正規化を避ける
     try:
         if input_path.is_file() and input_path.suffix.lower() == ".mp4":
+
             target_spec = {
                 "video": {
                     "width": int(video_params.width),
@@ -361,6 +573,10 @@ async def normalize_media(
                     "fps": int(video_params.fps),
                     "pix_fmt": video_params.pix_fmt,
                     "codec": "h264",
+                    "background_fit": fit_mode_norm,
+                    "background_fill_color": fill_norm,
+                    "background_anchor": anchor_norm,
+                    "background_position": pos_norm,
                 },
                 "audio": {
                     "sr": int(audio_params.sample_rate),
@@ -394,6 +610,11 @@ async def normalize_media(
         "ffmpeg_version": await get_ffmpeg_version(
             ffmpeg_path
         ),  # FFmpegのバージョンもハッシュに含める
+        "background_fit": fit_mode_norm,
+        "background_fill_color": fill_norm,
+        "background_anchor": anchor_norm,
+        "background_position": pos_norm,
+        "scale_flags": scale_flags,
     }
 
     cached_path = cache_manager.get_cache_path(key_data, "normalized", "mp4")
@@ -417,6 +638,8 @@ async def normalize_media(
         can_copy_audio = False
 
         input_v = input_media_info.get("video")
+        requires_fit = fit_mode_norm != BACKGROUND_FIT_STRETCH or offset_x != "0" or offset_y != "0"
+
         if input_v:
             # 解像度、FPS、ピクセルフォーマット、コーデックが一致するか
             if (
@@ -427,8 +650,13 @@ async def normalize_media(
                 and input_v.get("codec_name")
                 in ["h264", "hevc"]  # H.264/HEVCコーデックのみコピー対象
             ):
-                can_copy_video = True
-                logger.debug(f"Video can be copied for {input_path}")
+                can_copy_video = not requires_fit
+                logger.debug(
+                    "Video can%s be copied for %s (requires_fit=%s)",
+                    "" if can_copy_video else "not",
+                    input_path,
+                    requires_fit,
+                )
             else:
                 logger.debug(
                     f"Video parameters mismatch for {input_path}. Input: {input_v}, Target: {video_params.__dict__}"
@@ -480,7 +708,22 @@ async def normalize_media(
                         f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS",
                     ]
                 )  # 音声はコピーだが、サンプルレート調整は必要
-                cmd_local.extend(["-vf", f"fps={video_params.fps},setpts=PTS-STARTPTS"])
+                fit_steps = build_background_fit_steps(
+                    width=int(video_params.width),
+                    height=int(video_params.height),
+                    fit_mode=fit_mode_norm,
+                    fill_color=fill_norm,
+                    anchor=anchor_norm,
+                    offset_x=offset_x,
+                    offset_y=offset_y,
+                    scale_flags=scale_flags,
+                )
+                composed = compose_background_filter_expression(
+                    steps=fit_steps,
+                    apply_fps=True,
+                    fps=int(video_params.fps),
+                )
+                cmd_local.extend(["-vf", f"{composed},setpts=PTS-STARTPTS"])
                 # HW検出（フォールバック用に環境変数を尊重）
                 hw_kind_local = None
                 if not disable_hwenc:
@@ -491,7 +734,22 @@ async def normalize_media(
                 logger.info(f"Using -c:a copy for audio for {input_path}")
             else:
                 # 再エンコードが必要な場合
-                video_filter = f"fps={video_params.fps},setpts=PTS-STARTPTS"
+                fit_steps = build_background_fit_steps(
+                    width=int(video_params.width),
+                    height=int(video_params.height),
+                    fit_mode=fit_mode_norm,
+                    fill_color=fill_norm,
+                    anchor=anchor_norm,
+                    offset_x=offset_x,
+                    offset_y=offset_y,
+                    scale_flags=scale_flags,
+                )
+                video_filter_core = compose_background_filter_expression(
+                    steps=fit_steps,
+                    apply_fps=True,
+                    fps=int(video_params.fps),
+                )
+                video_filter = f"{video_filter_core},setpts=PTS-STARTPTS"
                 audio_filter = (
                     f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"
                 )
@@ -541,6 +799,10 @@ async def normalize_media(
                             "fps": int(video_params.fps),
                             "pix_fmt": video_params.pix_fmt,
                             "codec": "h264",
+                            "background_fit": fit_mode_norm,
+                            "background_fill_color": fill_norm,
+                            "background_anchor": anchor_norm,
+                            "background_position": pos_norm,
                         },
                         "audio": {
                             "sr": int(audio_params.sample_rate),
@@ -599,6 +861,10 @@ async def normalize_media(
                                 "fps": int(video_params.fps),
                                 "pix_fmt": video_params.pix_fmt,
                                 "codec": "h264",
+                                "background_fit": fit_mode_norm,
+                                "background_fill_color": fill_norm,
+                                "background_anchor": anchor_norm,
+                                "background_position": pos_norm,
                             },
                             "audio": {
                                 "sr": int(audio_params.sample_rate),

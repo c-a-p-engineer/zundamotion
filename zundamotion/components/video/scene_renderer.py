@@ -8,12 +8,65 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from ...exceptions import PipelineError
 from ...utils.ffmpeg_hw import get_profile_flags
-from ...utils.ffmpeg_ops import calculate_overlay_position, normalize_media
+from ...utils.ffmpeg_ops import (
+    BACKGROUND_FIT_STRETCH,
+    DEFAULT_BACKGROUND_ANCHOR,
+    DEFAULT_BACKGROUND_FILL_COLOR,
+    build_background_filter_complex,
+    build_background_fit_steps,
+    calculate_overlay_position,
+    compose_background_filter_expression,
+    normalize_media,
+)
 from ...utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from .clip.effects import resolve_background_effects, resolve_screen_effects
 
 if TYPE_CHECKING:
     from .renderer import VideoRenderer
+
+
+def _to_offset_expr(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return str(value)
+    if value is None:
+        return "0"
+    return str(value)
+
+
+def _extract_background_layout(
+    renderer: "VideoRenderer", background_config: Dict[str, Any]
+) -> tuple[str, str, str, str, str, Dict[str, str]]:
+    video_defaults = renderer.config.get("video", {}) or {}
+    background_defaults = renderer.config.get("background", {}) or {}
+    fit = str(
+        background_config.get(
+            "fit",
+            video_defaults.get("background_fit", BACKGROUND_FIT_STRETCH),
+        )
+    ).lower()
+    fill = str(
+        background_config.get(
+            "fill_color",
+            background_defaults.get("fill_color", DEFAULT_BACKGROUND_FILL_COLOR),
+        )
+        or DEFAULT_BACKGROUND_FILL_COLOR
+    )
+    anchor = (
+        background_config.get(
+            "anchor",
+            background_defaults.get("anchor", DEFAULT_BACKGROUND_ANCHOR),
+        )
+        or DEFAULT_BACKGROUND_ANCHOR
+    )
+    raw_position = background_config.get("position")
+    if not isinstance(raw_position, dict):
+        raw_position = background_defaults.get("position")
+        if not isinstance(raw_position, dict):
+            raw_position = {}
+    offset_x = _to_offset_expr(raw_position.get("x"))
+    offset_y = _to_offset_expr(raw_position.get("y"))
+    position_exprs = {"x": offset_x, "y": offset_y}
+    return fit, fill, str(anchor), offset_x, offset_y, position_exprs
 
 
 async def render_scene_base(
@@ -25,6 +78,9 @@ async def render_scene_base(
     """背景のみのシーンベース映像を生成する。"""
     bg_type = background_config.get("type")
     bg_path = Path(background_config.get("path"))
+    fit, fill_color, anchor, offset_x, offset_y, position_exprs = _extract_background_layout(
+        renderer, background_config
+    )
 
     if bg_type == "video":
         return await render_looped_background_video(
@@ -32,13 +88,24 @@ async def render_scene_base(
             str(bg_path),
             duration,
             output_filename,
+            fit_mode=fit,
+            fill_color=fill_color,
+            anchor=anchor,
+            position=position_exprs,
         )
 
     line_cfg: Dict[str, Any] = {}
     base_path = await render_wait_clip(
         renderer,
         duration=duration,
-        background_config={"type": "image", "path": str(bg_path)},
+        background_config={
+            "type": "image",
+            "path": str(bg_path),
+            "fit": fit,
+            "fill_color": fill_color,
+            "anchor": anchor,
+            "position": position_exprs,
+        },
         output_filename=output_filename,
         line_config=line_cfg,
     )
@@ -73,6 +140,9 @@ async def render_scene_base_composited(
 
     bg_type = background_config.get("type")
     bg_path = Path(background_config.get("path"))
+    fit, fill_color, anchor, offset_x, offset_y, position_exprs = _extract_background_layout(
+        renderer, background_config
+    )
     if bg_type == "video":
         try:
             key_data = {
@@ -88,6 +158,11 @@ async def render_scene_base_composited(
                     audio_params=renderer.audio_params,
                     cache_manager=renderer.cache_manager,
                     ffmpeg_path=renderer.ffmpeg_path,
+                    fit_mode=fit,
+                    fill_color=fill_color,
+                    anchor=anchor,
+                    position=position_exprs,
+                    scale_flags=renderer.scale_flags,
                 )
 
             bg_path = await renderer.cache_manager.get_or_create(
@@ -106,15 +181,28 @@ async def render_scene_base_composited(
         cmd.extend(["-loop", "1", "-i", str(Path(ov["path"]).resolve())])
 
     filter_parts: List[str] = []
-    fps_part = f",fps={fps}" if renderer.apply_fps_filter else ""
-    if bg_type == "video":
-        filter_parts.append(
-            f"[0:v]scale={width}:{height}:flags={renderer.scale_flags}{fps_part}[bg]"
-        )
-    else:
-        filter_parts.append(
-            f"[0:v]scale={width}:{height}:flags={renderer.scale_flags}{fps_part},trim=duration={duration}[bg]"
-        )
+    steps = build_background_fit_steps(
+        width=width,
+        height=height,
+        fit_mode=fit,
+        fill_color=fill_color,
+        anchor=anchor,
+        offset_x=offset_x,
+        offset_y=offset_y,
+        scale_flags=renderer.scale_flags,
+    )
+    cpu_chain = build_background_filter_complex(
+        input_label="0:v",
+        output_label="bg",
+        steps=steps,
+        apply_fps=renderer.apply_fps_filter,
+        fps=fps,
+    )
+    if bg_type != "video" and cpu_chain:
+        last = cpu_chain[-1]
+        prefix, _, _ = last.rpartition("[bg]")
+        cpu_chain[-1] = f"{prefix}trim=duration={duration}[bg]"
+    filter_parts.extend(cpu_chain)
 
     chain = "[bg]"
     for i, ov in enumerate(overlays):
@@ -197,6 +285,9 @@ async def render_wait_clip(
     if not bg_path_str:
         raise ValueError("Background path is missing.")
     bg_path = Path(bg_path_str)
+    fit, fill_color, anchor, offset_x, offset_y, position_exprs = _extract_background_layout(
+        renderer, background_config
+    )
 
     if background_config.get("type") == "video":
         try:
@@ -224,6 +315,11 @@ async def render_wait_clip(
                             audio_params=renderer.audio_params,
                             cache_manager=renderer.cache_manager,
                             ffmpeg_path=renderer.ffmpeg_path,
+                            fit_mode=fit,
+                            fill_color=fill_color,
+                            anchor=anchor,
+                            position=position_exprs,
+                            scale_flags=renderer.scale_flags,
                         )
 
                     bg_path = await renderer.cache_manager.get_or_create(
@@ -276,10 +372,25 @@ async def render_wait_clip(
 
     pre_scaled = bool(background_config.get("pre_scaled", False))
     if not pre_scaled:
-        filter_parts.append(
-            f"{current_label}scale={width}:{height}:flags={renderer.scale_flags}[wait_scaled]"
+        steps = build_background_fit_steps(
+            width=width,
+            height=height,
+            fit_mode=fit,
+            fill_color=fill_color,
+            anchor=anchor,
+            offset_x=offset_x,
+            offset_y=offset_y,
+            scale_flags=renderer.scale_flags,
         )
-        current_label = "[wait_scaled]"
+        cpu_chain = build_background_filter_complex(
+            input_label="0:v",
+            output_label="wait_base",
+            steps=steps,
+            apply_fps=renderer.apply_fps_filter,
+            fps=fps,
+        )
+        filter_parts.extend(cpu_chain)
+        current_label = "[wait_base]"
 
     bg_snippet = resolve_background_effects(
         effects=background_effects,
@@ -344,12 +455,22 @@ async def render_looped_background_video(
     bg_video_path_str: str,
     duration: float,
     output_filename: str,
+    *,
+    fit_mode: str = BACKGROUND_FIT_STRETCH,
+    fill_color: str = DEFAULT_BACKGROUND_FILL_COLOR,
+    anchor: str = DEFAULT_BACKGROUND_ANCHOR,
+    position: Optional[Dict[str, str]] = None,
 ) -> Path:
     """指定長で背景動画をループさせた映像を生成する。"""
     output_path = renderer.temp_dir / f"{output_filename}.mp4"
     width = renderer.video_params.width
     height = renderer.video_params.height
     fps = renderer.video_params.fps
+
+    position = position or {}
+    offset_x = _to_offset_expr(position.get("x"))
+    offset_y = _to_offset_expr(position.get("y"))
+    position_exprs = {"x": offset_x, "y": offset_y}
 
     print(f"[Video] Rendering looped background video -> {output_path.name}")
 
@@ -377,6 +498,11 @@ async def render_looped_background_video(
                 audio_params=renderer.audio_params,
                 cache_manager=renderer.cache_manager,
                 ffmpeg_path=renderer.ffmpeg_path,
+                fit_mode=fit_mode,
+                fill_color=fill_color,
+                anchor=anchor,
+                position=position_exprs,
+                scale_flags=renderer.scale_flags,
             )
 
         bg_video_path = await renderer.cache_manager.get_or_create(
@@ -390,10 +516,22 @@ async def render_looped_background_video(
             f"[Warning] Could not inspect/normalize looped BG video {bg_video_path.name}: {e}. Using as-is."
         )
 
-    vf = f"scale={width}:{height}:flags={renderer.scale_flags}"
-    if renderer.apply_fps_filter:
-        vf += f",fps={fps}"
-    vf += ",format=yuv420p"
+    steps = build_background_fit_steps(
+        width=width,
+        height=height,
+        fit_mode=fit_mode,
+        fill_color=fill_color,
+        anchor=anchor,
+        offset_x=offset_x,
+        offset_y=offset_y,
+        scale_flags=renderer.scale_flags,
+    )
+    vf_core = compose_background_filter_expression(
+        steps=steps,
+        apply_fps=renderer.apply_fps_filter,
+        fps=fps,
+    )
+    vf = f"{vf_core},format=yuv420p"
     cmd.extend([
         "-stream_loop",
         "-1",

@@ -6,7 +6,12 @@ from ...cache import CacheManager
 from ...utils.ffmpeg_params import AudioParams, VideoParams
 from ...utils.ffmpeg_hw import get_hw_filter_mode, set_hw_filter_mode
 from ...utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async  # 互換用エクスポート
-from ...utils.ffmpeg_ops import concat_videos_copy
+from ...utils.ffmpeg_ops import (
+    BACKGROUND_FIT_STRETCH,
+    DEFAULT_BACKGROUND_ANCHOR,
+    DEFAULT_BACKGROUND_FILL_COLOR,
+    concat_videos_copy,
+)
 from ...utils.ffmpeg_capabilities import (
     has_cuda_filters,
     smoke_test_cuda_filters,
@@ -354,13 +359,25 @@ class VideoRenderer(OverlayMixin):
     # BG動画の指定長ループ
     # --------------------------
     async def render_looped_background_video(
-        self, bg_video_path_str: str, duration: float, output_filename: str
+        self,
+        bg_video_path_str: str,
+        duration: float,
+        output_filename: str,
+        *,
+        fit_mode: str = BACKGROUND_FIT_STRETCH,
+        fill_color: str = DEFAULT_BACKGROUND_FILL_COLOR,
+        anchor: str = DEFAULT_BACKGROUND_ANCHOR,
+        position: Optional[Dict[str, str]] = None,
     ) -> Path:
         return await render_looped_background_video_task(
             self,
             bg_video_path_str=bg_video_path_str,
             duration=duration,
             output_filename=output_filename,
+            fit_mode=fit_mode,
+            fill_color=fill_color,
+            anchor=anchor,
+            position=position,
         )
 
     # --------------------------

@@ -569,6 +569,38 @@ video:
 
 対象キャラクターは、各セリフの `speaker_name`（未指定時は最初の `visible: true` のキャラ）です。
 
+### 背景フィットモードと余白制御
+
+`video.background_fit` では背景のリサイズ方法を指定できます。`stretch`（従来の全画面伸長）のほかに、縦横比を維持したまま余白を残す
+`contain`、逆に余白が出ないよう中央でクロップする `cover`、単軸優先の `fit_width` / `fit_height` を選べます。`contain` と単軸フィッ
+トでは `background.fill_color` が余白色として使われ、`background.anchor` と `background.position` で余白やクロップ位置を調整でき
+ます。値はシーンや行ごとに `background:` ブロックで上書き可能です。
+
+```yaml
+video:
+  width: 1080
+  height: 1920
+  background_fit: contain
+
+background:
+  default: assets/bg/street.png
+  fill_color: "#0F172A"
+  anchor: middle_center
+
+scenes:
+  - id: skyline
+    lines:
+      - text: "縦長でも背景を余白付きで表示"
+      - text: "一部シーンだけトリミング"
+        background:
+          fit: cover
+          anchor: bottom_center
+          position: {y: -160}
+```
+
+上記の例では、デフォルトでレターボックス付きの `contain` を使い、特定の行だけ `cover` でクロップ位置を下寄せに切り替えています。
+`scripts/sample_vertical.yaml` に縦長キャンバス向けの詳細なサンプルを用意しました。
+
 #### 差分PNG配置ガイド（具体例）
 
 - 準備するファイル（こぴぺたんの例）:
