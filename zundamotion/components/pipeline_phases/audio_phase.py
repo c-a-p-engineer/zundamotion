@@ -12,7 +12,10 @@ from zundamotion.cache import CacheManager
 from zundamotion.components.audio import AudioGenerator
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
-from zundamotion.utils.subtitle_text import is_effective_subtitle_text
+from zundamotion.utils.subtitle_text import (
+    is_effective_subtitle_text,
+    normalize_subtitle_text,
+)
 from zundamotion.utils.ffmpeg_params import AudioParams
 from zundamotion.utils.ffmpeg_probe import get_audio_duration
 from zundamotion.utils.text_processing import parse_reading_markup
@@ -109,13 +112,17 @@ class AudioPhase:
                         disp_from_markup, _ = parse_reading_markup(
                             original_text, subtitle_reading_display
                         )
-                        display_text = str(line.get("subtitle_text") or disp_from_markup)
+                        display_text = normalize_subtitle_text(
+                            line.get("subtitle_text") or disp_from_markup
+                        )
                     else:
                         disp_from_markup, tts_from_markup = parse_reading_markup(
                             original_text, subtitle_reading_display
                         )
                         read_text = tts_from_markup
-                        display_text = str(line.get("subtitle_text") or disp_from_markup)
+                        display_text = normalize_subtitle_text(
+                            line.get("subtitle_text") or disp_from_markup
+                        )
                     text = display_text
                     effective_subtitle_text = (
                         display_text if is_effective_subtitle_text(display_text) else ""

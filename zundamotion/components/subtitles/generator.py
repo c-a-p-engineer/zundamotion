@@ -9,6 +9,7 @@ from ...cache import CacheManager
 from ...utils.ffmpeg_capabilities import has_cuda_filters, is_nvenc_available
 from ...utils.ffmpeg_hw import get_hw_filter_mode
 from ...utils.logger import logger
+from ...utils.subtitle_text import normalize_subtitle_text
 from .effects import resolve_subtitle_effects
 from .png import SubtitlePNGRenderer
 
@@ -34,6 +35,8 @@ class SubtitleGenerator:
             extra_input: {"-loop": "1", "-i": <png>}
             filter_snippet: FFmpeg filter graph snippet
         """
+        text = normalize_subtitle_text(text)
+
         style = self.subtitle_config.copy()
         style.update(line_config)
         if "subtitle" in line_config and isinstance(line_config["subtitle"], dict):

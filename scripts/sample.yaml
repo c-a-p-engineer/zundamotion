@@ -90,6 +90,12 @@ scenes:
         subtitle:
           font_color: "yellow" # この行だけデフォルトを上書き
 
+      - text: "字幕の手動改行サンプルを紹介するのだ。"
+        speaker_name: "copetan"
+        subtitle_text: "手動改行の例だよ\\nPNGと字幕ファイルで2行になるのだ。"
+        reading: "手動改行の例だよ。PNGと字幕ファイルで二行になるのだ。"
+        # `\\n` を差し込むと字幕PNG/SRT/ASSでも改行が反映される
+
       - text: "私はエンジー。私の字幕もデフォルト設定よ。"
         speaker_name: "engy"
         characters:

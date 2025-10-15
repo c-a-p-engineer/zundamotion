@@ -62,6 +62,7 @@ scenes:
 - `transition`: シーン終端に適用する映像トランジション。サンプル: [`sample_transitions.yaml`](./sample_transitions.yaml)。
 - `bg`: 背景画像／動画。動画は自動でループ・尺合わせを行う。
 - `defaults.characters_persist: true` で VN 風に立ち絵を保持。サンプル: [`sample_vn_minimal.yaml`](./sample_vn_minimal.yaml)。
+- 字幕を任意位置で改行したい場合は `text` / `subtitle_text` に `\\n`（YAML では `"行1\\n行2"`）または `<br>` を挿入すると、字幕PNGと SRT/ASS ファイルで複数行表示されます。サンプル: [`sample.yaml`](./sample.yaml)。
 
 ## シーン遷移 (`transition`)
 

@@ -6,7 +6,10 @@ from typing import Any, Dict, List, Optional
 
 import pysubs2
 
-from zundamotion.utils.subtitle_text import is_effective_subtitle_text
+from zundamotion.utils.subtitle_text import (
+    is_effective_subtitle_text,
+    normalize_subtitle_text,
+)
 
 
 def format_timestamp(seconds: float) -> str:
@@ -27,7 +30,7 @@ class Timeline:
         """タイムラインに新しいイベントを追加する。"""
         effective_text: Optional[str]
         if is_effective_subtitle_text(text):
-            effective_text = str(text)
+            effective_text = normalize_subtitle_text(text)
         else:
             effective_text = None
         self.events.append(
@@ -84,7 +87,7 @@ class Timeline:
         if description or metadata:
             gap_text: Optional[str]
             if is_effective_subtitle_text(text):
-                gap_text = str(text)
+                gap_text = normalize_subtitle_text(text)
             else:
                 gap_text = None
             new_event = {
@@ -132,12 +135,16 @@ class Timeline:
     def save_subtitles(self, output_path: Path, format: str):
         """字幕ファイルを SRT または ASS 形式で保存する。"""
         subs = pysubs2.SSAFile()
+        target_format = (format or "srt").lower()
         for event in self.events:
             text = event.get("text")
             if not is_effective_subtitle_text(text):
                 continue
             start_time = int(event["start_time"] * 1000)
             end_time = int((event["start_time"] + event["duration"]) * 1000)
-            line = pysubs2.SSAEvent(start=start_time, end=end_time, text=str(text))
+            payload = normalize_subtitle_text(str(text))
+            if target_format == "ass":
+                payload = payload.replace("\n", r"\N")
+            line = pysubs2.SSAEvent(start=start_time, end=end_time, text=payload)
             subs.append(line)
-        subs.save(str(output_path), format=format)
+        subs.save(str(output_path), format=target_format)
