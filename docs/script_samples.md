@@ -27,6 +27,8 @@ Zundamotion に同梱されている YAML 台本サンプルを用途別に整�
 | チートシート項目 | 関連サンプル |
 | --- | --- |
 | [基本構造](../scripts/script_cheatsheet.md#基本構造) / [行とシーン](../scripts/script_cheatsheet.md#行とシーン) | [`sample.yaml`](../scripts/sample.yaml), [`sample_vn_minimal.yaml`](../scripts/sample_vn_minimal.yaml) |
+| [動画キャンバスと背景設定](../scripts/script_cheatsheet.md#動画キャンバスと背景設定) | [`sample_vertical.yaml`](../scripts/sample_vertical.yaml) |
+| [字幕設定](../scripts/script_cheatsheet.md#字幕設定) | [`sample.yaml`](../scripts/sample.yaml), [`sample_subtitle_styles.yaml`](../scripts/sample_subtitle_styles.yaml) |
 | [キャラクター表示](../scripts/script_cheatsheet.md#キャラクター表示) | [`sample_character_enter.yaml`](../scripts/sample_character_enter.yaml), [`copetan_all_expressions.yaml`](../scripts/copetan_all_expressions.yaml), [`engy_all_expressions.yaml`](../scripts/engy_all_expressions.yaml) |
 | [立ち絵アニメーション](../scripts/script_cheatsheet.md#立ち絵アニメーション) | [`sample_char_bob.yaml`](../scripts/sample_char_bob.yaml), [`sample_char_shake.yaml`](../scripts/sample_char_shake.yaml), [`sample_char_sway.yaml`](../scripts/sample_char_sway.yaml) |
 | [字幕エフェクト (`subtitle.effects`)](../scripts/script_cheatsheet.md#字幕エフェクト-subtitleeffects) | [`sample_text_bounce.yaml`](../scripts/sample_text_bounce.yaml), [`sample_subtitle_styles.yaml`](../scripts/sample_subtitle_styles.yaml) |
@@ -34,8 +36,10 @@ Zundamotion に同梱されている YAML 台本サンプルを用途別に整�
 | [背景エフェクト (`background_effects`)](../scripts/script_cheatsheet.md#背景エフェクト-background_effects) | [`sample_bg_shake.yaml`](../scripts/sample_bg_shake.yaml) |
 | [画像・動画の挿入 (`insert`)](../scripts/script_cheatsheet.md#画像動画の挿入-insert) | [`sample.yaml`](../scripts/sample.yaml) |
 | [前景オーバーレイ (`fg_overlays`)](../scripts/script_cheatsheet.md#前景オーバーレイ-fg_overlays) | [`sample.yaml`](../scripts/sample.yaml), [`sample_effects.yaml`](../scripts/sample_effects.yaml) |
+| [BGM と音声チューニング](../scripts/script_cheatsheet.md#bgm-と音声チューニング) | [`sample.yaml`](../scripts/sample.yaml) |
 | [効果音 (`sound_effects`)](../scripts/script_cheatsheet.md#効果音-sound_effects) | [`sample.yaml`](../scripts/sample.yaml) |
 | [顔アニメ用差分素材](../scripts/script_cheatsheet.md#顔アニメ用差分素材) | [`sample.yaml`](../scripts/sample.yaml), [`copetan_all_expressions.yaml`](../scripts/copetan_all_expressions.yaml) |
+| [読みと字幕テキストの制御](../scripts/script_cheatsheet.md#読みと字幕テキストの制御) | [`sample.yaml`](../scripts/sample.yaml) |
 | [シーン遷移 (`transition`)](../scripts/script_cheatsheet.md#シーン遷移-transition) | [`sample_transitions.yaml`](../scripts/sample_transitions.yaml), [`sample_vn_minimal.yaml`](../scripts/sample_vn_minimal.yaml) |
 | [便利な小ネタ](../scripts/script_cheatsheet.md#便利な小ネタ) | [`sample.yaml`](../scripts/sample.yaml), [`sample_vn_minimal.yaml`](../scripts/sample_vn_minimal.yaml) |
 

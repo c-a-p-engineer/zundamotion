@@ -5,6 +5,8 @@
 ## 目次
 
 - [基本構造](#基本構造)
+- [動画キャンバスと背景設定](#動画キャンバスと背景設定)
+- [字幕設定](#字幕設定)
 - [行とシーン](#行とシーン)
 - [シーン遷移 (`transition`)](#シーン遷移-transition)
 - [キャラクター表示](#キャラクター表示)
@@ -14,8 +16,10 @@
 - [背景エフェクト (`background_effects`)](#背景エフェクト-background_effects)
 - [画像・動画の挿入 (`insert`)](#画像動画の挿入-insert)
 - [前景オーバーレイ (`fg_overlays`)](#前景オーバーレイ-fg_overlays)
+- [BGM と音声チューニング](#bgm-と音声チューニング)
 - [効果音 (`sound_effects`)](#効果音-sound_effects)
 - [顔アニメ用差分素材](#顔アニメ用差分素材)
+- [読みと字幕テキストの制御](#読みと字幕テキストの制御)
 - [便利な小ネタ](#便利な小ネタ)
 
 ## 基本構造
@@ -26,6 +30,8 @@ meta:
   version: 1
 
 video:
+  width: 1920
+  height: 1080
   fps: 30
   resolution: {width: 1920, height: 1080}
 
@@ -54,6 +60,44 @@ scenes:
             freq: 6.0
             easing: ease_out
 ```
+
+- `meta.version` はツール側のフォーマット互換性を示します。最新の値は [`sample.yaml`](./sample.yaml) を参照してください。
+- `video.width` / `video.height` は出力キャンバスの解像度。旧 `resolution` キーもサポートされていますが、新規は幅・高さの個別指定を推奨します。縦長レイアウト例: [`sample_vertical.yaml`](./sample_vertical.yaml)。
+- `video.face_anim` を設定すると口パク／瞬き制御が行えます。閾値やフレーム数は [`sample.yaml`](./sample.yaml) を参照。
+- `defaults.characters` で VOICEVOX `speaker_id` や字幕色などキャラクターごとの初期値をまとめて定義できます。
+
+## 動画キャンバスと背景設定
+
+```yaml
+video:
+  background_fit: contain      # contain / cover / fit_width / fit_height
+
+background:
+  default: assets/bg/room.png
+  fill_color: "#0F172A"
+  anchor: middle_center
+```
+
+- `video.background_fit` で背景のフィットモードを指定。余白の扱いは `background.fill_color` に従います。縦長キャンバスの比較: [`sample_vertical.yaml`](./sample_vertical.yaml)。
+- ルート `background` はシーンで `bg` が未指定の場合のデフォルト。`anchor` / `position` / `fit` はシーンや行ごとにも上書き可能です。
+- 行レベルの `background` でズームやパンを切り替えることで、同じ素材でも構図を変えられます。
+
+## 字幕設定
+
+```yaml
+subtitle:
+  font_path: /path/to/font.ttf
+  size: 48
+  color: "white"
+  outline: "black"
+  wrap_mode: chars
+  max_chars_per_line: 28
+  reading_display: paren      # none / paren
+```
+
+- ルート `subtitle` でフォントパスや文字数制御など全体の既定値をまとめます。例: [`sample.yaml`](./sample.yaml)。
+- 行ごとの `subtitle` ブロックで色や余白などを一時的に上書き可能。スタイルバリエーション: [`sample_subtitle_styles.yaml`](./sample_subtitle_styles.yaml)。
+- 字幕PNGだけ改行したい場合は `subtitle_text` に `"行1\n行2"` を設定します。読み仮名は `reading` で別途管理できます。
 
 ## 行とシーン
 
@@ -138,6 +182,7 @@ screen_effects:
 ```
 
 - `screen:shake_screen`: 画面全体の揺れ。振幅・周波数・減衰 (`easing`) の調整が可能。必要量を自動で `pad` → `crop` し、`padding` を指定すると余白を追加できます。サンプル: [`sample_screen_shake.yaml`](./sample_screen_shake.yaml)。
+- `offset` で揺れの中心をずらして、画面全体が常に上下に動かないよう微調整できます。
 - 今後追加された screen エフェクトはここに追記してください。
 
 ## 背景エフェクト (`background_effects`)
@@ -187,6 +232,29 @@ fg_overlays:
 - 行レベルの `fg_overlays` はその行のみ、シーンレベルはベース映像へ適用。
 - `mode: blend` のときは `blend_mode: screen|add|multiply|lighten` を指定。
 - `mode: chroma` のときは `chroma: {key_color, similarity, blend}` を設定。
+- 静止画オーバーレイでも `fps` を指定するとフレーム補間され、アニメ的な動きを加えられます。
+- `effects` チェーンで `blur` / `eq` / `rotate` などのポストエフェクトを順番に適用可能。`timing` の `loop` や `start` で再生タイミングを制御できます。詳しくは [`sample_effects.yaml`](./sample_effects.yaml), [`sample.yaml`](./sample.yaml)。
+
+## BGM と音声チューニング
+
+```yaml
+bgm:
+  path: assets/bgm/intro.wav
+  volume: 0.2
+  fade_in_duration: 2.0
+  fade_out_duration: 1.5
+  start_time: 1.0
+
+lines:
+  - text: "台詞ごとに速度を調整"
+    speed: 0.9            # 0.5〜2.0 の範囲
+    pitch: -0.1           # -1.0〜1.0
+    voice_style: whisper  # キャラクターに登録済みのスタイル名
+```
+
+- シーンレベル `bgm` でループBGMを設定。フェードや開始位置を細かく制御できます。サンプル: [`sample.yaml`](./sample.yaml)。
+- 行ごとの `speed` / `pitch` / `voice_style` は VOICEVOX の音声チューニングに利用します。
+- `defaults.characters.<name>.speaker_id` や行の `speaker_id` で話者を指定してください。
 
 ## 効果音 (`sound_effects`)
 
@@ -221,6 +289,12 @@ video:
     blink_max_interval: 5.0
     blink_close_frames: 2
 ```
+
+## 読みと字幕テキストの制御
+
+- ルート `subtitle.reading_display: paren` を設定すると、インライン読み `[表示|読み]` や `表示{読み}` を字幕PNGにも括弧付きで出力します。
+- 行全体の読み仮名を差し替える場合は `reading: "ふりがな"` を指定。サンプル: [`sample.yaml`](./sample.yaml)。
+- 字幕と音声のテキストを分けたいときは `subtitle_text` を活用し、表示のみ別テキストにできます。
 
 ## 便利な小ネタ
 
