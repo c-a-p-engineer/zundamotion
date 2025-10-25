@@ -31,6 +31,35 @@ def _enable_expr(
         return None
 
 
+def _resolve_face_asset(
+    base_dir: Path, expression: str, category: str, filename: str
+) -> Path:
+    """Resolve character face asset with fallbacks when expression-specific files are missing."""
+    expr = expression or "default"
+    candidates: List[Path] = [
+        base_dir / expr / category / filename,
+        base_dir / category / expr / filename,
+        base_dir / category / filename,
+        base_dir / "default" / category / filename,
+        base_dir / category / "default" / filename,
+    ]
+    seen: set[str] = set()
+    ordered: List[Path] = []
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(candidate)
+    for candidate in ordered:
+        try:
+            if candidate.exists():
+                return candidate
+        except Exception:
+            continue
+    return ordered[0]
+
+
 async def apply_face_overlays(
     *,
     renderer: Any,
@@ -121,30 +150,11 @@ async def apply_face_overlays(
 
     base_dir = Path(f"assets/characters/{target_name}")
     expression = str(placement.get("expression") or "default")
-    expr_dir = base_dir / expression
-
-    def _first_dir(candidates: List[Path]) -> Path:
-        for candidate in candidates:
-            try:
-                if candidate.exists() and candidate.is_dir():
-                    return candidate
-            except Exception:
-                continue
-        return base_dir
-
-    mouth_dir = _first_dir([expr_dir / "mouth", base_dir / "mouth", base_dir / "mouth" / expression])
-    eyes_dir = _first_dir([expr_dir / "eyes", base_dir / "eyes", base_dir / "eyes" / expression])
-
-    def _pick_file(expr_path: Path, common_path: Path, name: str) -> Path:
-        candidate_expr = expr_path / name
-        candidate_common = common_path / name
-        return candidate_expr if candidate_expr.exists() else candidate_common
-
-    mouth_close = _pick_file(expr_dir / "mouth", base_dir / "mouth", "close.png")
-    mouth_half = _pick_file(expr_dir / "mouth", base_dir / "mouth", "half.png")
-    mouth_open = _pick_file(expr_dir / "mouth", base_dir / "mouth", "open.png")
-    eyes_open = _pick_file(expr_dir / "eyes", base_dir / "eyes", "open.png")
-    eyes_close = _pick_file(expr_dir / "eyes", base_dir / "eyes", "close.png")
+    mouth_close = _resolve_face_asset(base_dir, expression, "mouth", "close.png")
+    mouth_half = _resolve_face_asset(base_dir, expression, "mouth", "half.png")
+    mouth_open = _resolve_face_asset(base_dir, expression, "mouth", "open.png")
+    eyes_open = _resolve_face_asset(base_dir, expression, "eyes", "open.png")
+    eyes_close = _resolve_face_asset(base_dir, expression, "eyes", "close.png")
 
     try:
         mouth_segments = face_anim.get("mouth") or []

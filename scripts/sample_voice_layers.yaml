@@ -1,0 +1,92 @@
+meta:
+  title: "同時発話サンプル台本"
+  version: 3
+
+video:
+  fps: 30
+  face_anim:
+    mouth_fps: 15
+    mouth_thr_half: 0.2
+    mouth_thr_open: 0.5
+
+defaults:
+  characters:
+    copetan:
+      speaker_id: 3
+      speed: 1.05
+      subtitle:
+        font_color: "#8FBC8F"  # DarkSeaGreen
+        stroke_color: "#0F3816"
+    engy:
+      speaker_id: 8
+      speed: 0.95
+      subtitle:
+        font_color: "#E6E6FA"  # Lavender
+        stroke_color: "#1C1C1C"
+
+scenes:
+  - id: layered_voice_demo
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "こぴぺたん、準備はいい？二人同時に挨拶しちゃおう。"
+        speaker_name: "engy"
+        characters:
+          - name: "engy"
+            expression: "default"
+            enter: slide_right
+            enter_duration: 0.6
+            anchor: bottom_center
+            position:
+              x: 420
+              y: -60
+            scale: 0.85
+          - name: "copetan"
+            expression: "default"
+            enter: slide_left
+            enter_duration: 0.6
+            anchor: bottom_center
+            position:
+              x: -420
+              y: -60
+            scale: 0.85
+
+      - text: "二人揃って、ご挨拶なのだ！"
+        speaker_name: "copetan & engy"
+        voice_layers:
+          - speaker_name: "copetan"
+            text: "二人揃って、ご挨拶なのだ！"
+            reading: "ふたりそろって、ごあいさつなのだ！"
+          - speaker_name: "engy"
+            text: "二人揃って、ご挨拶よ！"
+            reading: "ふたりそろって、ごあいさつよ！"
+            start_time: 0.12
+            volume: 0.92
+        characters:
+          - name: "copetan"
+            expression: "smile"
+          - name: "engy"
+            expression: "wink"
+
+      - text: "読みや音量を調整できるから、コール&レスポンスもばっちりなのだ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "smile"
+
+      - text: "タイムライン上は1行扱いで、字幕も共通のテキストが表示されるわ。"
+        speaker_name: "engy"
+        characters:
+          - name: "engy"
+            expression: "default"
+
+      - text: "これで同時発話の台本は完了なのだ。またね！"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "default"
+            leave: slide_left
+            leave_duration: 0.6
+          - name: "engy"
+            expression: "default"
+            leave: slide_right
+            leave_duration: 0.6

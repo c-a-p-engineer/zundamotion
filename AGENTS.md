@@ -99,37 +99,6 @@ output_contract:
     - "8) コミットメッセージ提案(複数/Conventional)"
   constraints: ["I/Oはモック/スタブで分離","不明点は仮定を明示して前進"]
 
-output_contract_strict:
-  schema:
-    type: object
-    required: ["requirements","design","code","tests","run","readme","checklist","commit_suggestions"]
-    properties:
-      requirements: { type: array, items: { type: string }, minItems: 3 }
-      design: { type: array, items: { type: string } }
-      code:
-        type: array
-        items: { type: object, required: ["path","lang","body"], properties: { path: {type: string}, lang: {type: string}, body: {type: string} } }
-      tests:
-        type: array
-        items: { type: object, required: ["path","lang","body"], properties: { path: {type: string}, lang: {type: string}, body: {type: string} } }
-      run: { type: array, items: { type: string } }
-      readme: { type: string }
-      checklist: { type: array, items: { type: string } }
-      commit_suggestions:
-        type: array
-        minItems: 2
-        items:
-          type: object
-          required: ["type","scope","subject"]
-          properties:
-            type: { type: string, enum: ["feat","fix","refactor","perf","test","docs","build","ci","chore","revert"] }
-            scope: { type: string }
-            subject: { type: string, maxLength: 50 }
-            body: { type: string }
-            breaking: { type: boolean }
-            footer: { type: string }
-            example: { type: string }
-
 principles_checklist:
   - "[ ] KISS/SoC/過度抽象禁止"
   - "[ ] 型/スキーマで境界防御"

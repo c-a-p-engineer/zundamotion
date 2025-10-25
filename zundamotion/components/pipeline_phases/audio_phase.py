@@ -134,8 +134,8 @@ class AudioPhase:
                     # Generate audio and get speaker info
                     (
                         audio_path,
-                        speaker_id,
-                        generated_text,
+                        voice_entries,
+                        voice_layer_segments,
                     ) = await self.audio_gen.generate_audio(read_text, line, line_id)
 
                     if not audio_path:
@@ -144,10 +144,9 @@ class AudioPhase:
                         )
 
                     # Record VOICEVOX usage information
-                    if (
-                        generated_text.strip()
-                    ):  # Only record if actual voice was generated
-                        self.used_voicevox_info.append((speaker_id, generated_text))
+                    for speaker_id, generated_text in voice_entries:
+                        if generated_text.strip():
+                            self.used_voicevox_info.append((speaker_id, generated_text))
 
                     # Cache the generated audio file
                     audio_cache_data = {
@@ -193,7 +192,23 @@ class AudioPhase:
                             )
                         )
 
-                    character_name = line.get("speaker_name", "Unknown")
+                    voice_layers_cfg = [
+                        layer
+                        for layer in (line.get("voice_layers") or [])
+                        if isinstance(layer, dict)
+                    ]
+
+                    character_name = line.get("speaker_name")
+                    if not character_name and voice_layers_cfg:
+                        names = [
+                            layer.get("speaker_name")
+                            for layer in voice_layers_cfg
+                            if layer.get("speaker_name")
+                        ]
+                        if names:
+                            character_name = " + ".join(names)
+                    if not character_name:
+                        character_name = "Unknown"
                     timeline.add_event(
                         f'{character_name}: "{display_text}"',
                         duration,
@@ -214,26 +229,23 @@ class AudioPhase:
                     blink_max = float(anim_cfg.get("blink_max_interval", 5.0))
                     blink_close_frames = int(anim_cfg.get("blink_close_frames", 2))
 
-                    # The target character to animate: prefer speaker_name; fallback to first visible character
-                    target_name = line.get("speaker_name")
-                    if not target_name:
-                        try:
-                            for ch in (line.get("characters") or []):
-                                if ch.get("visible", False) and ch.get("name"):
-                                    target_name = ch.get("name")
-                                    break
-                        except Exception:
-                            target_name = None
+                    mouth_segment_cache: Dict[str, List[Dict[str, Any]]] = {}
 
-                    face_anim = None
-                    try:
-                        # Compute mouth timeline from speech audio only (cached by audio content + params)
-                        mouth_segments = []
+                    async def _load_mouth_segments(target_audio_path: Path) -> List[Dict[str, Any]]:
+                        cache_key_path = target_audio_path
                         try:
-                            st = audio_path.stat()
+                            cache_key_path = target_audio_path.resolve(strict=False)
+                        except Exception:
+                            cache_key_path = target_audio_path.absolute()
+                        cache_key = str(cache_key_path)
+                        if cache_key in mouth_segment_cache:
+                            return mouth_segment_cache[cache_key]
+
+                        try:
+                            st = target_audio_path.stat()
                             key_data = {
                                 "op": "mouth_timeline",
-                                "audio_path": str(audio_path.resolve()),
+                                "audio_path": str(cache_key_path),
                                 "size": st.st_size,
                                 "mtime": int(st.st_mtime),
                                 "fps": int(mouth_fps),
@@ -243,7 +255,7 @@ class AudioPhase:
 
                             async def _create_mouth_json(out_path: Path) -> Path:
                                 segs = compute_mouth_timeline(
-                                    audio_path,
+                                    target_audio_path,
                                     fps=mouth_fps,
                                     thr_half_ratio=thr_half,
                                     thr_open_ratio=thr_open,
@@ -259,41 +271,145 @@ class AudioPhase:
                                 creator_func=_create_mouth_json,
                             )
                             with open(mouth_json_path, "r", encoding="utf-8") as _f:
-                                mouth_segments = (json.load(_f) or {}).get("segments", [])
+                                segments = (json.load(_f) or {}).get("segments", [])
                         except Exception:
-                            # Fallback: compute inline on any cache/read error
-                            mouth_segments = compute_mouth_timeline(
-                                audio_path,
-                                fps=mouth_fps,
-                                thr_half_ratio=thr_half,
-                                thr_open_ratio=thr_open,
-                            )
+                            try:
+                                segments = compute_mouth_timeline(
+                                    target_audio_path,
+                                    fps=mouth_fps,
+                                    thr_half_ratio=thr_half,
+                                    thr_open_ratio=thr_open,
+                                )
+                            except Exception as err:
+                                logger.debug(
+                                    "Mouth timeline computation failed for %s: %s",
+                                    line_id,
+                                    err,
+                                )
+                                segments = []
 
-                        # Deterministic blink schedule per line
-                        seed = deterministic_seed_from_text(line_id)
-                        blink_segments = generate_blink_timeline(
-                            duration=float(duration),
-                            fps=video_fps,
-                            min_interval_sec=blink_min,
-                            max_interval_sec=blink_max,
-                            close_frames=blink_close_frames,
-                            seed=seed,
-                        )
-                        face_anim = {
-                            "target_name": target_name,
-                            "mouth": mouth_segments,
-                            "eyes": blink_segments,
-                            "meta": {
-                                "mouth_fps": mouth_fps,
-                                "thr_half": thr_half,
-                                "thr_open": thr_open,
-                                "blink_min_interval": blink_min,
-                                "blink_max_interval": blink_max,
-                                "blink_close_frames": blink_close_frames,
-                            },
-                        }
-                    except Exception as e:
-                        logger.debug(f"Face animation timeline generation failed for {line_id}: {e}")
+                        mouth_segment_cache[cache_key] = segments
+                        return segments
+
+                    face_anim: Optional[Any] = None
+
+                    if voice_layers_cfg and voice_layer_segments:
+                        layer_face_anims: List[Dict[str, Any]] = []
+                        for layer_idx, layer_cfg in enumerate(voice_layers_cfg):
+                            target_name = layer_cfg.get("speaker_name")
+                            if not target_name:
+                                continue
+                            matching_segments = [
+                                seg
+                                for seg in voice_layer_segments
+                                if seg.get("layer_origin") == layer_idx
+                            ]
+                            if not matching_segments:
+                                continue
+                            mouth_segments: List[Dict[str, Any]] = []
+                            for seg_info in matching_segments:
+                                audio_seg = seg_info.get("audio_path")
+                                if not audio_seg:
+                                    continue
+                                try:
+                                    audio_seg_path = (
+                                        audio_seg
+                                        if isinstance(audio_seg, Path)
+                                        else Path(str(audio_seg))
+                                    )
+                                except Exception:
+                                    continue
+                                segments = await _load_mouth_segments(audio_seg_path)
+                                if not segments:
+                                    continue
+                                offset = float(seg_info.get("start_time", 0.0))
+                                for seg in segments:
+                                    start_val = float(seg.get("start", 0.0)) + offset
+                                    end_val = float(seg.get("end", 0.0)) + offset
+                                    if end_val <= start_val:
+                                        continue
+                                    mouth_segments.append(
+                                        {
+                                            "start": start_val,
+                                            "end": end_val,
+                                            "state": seg.get("state"),
+                                        }
+                                    )
+                            if not mouth_segments:
+                                continue
+                            mouth_segments.sort(key=lambda item: item["start"])
+                            seed = deterministic_seed_from_text(f"{line_id}:{target_name}")
+                            blink_segments = generate_blink_timeline(
+                                duration=float(duration),
+                                fps=video_fps,
+                                min_interval_sec=blink_min,
+                                max_interval_sec=blink_max,
+                                close_frames=blink_close_frames,
+                                seed=seed,
+                            )
+                            layer_face_anims.append(
+                                {
+                                    "target_name": target_name,
+                                    "mouth": mouth_segments,
+                                    "eyes": blink_segments,
+                                    "meta": {
+                                        "mouth_fps": mouth_fps,
+                                        "thr_half": thr_half,
+                                        "thr_open": thr_open,
+                                        "blink_min_interval": blink_min,
+                                        "blink_max_interval": blink_max,
+                                        "blink_close_frames": blink_close_frames,
+                                    },
+                                }
+                            )
+                        if layer_face_anims:
+                            face_anim = layer_face_anims
+
+                    if face_anim is None:
+                        target_name = line.get("speaker_name")
+                        if not target_name:
+                            try:
+                                for ch in (line.get("characters") or []):
+                                    if ch.get("visible", False) and ch.get("name"):
+                                        target_name = ch.get("name")
+                                        break
+                            except Exception:
+                                target_name = None
+                        if not target_name and voice_layers_cfg:
+                            for layer in voice_layers_cfg:
+                                if layer.get("speaker_name"):
+                                    target_name = layer.get("speaker_name")
+                                    break
+
+                        if target_name:
+                            try:
+                                mouth_segments = await _load_mouth_segments(audio_path)
+                                seed = deterministic_seed_from_text(line_id)
+                                blink_segments = generate_blink_timeline(
+                                    duration=float(duration),
+                                    fps=video_fps,
+                                    min_interval_sec=blink_min,
+                                    max_interval_sec=blink_max,
+                                    close_frames=blink_close_frames,
+                                    seed=seed,
+                                )
+                                face_anim = {
+                                    "target_name": target_name,
+                                    "mouth": mouth_segments,
+                                    "eyes": blink_segments,
+                                    "meta": {
+                                        "mouth_fps": mouth_fps,
+                                        "thr_half": thr_half,
+                                        "thr_open": thr_open,
+                                        "blink_min_interval": blink_min,
+                                        "blink_max_interval": blink_max,
+                                        "blink_close_frames": blink_close_frames,
+                                    },
+                                }
+                            except Exception as e:
+                                logger.debug(
+                                    f"Face animation timeline generation failed for {line_id}: {e}"
+                                )
 
                     line_data_map[line_id] = {
                         "type": "talk",

@@ -54,6 +54,7 @@ def load_script_and_config(script_path: str, default_config_path: str) -> Dict[s
             merged_line_settings = global_defaults.copy()
             # Avoid deep merging issues with line-specific character lists
             merged_line_settings.pop("characters", None)
+            merged_line_settings.pop("voice_layers", None)
 
             speaker_name = current_line_data.get("speaker_name")
             if speaker_name and speaker_name in character_defaults:
@@ -80,6 +81,30 @@ def load_script_and_config(script_path: str, default_config_path: str) -> Dict[s
                     else:
                         processed_characters.append(char_entry)
                 merged_line_settings["characters"] = processed_characters
+
+            # Handle concurrent voice layers for simultaneous speech
+            voice_layers = current_line_data.get("voice_layers")
+            if isinstance(voice_layers, list):
+                processed_layers = []
+                for layer_entry in voice_layers:
+                    if not isinstance(layer_entry, dict):
+                        processed_layers.append(layer_entry)
+                        continue
+
+                    layer_defaults = global_defaults.copy()
+                    layer_defaults.pop("characters", None)
+                    layer_defaults.pop("voice_layers", None)
+
+                    layer_speaker = layer_entry.get("speaker_name")
+                    if layer_speaker and layer_speaker in character_defaults:
+                        layer_defaults = merge_configs(
+                            layer_defaults, character_defaults[layer_speaker]
+                        )
+
+                    merged_layer = merge_configs(layer_defaults, layer_entry)
+                    processed_layers.append(merged_layer)
+
+                merged_line_settings["voice_layers"] = processed_layers
 
             # Update the original line dictionary with the merged settings
             line.clear()

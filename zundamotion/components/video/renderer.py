@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from ...cache import CacheManager
 from ...utils.ffmpeg_params import AudioParams, VideoParams
@@ -273,7 +273,7 @@ class VideoRenderer(OverlayMixin):
         background_effects: Optional[List[Any]] = None,
         screen_effects: Optional[List[Any]] = None,
         subtitle_png_path: Optional[Path] = None,
-        face_anim: Optional[Dict[str, Any]] = None,
+        face_anim: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
         _force_cpu: bool = False,
         audio_delay: float = 0.0,
     ) -> Optional[Path]:

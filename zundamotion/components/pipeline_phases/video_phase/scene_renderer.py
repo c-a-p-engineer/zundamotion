@@ -805,8 +805,15 @@ class SceneRenderer:
                         effective_insert = raw_insert
 
                 # Face animation config versioning for cache stability
-                face_anim = line_data.get("face_anim")
-                anim_meta = (face_anim or {}).get("meta") or {}
+                face_anim_raw = line_data.get("face_anim")
+                if isinstance(face_anim_raw, list):
+                    face_anim_list = face_anim_raw
+                elif face_anim_raw:
+                    face_anim_list = [face_anim_raw]
+                else:
+                    face_anim_list = []
+                first_anim_meta = face_anim_list[0] if face_anim_list else {}
+                anim_meta = (first_anim_meta or {}).get("meta") or {}
                 video_cache_data = {
                     "type": "talk",
                     "audio_cache_key": self.cache_manager._generate_hash(
@@ -825,8 +832,8 @@ class SceneRenderer:
                     "video_params": self.video_params.__dict__,
                     "audio_params": self.audio_params.__dict__,
                     # Minimal cache key for face animation
-                    "lip_eye_version": "v1",
-                    "face_anim_enabled": bool(face_anim),
+                    "lip_eye_version": "v2",
+                    "face_anim_enabled": bool(face_anim_list),
                     "mouth_fps": anim_meta.get("mouth_fps"),
                     "thr_half": anim_meta.get("thr_half"),
                     "thr_open": anim_meta.get("thr_open"),
@@ -848,7 +855,7 @@ class SceneRenderer:
                         insert_config=effective_insert,
                         background_effects=line_config.get("background_effects"),
                         screen_effects=line_config.get("screen_effects"),
-                        face_anim=face_anim,
+                        face_anim=face_anim_list,
                         audio_delay=pre_dur,
                     )
                     if clip_path is None:

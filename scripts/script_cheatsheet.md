@@ -108,6 +108,27 @@ subtitle:
 - `defaults.characters_persist: true` で VN 風に立ち絵を保持。サンプル: [`sample_vn_minimal.yaml`](./sample_vn_minimal.yaml)。
 - 字幕を任意位置で改行したい場合は `text` / `subtitle_text` に `\\n`（YAML では `"行1\\n行2"`）または `<br>` を挿入すると、字幕PNGと SRT/ASS ファイルで複数行表示されます。サンプル: [`sample.yaml`](./sample.yaml)。
 
+### 複数キャラクターの同時発話
+
+`voice_layers` にキャラクターごとのボイス設定を列挙すると、同じ行で複数の音声をミックスできます。
+レイヤーには `speaker_name` を必須指定し、必要に応じて `text` / `reading` / `speed` などを個別に上書きします。
+
+サンプル台本: [`sample_voice_layers.yaml`](./sample_voice_layers.yaml)
+
+```yaml
+lines:
+  - text: "二人揃ってご挨拶！"
+    voice_layers:
+      - speaker_name: "copetan"
+        text: "二人揃ってご挨拶！"
+      - speaker_name: "engy"
+        text: "二人揃ってご挨拶！"
+        start_time: 0.0   # ずらしたい場合は秒数指定（省略時は0）
+        volume: 0.9       # 個別音量（0.0〜1.0、省略時は1.0）
+```
+
+`voice_layers` の各エントリには `defaults.characters.<name>` の `speaker_id` や `speed` が自動適用されるため、既存のキャラクターデフォルトをそのまま活用できます。
+
 ## シーン遷移 (`transition`)
 
 ```yaml

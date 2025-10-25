@@ -228,6 +228,27 @@ scenes:
 - `text` / `subtitle_text`: 字幕PNG生成・タイムライン表記に使用。`subtitle_text` があればそれを、無ければ `text` を使用します。
 - 字幕内で任意に改行したい場合は `\n`（YAML では `"行1\\n行2"`）や `<br>` を差し込むと、PNG描画・SRT/ASS ファイルの両方で複数行に分割されます。
 
+### 🗣️ 同時発話（複数キャラを1行で）
+
+1つの行で複数キャラクターに同時に喋らせたい場合は、`voice_layers` にキャラクターごとのボイス設定を並べます。
+`defaults.characters.<name>` に定義した `speaker_id` や `speed` が各レイヤーへ自動で適用され、必要な項目だけを上書きすればOKです。
+
+```yaml
+lines:
+  - text: "二人揃って○○です！"
+    voice_layers:
+      - speaker_name: copetan
+        text: "二人揃って○○です！"
+      - speaker_name: engy
+        text: "二人揃って○○です！"
+        volume: 0.9       # 省略時は1.0
+        start_time: 0.0   # 秒単位、ずらしたいときだけ指定
+```
+
+各レイヤーは `reading` / `speed` / `pitch` などの調整も個別に指定可能です。生成された音声は自動的にミックスされ、字幕表示は行の `text`（または `subtitle_text`）が使用されます。
+
+> 📄 フルサンプル: [`scripts/sample_voice_layers.yaml`](scripts/sample_voice_layers.yaml)
+
 ### 📝 字幕スタイル調整
 
 `subtitle` セクション（既定は `zundamotion/templates/config.yaml`）で、行間や整列方法を細かく調整できます。

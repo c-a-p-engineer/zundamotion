@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ...exceptions import PipelineError
 from ...utils.ffmpeg_audio import has_audio_stream
@@ -52,7 +52,7 @@ async def render_clip(
     background_effects: Optional[List[Any]] = None,
     screen_effects: Optional[List[Any]] = None,
     subtitle_png_path: Optional[Path] = None,
-    face_anim: Optional[Dict[str, Any]] = None,
+    face_anim: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
     _force_cpu: bool = False,
     audio_delay: float = 0.0,
 ) -> Optional[Path]:
@@ -506,18 +506,25 @@ async def render_clip(
     )
 
     # Face animation overlays (mouth/eyes) for the speaking character
-    await apply_face_overlays(
-        renderer=renderer,
-        face_anim=face_anim,
-        subtitle_line_config=subtitle_line_config,
-        char_overlay_placement=char_overlay_placement,
-        duration=duration,
-        cmd=cmd,
-        input_layers=input_layers,
-        filter_complex_parts=filter_complex_parts,
-        overlay_streams=overlay_streams,
-        overlay_filters=overlay_filters,
-    )
+    face_anim_entries: List[Dict[str, Any]] = []
+    if isinstance(face_anim, list):
+        face_anim_entries = [entry for entry in face_anim if isinstance(entry, dict)]
+    elif isinstance(face_anim, dict):
+        face_anim_entries = [face_anim]
+
+    for face_anim_entry in face_anim_entries:
+        await apply_face_overlays(
+            renderer=renderer,
+            face_anim=face_anim_entry,
+            subtitle_line_config=subtitle_line_config,
+            char_overlay_placement=char_overlay_placement,
+            duration=duration,
+            cmd=cmd,
+            input_layers=input_layers,
+            filter_complex_parts=filter_complex_parts,
+            overlay_streams=overlay_streams,
+            overlay_filters=overlay_filters,
+        )
 
     # オーバーレイを連結
     if overlay_streams:

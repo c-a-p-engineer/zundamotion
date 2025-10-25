@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 from ...cache import CacheManager  # CacheManagerをインポート
 from ...utils.ffmpeg_params import AudioParams
@@ -30,7 +30,7 @@ class AudioGenerator:
 
     async def generate_audio(
         self, text: str, line_config: Dict[str, Any], output_filename: str
-    ) -> tuple[Path, int, str]:  # Returns (audio_path, speaker_id, text)
+    ) -> tuple[Path, List[Tuple[int, str]], List[Dict[str, Any]]]:
         """
         Generates a single audio file for a line of text.
 
@@ -41,13 +41,113 @@ class AudioGenerator:
 
         Returns:
             Path: The path to the generated wav file.
+            List[Tuple[int, str]]: Pairs of (speaker_id, text) for reporting.
+            List[Dict[str, Any]]: Voice layer metadata for lip-sync (per layer).
         """
         speech_wav_path_base = self.temp_dir / f"{output_filename}_speech"
         speech_duration = 0.0  # Initialize speech_duration
+        voice_usage: List[Tuple[int, str]] = []
+
+        voice_layers = line_config.get("voice_layers")
+        sound_effects = line_config.get("sound_effects", [])
+        layer_voice_segments: List[Dict[str, Any]] = []
+
+        if isinstance(voice_layers, list) and voice_layers:
+            audio_tracks_to_mix: List[Tuple[str, float, float]] = []
+            max_end_time = 0.0
+
+            for idx, layer in enumerate(voice_layers):
+                if not isinstance(layer, dict):
+                    continue
+
+                layer_text = str(
+                    layer.get("reading")
+                    or layer.get("read")
+                    or layer.get("text")
+                    or text
+                )
+                layer_output = f"{output_filename}_voice{idx+1}"
+
+                layer_line_config: Dict[str, Any] = {
+                    key: value
+                    for key, value in line_config.items()
+                    if key not in {"voice_layers", "sound_effects"}
+                }
+                layer_line_config.update(layer)
+                layer_line_config["sound_effects"] = []
+
+                (
+                    layer_audio_path,
+                    layer_usage,
+                    layer_segments,
+                ) = await self.generate_audio(layer_text, layer_line_config, layer_output)
+                voice_usage.extend(layer_usage)
+
+                start_time = float(layer.get("start_time", 0.0))
+                volume = float(layer.get("volume", 1.0))
+                audio_tracks_to_mix.append((str(layer_audio_path), start_time, volume))
+
+                try:
+                    layer_duration = await get_audio_duration(str(layer_audio_path))
+                except Exception:
+                    layer_duration = 0.0
+                max_end_time = max(max_end_time, start_time + layer_duration)
+                layer_speaker = layer.get("speaker_name") or layer_line_config.get(
+                    "speaker_name"
+                )
+
+                if layer_segments:
+                    for seg in layer_segments:
+                        seg_info = dict(seg)
+                        seg_info["start_time"] = start_time + float(
+                            seg_info.get("start_time", 0.0)
+                        )
+                        seg_info.setdefault("duration", layer_duration)
+                        seg_info.setdefault("volume", volume)
+                        seg_info.setdefault("speaker_name", layer_speaker)
+                        seg_info["layer_origin"] = idx
+                        layer_voice_segments.append(seg_info)
+                else:
+                    layer_voice_segments.append(
+                        {
+                            "speaker_name": layer_speaker,
+                            "audio_path": layer_audio_path,
+                            "start_time": start_time,
+                            "duration": layer_duration,
+                            "volume": volume,
+                            "layer_origin": idx,
+                        }
+                    )
+
+            for se in sound_effects:
+                se_path = se["path"]
+                se_start_time = float(se.get("start_time", 0.0))
+                se_volume = float(se.get("volume", 1.0))
+                audio_tracks_to_mix.append((se_path, se_start_time, se_volume))
+                se_duration = await get_audio_duration(se_path)
+                max_end_time = max(max_end_time, se_start_time + se_duration)
+
+            if not audio_tracks_to_mix:
+                silent_path = speech_wav_path_base.with_suffix(".wav")
+                await create_silent_audio(
+                    str(silent_path),
+                    0.001,
+                    self.audio_params,
+                )
+                return silent_path, voice_usage
+
+            total_duration = max(max_end_time, 0.001)
+            mixed_wav_path = self.temp_dir / f"{output_filename}_mixed.wav"
+            await mix_audio_tracks(
+                audio_tracks_to_mix,
+                str(mixed_wav_path),
+                total_duration=total_duration,
+                audio_params=self.audio_params,
+            )
+            return mixed_wav_path, voice_usage, layer_voice_segments
 
         # Determine the required duration for the speech track based on SEs if text is empty
         required_speech_duration_for_ses = 0.0
-        sound_effects = line_config.get("sound_effects", [])
         if not text.strip() and sound_effects:
             for se in sound_effects:
                 se_path = se["path"]
@@ -106,6 +206,17 @@ class AudioGenerator:
                 creator_func=creator_func,
             )
             speech_duration = await get_audio_duration(str(speech_wav_path))
+            voice_usage.append((int(speaker), text))
+            layer_voice_segments.append(
+                {
+                    "speaker_name": line_config.get("speaker_name"),
+                    "audio_path": speech_wav_path,
+                    "start_time": 0.0,
+                    "duration": speech_duration,
+                    "volume": 1.0,
+                    "layer_origin": None,
+                }
+            )
         else:
             # If text is empty, create a silent WAV file with duration based on SEs
             speech_wav_path = speech_wav_path_base.with_suffix(
@@ -120,17 +231,11 @@ class AudioGenerator:
                 self.audio_params,
             )
             speech_duration = required_speech_duration_for_ses
-            speaker = 0  # Default speaker ID for silent audio
-            text = ""  # Empty text for silent audio
 
         # Handle sound effects
         # sound_effects = line_config.get("sound_effects", []) # Already retrieved above
         if not sound_effects:
-            return (
-                speech_wav_path,
-                speaker,
-                text,
-            )  # No sound effects, return speech audio directly
+            return speech_wav_path, voice_usage, layer_voice_segments
 
         # Prepare audio tracks for mixing
         audio_tracks_to_mix = []
@@ -144,7 +249,7 @@ class AudioGenerator:
         for se in sound_effects:
             se_path = se["path"]
             se_start_time = se.get("start_time", 0.0)
-            se_volume = se.get("volume", 0.0)  # Corrected default volume
+            se_volume = se.get("volume", 1.0)
             audio_tracks_to_mix.append((se_path, se_start_time, se_volume))
             se_duration = await get_audio_duration(se_path)
             max_end_time = max(max_end_time, se_start_time + se_duration)
@@ -158,4 +263,4 @@ class AudioGenerator:
             audio_params=self.audio_params,
         )
 
-        return mixed_wav_path, speaker, text
+        return mixed_wav_path, voice_usage, layer_voice_segments
