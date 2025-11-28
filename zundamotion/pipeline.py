@@ -16,6 +16,7 @@ from .components.pipeline_phases import AudioPhase, BGMPhase, FinalizePhase, Vid
 from .components.script import load_script_and_config
 from .exceptions import PipelineError
 from .timeline import Timeline
+from .plugins.manager import initialize_plugins
 from .utils.ffmpeg_params import AudioParams, VideoParams
 from .utils.logger import KVLogger, logger, time_log
 
@@ -355,6 +356,10 @@ async def run_generation(
     hw_encoder: str = "auto",
     quality: str = "balanced",
     final_copy_only: bool = False,
+    disable_plugins: bool = False,
+    plugin_paths: Optional[List[str]] = None,
+    plugin_allow: Optional[List[str]] = None,
+    plugin_deny: Optional[List[str]] = None,
 ):
     """動画生成を高レベルに実行するユーティリティ関数。"""
     # Get the path to the default config file
@@ -380,6 +385,18 @@ async def run_generation(
             "enabled"
         ] = True
         config["system"]["subtitle_file"]["format"] = subtitle_file_format
+
+    # Initialize plugin system before pipeline creation
+    if not disable_plugins:
+        try:
+            initialize_plugins(
+                config=config,
+                cli_paths=plugin_paths,
+                allow_ids=plugin_allow,
+                deny_ids=plugin_deny,
+            )
+        except Exception:
+            logger.warning("[PluginLoader] Plugin initialization failed; continuing with built-ins")
 
     # Create and run the pipeline with default VideoParams and AudioParams
     pipeline = GenerationPipeline(

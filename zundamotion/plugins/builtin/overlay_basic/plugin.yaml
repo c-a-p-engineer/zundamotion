@@ -1,0 +1,13 @@
+id: overlay.basic
+version: 1.0.0
+kind: overlay
+description: Built-in overlay effects (blur, vignette, eq, hue, curves, unsharp, lut3d, rotate)
+provides:
+  - blur
+  - vignette
+  - eq
+  - hue
+  - curves
+  - unsharp
+  - lut3d
+  - rotate

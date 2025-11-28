@@ -1,0 +1,6 @@
+id: subtitle.text
+version: 1.0.0
+kind: subtitle
+description: Built-in subtitle bounce effect
+provides:
+  - text:bounce_text

@@ -8,6 +8,7 @@
 - [動画キャンバスと背景設定](#動画キャンバスと背景設定)
 - [字幕設定](#字幕設定)
 - [行とシーン](#行とシーン)
+- [プラグイン設定](#プラグイン設定)
 - [シーン遷移 (`transition`)](#シーン遷移-transition)
 - [キャラクター表示](#キャラクター表示)
   - [立ち絵アニメーション](#立ち絵アニメーション)
@@ -21,6 +22,21 @@
 - [顔アニメ用差分素材](#顔アニメ用差分素材)
 - [読みと字幕テキストの制御](#読みと字幕テキストの制御)
 - [便利な小ネタ](#便利な小ネタ)
+
+## プラグイン設定
+
+組み込みエフェクトはレジストリにキャッシュ済みで即座に利用できます。外部プラグインを試す場合は `plugins` ブロックを設定します。
+
+```yaml
+plugins:
+  enabled: true            # false でドロップインを全て無効化
+  paths: ["./plugins"]      # スキャン対象の追加ディレクトリ
+  allow: []               # 許可IDを列挙（空なら全許可）
+  deny: []                # 拒否IDを列挙（allow より優先）
+```
+
+- CLI から追加する場合: `python -m zundamotion.main --plugin-path ./my_plugins --plugin-allow my-blur`
+- レジストリ動作をまとめて確認したい場合は [`scripts/sample_registry_smoke.yaml`](./sample_registry_smoke.yaml) を実行すると、字幕とオーバーレイの両方でプラグイン読み込み・順序維持を検証できます。
 
 ## 基本構造
 
@@ -190,6 +206,7 @@ lines:
 ```
 
 - `text:bounce_text`: `abs(sin)` ベースの常時バウンド。設定は `amplitude`（px）だけで、値が大きいほど跳ね上がりが大きくなります。サンプル: [`sample_text_bounce.yaml`](./sample_text_bounce.yaml)。
+- オーバーレイと字幕エフェクトのレジストリ挙動を同時に確認するスモーク: [`sample_registry_smoke.yaml`](./sample_registry_smoke.yaml)。
 
 ## 画面全体エフェクト (`screen_effects`)
 
@@ -255,6 +272,7 @@ fg_overlays:
 - `mode: chroma` のときは `chroma: {key_color, similarity, blend}` を設定。
 - 静止画オーバーレイでも `fps` を指定するとフレーム補間され、アニメ的な動きを加えられます。
 - `effects` チェーンで `blur` / `eq` / `rotate` などのポストエフェクトを順番に適用可能。`timing` の `loop` や `start` で再生タイミングを制御できます。詳しくは [`sample_effects.yaml`](./sample_effects.yaml), [`sample.yaml`](./sample.yaml)。
+- オーバーレイのレジストリ化と字幕効果の同時スモークテスト: [`sample_registry_smoke.yaml`](./sample_registry_smoke.yaml)。
 
 ## BGM と音声チューニング
 

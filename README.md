@@ -22,6 +22,7 @@ Zundamotionは、VOICEVOXによる高品質な音声合成とFFmpegを用いた�
 - **音声処理ヘルパーの分離**: FFmpeg音声操作を`ffmpeg_audio.py`に集約し、責務を明確化しました。
 - **メディアパラメータ比較の並列化**: 複数ファイルのffprobeを同時実行し、前処理を高速化しました。
 - **設定ローダの責務分離**: YAML読み込み（`config/io.py`）/ディープマージ（`config/merge.py`）/検証（`config/validate.py`）に分割し、`script/loader.py`はエントリAPIに集約しました。
+- **ドロップインプラグイン**: `plugins.enabled/allow/deny/paths` でエフェクトや字幕エフェクトをドロップイン追加・無効化でき、組み込みプラグインはキャッシュされたレジストリ経由で即時利用できます。
 - **AIに読みやすい規模の徹底**: 1ファイル200–400行（最大500）、1関数20–40行（最大80）の目安で分割・整理。[AI_README.md](/docs/AI_README.md) に詳細。
 - **並列レンダリングとハードウェアエンコードの自動検出**: CPUコア数やGPU（NVENC/VAAPI/VideoToolbox）を検出し、最適なジョブ数を自動設定します。ハードウェアエンコードが利用可能な場合は自動的に活用し、失敗時はソフトウェアにフォールバックします。
 - **キャラクター配置の柔軟性**: キャラクターの表示位置をX/Y座標で指定できるだけでなく、スケーリング（拡大縮小）やアンカーポイント（画像の基準点）を設定することで、より細かくキャラクターの配置を制御できます。
@@ -136,6 +137,19 @@ lines:
 │       └── logger.py         # ロギングユーティリティ
 └── requirements.txt        # Pythonの依存関係
 ```
+
+### プラグイン設定の最小例
+
+- CLI: `python -m zundamotion.main --plugin-path ./my_plugins --plugin-allow my-blur`
+- config.yaml:
+  ```yaml
+  plugins:
+    enabled: true
+    paths: ["./plugins"]
+    allow: []   # 空なら全許可、ID指定で絞り込み
+    deny: []    # 危険/不要なIDを明示的に遮断
+  ```
+組み込みプラグインはキャッシュ済みレジストリから即時読み込まれ、追加パスを指定しない場合はスキャンも最小限になります。
 
 ---
 

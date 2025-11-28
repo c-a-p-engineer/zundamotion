@@ -1,0 +1,92 @@
+meta:
+  title: "レジストリ動作テストスモーク"
+  version: 3
+
+video:
+  fps: 30
+  size: {w: 1920, h: 1080}
+
+defaults:
+  characters_persist: true
+  characters:
+    copetan:
+      speaker_id: 3
+      subtitle:
+        font_color: "#FFFFFF"
+        stroke_color: "#000000"
+
+scenes:
+  - id: registry_smoke
+    bg: "assets/bg/room.png"
+    fg_overlays:
+      - id: color_grade
+        src: "assets/overlay/sakura_bg_black.mp4"
+        mode: overlay
+        opacity: 0.72
+        position: {x: 0, y: 0}
+        scale: {w: 1920, h: 1080, keep_aspect: true}
+        effects:
+          - type: hue
+            h: 8.0
+            s: 1.05
+            order: 5
+          - type: blur
+            sigma: 1.5
+            order: 10
+          - type: vignette
+            angle: 0.0
+            x0: 0.5
+            y0: 0.5
+            order: 20
+        timing:
+          start: 0.0
+          duration: 6.0
+      - id: accent_lines
+        src: "assets/overlay/speedlines.png"
+        mode: blend
+        blend_mode: screen
+        opacity: 0.88
+        position: {x: 0, y: 0}
+        scale: {w: 1920, h: 1080, keep_aspect: true}
+        effects:
+          - type: eq
+            contrast: 1.08
+            brightness: 0.04
+            order: 5
+          - type: unsharp
+            luma_msize_x: 5
+            luma_msize_y: 5
+            luma_amount: 1.0
+            order: 15
+          - type: rotate
+            degrees: 3.0
+            order: 25
+        timing:
+          start: 2.0
+          duration: 4.0
+    lines:
+      - text: "オーバーレイと字幕エフェクトのレジストリ動作をまとめて確認します。"
+        speaker_name: "copetan"
+        subtitle:
+          effects:
+            - type: "text:bounce_text"
+              amplitude: 28
+              frequency: 1.25
+      - wait: 2.5
+      - text: "オーダー指定つきのエフェクトチェーンで描画順序を検証できます。"
+        speaker_name: "copetan"
+        subtitle:
+          effects:
+            - type: "text:bounce_text"
+              amplitude: 20
+              frequency: 1.75
+              baseline_shift: -12
+      - wait: 2.5
+      - text: "字幕と前景レイヤーが同時に動いてもアルファが破綻しないことを確認してください。"
+        speaker_name: "copetan"
+        subtitle:
+          effects:
+            - type: "text:bounce_text"
+              amplitude: 16
+              frequency: 1.15
+              baseline_shift: -6

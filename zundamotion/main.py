@@ -115,6 +115,32 @@ async def main() -> None:
         action="store_true",
         help="Force final concat to use -c copy only; fail if re-encode would be required.",
     )
+    parser.add_argument(
+        "--plugin-path",
+        action="append",
+        dest="plugin_paths",
+        default=[],
+        help="Additional plugin search path (can be repeated).",
+    )
+    parser.add_argument(
+        "--plugin-allow",
+        action="append",
+        dest="plugin_allow",
+        default=[],
+        help="Only load plugins with these IDs (can be repeated).",
+    )
+    parser.add_argument(
+        "--plugin-deny",
+        action="append",
+        dest="plugin_deny",
+        default=[],
+        help="Deny-list plugin IDs (can be repeated).",
+    )
+    parser.add_argument(
+        "--no-plugins",
+        action="store_true",
+        help="Disable plugin discovery and use built-in registry only.",
+    )
 
     args = parser.parse_args()
 
@@ -164,6 +190,10 @@ async def main() -> None:
             args.hw_encoder,
             args.quality,
             final_copy_only=args.final_copy_only,
+            disable_plugins=args.no_plugins,
+            plugin_paths=args.plugin_paths,
+            plugin_allow=args.plugin_allow,
+            plugin_deny=args.plugin_deny,
         )
         logger.kv_info(
             "Video generation completed successfully.",

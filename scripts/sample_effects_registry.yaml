@@ -1,0 +1,61 @@
+meta:
+  title: "エフェクトレジストリ検証サンプル"
+  version: 3
+
+video:
+  fps: 30
+  size: {w: 1920, h: 1080}
+
+scenes:
+  - id: registry_demo
+    bg: "assets/bg/room.png"
+    fg_overlays:
+      - id: light_glow
+        src: "assets/overlay/speedlines.png"
+        mode: overlay
+        position: {x: 0, y: 0}
+        scale: {w: 1920, h: 1080, keep_aspect: true}
+        effects:
+          - type: blur
+            sigma: 2.0
+            order: 10
+          - type: eq
+            contrast: 1.05
+            brightness: 0.02
+            order: 20
+          - type: unsharp
+            luma_msize_x: 5
+            luma_msize_y: 5
+            luma_amount: 1.0
+            order: 30
+        timing:
+          start: 0.0
+          duration: 5.0
+      - id: color_grade
+        src: "assets/overlay/sakura_bg_black.mp4"
+        mode: overlay
+        opacity: 0.75
+        position: {x: 0, y: 0}
+        scale: {w: 1920, h: 1080, keep_aspect: true}
+        effects:
+          - type: hue
+            h: 5.0
+            s: 1.05
+            order: 5
+          - type: vignette
+            angle: 0.0
+            x0: 0.5
+            y0: 0.5
+            mode: backward
+            order: 40
+          - type: rotate
+            degrees: 2.5
+            order: 50
+        timing:
+          start: 1.0
+          duration: 4.0
+    lines:
+      - subtitle: "レジストリ経由で blur → eq → unsharp の順序を確認"
+        wait: 2.5
+      - subtitle: "hue → vignette → rotate の順序とアルファ保持を確認"
+        wait: 2.5

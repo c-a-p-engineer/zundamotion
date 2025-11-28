@@ -16,6 +16,13 @@ system:
     enabled: true
     format: "srt" # Can be "srt", "ass", "both", or "none"
 
+# Plugin system
+plugins:
+  enabled: true
+  paths: []      # Additional plugin directories (each containing plugin.yaml & plugin.py)
+  allow: []      # If non-empty, only load matching plugin IDs
+  deny: []       # Deny-list of plugin IDs to skip
+
 # Video settings
 video:
   width: 1920

@@ -260,6 +260,26 @@ def _validate_fg_overlays(container: Dict[str, Any], container_id: str) -> None:
                     )
 
 
+def _validate_plugins_config(cfg: Dict[str, Any]) -> None:
+    if not isinstance(cfg, dict):
+        raise ValidationError("'plugins' section must be a dictionary when provided.")
+    enabled = cfg.get("enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        raise ValidationError("'plugins.enabled' must be a boolean.")
+
+    for key in ("paths", "allow", "deny"):
+        val = cfg.get(key)
+        if val is None:
+            continue
+        if not isinstance(val, list):
+            raise ValidationError(f"'plugins.{key}' must be a list when provided.")
+        for idx, item in enumerate(val):
+            if not isinstance(item, str):
+                raise ValidationError(
+                    f"'plugins.{key}[{idx}]' must be a string path or ID."
+                )
+
+
 def validate_config(config: Dict[str, Any]) -> None:
     """Validate the loaded configuration and script data.
 
@@ -270,6 +290,10 @@ def validate_config(config: Dict[str, Any]) -> None:
     ValidationError
         If domain-specific checks fail.
     """
+    plugins_cfg = config.get("plugins")
+    if plugins_cfg is not None:
+        _validate_plugins_config(plugins_cfg)
+
     video_cfg = config.get("video", {}) or {}
     fit_mode = video_cfg.get("background_fit")
     if fit_mode is not None:

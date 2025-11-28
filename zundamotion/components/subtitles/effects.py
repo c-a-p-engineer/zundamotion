@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
+from zundamotion.plugins.loader import builtin_plugin_paths, load_plugins_cached
+from zundamotion.plugins.schema import SOURCE_PRIORITY
 from ...utils.logger import logger
 
 
@@ -17,6 +18,66 @@ class SubtitleEffectSnippet:
     output_label: str
     overlay_kwargs: Dict[str, str]
     dynamic: bool = False
+
+
+@dataclass(frozen=True)
+class SubtitleEffectContext:
+    """Context shared with subtitle effect builders."""
+
+    input_label: str
+    base_x_expr: str
+    base_y_expr: str
+    duration: float
+    width: int
+    height: int
+    index: int
+    effect_index: int
+
+
+SubtitleEffectBuilder = Callable[[SubtitleEffectContext, Dict[str, Any]], Optional[SubtitleEffectSnippet]]
+
+
+@dataclass(frozen=True)
+class SubtitleEffectSpec:
+    """Effect registration entry."""
+
+    name: str
+    builder: SubtitleEffectBuilder
+    source: str
+    version: str
+    aliases: tuple[str, ...]
+
+
+_EFFECT_REGISTRY: Dict[str, SubtitleEffectSpec] = {}
+
+
+def register_subtitle_effect(
+    name: str,
+    builder: SubtitleEffectBuilder,
+    *,
+    aliases: Sequence[str] | None = None,
+    source: str = "builtin",
+    version: str = "0.0.0",
+    enabled: bool = True,
+) -> None:
+    """Register a subtitle effect builder under a canonical name and optional aliases."""
+
+    if not enabled:
+        return
+
+    aliases = tuple(aliases or [])
+    spec = SubtitleEffectSpec(
+        name=name,
+        builder=builder,
+        source=source,
+        version=version,
+        aliases=aliases,
+    )
+    for key in (name, *aliases):
+        existing = _EFFECT_REGISTRY.get(key)
+        if existing and _source_priority(existing.source) > _source_priority(source):
+            continue
+        _EFFECT_REGISTRY[key] = spec
 
 
 def resolve_subtitle_effects(
@@ -35,6 +96,8 @@ def resolve_subtitle_effects(
     if not effects:
         return None
 
+    _ensure_registry_populated()
+
     filter_chain: List[str] = []
     current_label = input_label
     current_x = base_x_expr
@@ -46,21 +109,32 @@ def resolve_subtitle_effects(
         if not effect:
             continue
 
-        effect_type = effect["type"]
-        if effect_type == "text:bounce_text":
-            snippet = _resolve_text_bounce(
+        effect_type = effect.pop("type")
+        spec = _EFFECT_REGISTRY.get(effect_type)
+        if not spec:
+            logger.warning("[SubtitleEffects] Unsupported effect type: %s", effect_type)
+            continue
+
+        context = SubtitleEffectContext(
+            input_label=current_label,
+            base_x_expr=current_x,
+            base_y_expr=current_y,
+            duration=duration,
+            width=width,
+            height=height,
+            index=index,
+            effect_index=effect_index,
+        )
+
+        try:
+            snippet = spec.builder(context, effect)
+        except Exception as exc:  # noqa: BLE001 - log and continue
+            logger.warning(
+                "[SubtitleEffects] Failed to build effect type=%s params=%s err=%s",
+                effect_type,
                 effect,
-                input_label=current_label,
-                base_x_expr=current_x,
-                base_y_expr=current_y,
-                duration=duration,
-                width=width,
-                height=height,
-                index=index,
-                effect_index=effect_index,
+                exc,
             )
-        else:
-            logger.debug("[Effects] Unsupported text effect type: %s", effect_type)
             continue
 
         if not snippet:
@@ -94,77 +168,52 @@ def resolve_subtitle_effects(
 
 def _normalize_effect(raw: Any) -> Optional[Dict[str, Any]]:
     if isinstance(raw, str):
-        return {"type": raw.strip().lower()}
+        et = raw.strip().lower()
+        return {"type": et} if et else None
     if not isinstance(raw, dict):
         return None
     effect_type = raw.get("type")
-    if not isinstance(effect_type, str):
+    if not isinstance(effect_type, str) or not effect_type.strip():
         return None
-    normalized = dict(raw)
+    normalized = {k: v for k, v in raw.items() if v is not None}
     normalized["type"] = effect_type.strip().lower()
     return normalized
 
 
-def _resolve_text_bounce(
-    effect: Dict[str, Any],
-    *,
-    input_label: str,
-    base_x_expr: str,
-    base_y_expr: str,
-    duration: float,
-    width: int,
-    height: int,
-    index: int,
-    effect_index: int,
-) -> Optional[SubtitleEffectSnippet]:
-    """Create a perpetual vertical bounce controlled solely by amplitude."""
-
-    try:
-        amp_px = abs(float(effect.get("amplitude", effect.get("amount", 36.0))))
-    except Exception:
-        amp_px = 36.0
-
-    try:
-        freq = float(effect.get("frequency", 2.0))
-        if freq <= 0:
-            freq = 2.0
-    except Exception:
-        freq = 2.0
-
-    phase = _extract_phase_shift(effect, default=0.0)
-    omega = 2.0 * math.pi * freq
-    omega_str = f"{omega:.6f}"
-    phase_str = f"{phase:.6f}"
-
-    wave_expr = f"abs(sin({omega_str}*t+{phase_str}))"
-
-    base_bias = 0.0
-    try:
-        base_bias = float(effect.get("baseline_shift", 0.0))
-    except Exception:
-        base_bias = 0.0
-
-    y_expr = f"({base_y_expr})-(({amp_px:.6f})*{wave_expr})+({base_bias:.6f})"
-
-    overlay_kwargs = {"y": y_expr}
-
-    return SubtitleEffectSnippet(
-        filter_chain=[],
-        output_label=input_label,
-        overlay_kwargs=overlay_kwargs,
-        dynamic=amp_px > 0.0,
-    )
+def _ensure_registry_populated() -> None:
+    if _EFFECT_REGISTRY:
+        return
+    for plugin in load_plugins_cached(builtin_plugin_paths(), use_cache=True):
+        if plugin.meta.kind != "subtitle":
+            continue
+        aliases = plugin.aliases
+        for effect_id, builder in plugin.builders.items():
+            register_subtitle_effect(
+                effect_id,
+                builder,
+                aliases=aliases.get(effect_id, ()),
+                source=plugin.meta.source,
+                version=plugin.meta.version,
+                enabled=plugin.meta.enabled,
+            )
 
 
-def _extract_phase_shift(effect: Dict[str, Any], default: float) -> float:
-    if "phase_offset" in effect:
-        try:
-            return float(effect.get("phase_offset"))
-        except Exception:
-            return default
-    if "phase_offset_deg" in effect:
-        try:
-            return math.radians(float(effect.get("phase_offset_deg")))
-        except Exception:
-            return default
-    return default
+def reset_subtitle_effect_registry() -> None:
+    _EFFECT_REGISTRY.clear()
+
+
+def _source_priority(source: str) -> int:
+    return SOURCE_PRIORITY.get(source, 0)
+
+
+# Populate registry at import time for immediate availability.
+_ensure_registry_populated()
+
+
+__all__ = [
+    "resolve_subtitle_effects",
+    "register_subtitle_effect",
+    "SubtitleEffectSpec",
+    "SubtitleEffectSnippet",
+    "reset_subtitle_effect_registry",
+]

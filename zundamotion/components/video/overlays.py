@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from importlib import import_module
 
 from ...utils.ffmpeg_probe import get_media_duration
+from .overlay_effects import resolve_overlay_effects
 
 
 async def _run_ffmpeg(cmd: List[str]) -> None:
@@ -25,83 +26,9 @@ class OverlayMixin:
         return ext in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
     def _build_effect_filters(self, effects: Optional[List[Any]]) -> List[str]:
-        """fg_overlays[*].effects を FFmpeg フィルタ列に変換する。
+        """fg_overlays[*].effects を FFmpeg フィルタ列に変換する。"""
 
-        サポート（段階実装）:
-        - blur: {sigma}
-        - vignette: {}
-        - eq: {contrast, brightness, saturation, gamma, gamma_r, gamma_g, gamma_b}
-        - hue: {h, s, b}
-        - curves: {preset}
-        - unsharp: {lx, ly, la, cx, cy, ca}
-        - lut3d: {file}
-        - rotate: {angle|degrees, fill}
-        （zoompan は将来対応）
-        """
-        if not effects:
-            return []
-        out: List[str] = []
-        for eff in effects:
-            if isinstance(eff, str):
-                eff = {"type": eff}
-            if not isinstance(eff, dict):
-                continue
-            et = str(eff.get("type", "")).strip().lower()
-            if et == "blur":
-                sigma = float(eff.get("sigma", eff.get("r", 10)))
-                out.append(f"gblur=sigma={sigma}")
-            elif et == "vignette":
-                # パラメータ未指定でも既定を適用
-                out.append("vignette")
-            elif et == "eq":
-                parts: List[str] = []
-                for k in ("contrast", "brightness", "saturation", "gamma", "gamma_r", "gamma_g", "gamma_b"):
-                    if k in eff:
-                        parts.append(f"{k}={eff[k]}")
-                if parts:
-                    out.append("eq=" + ":".join(parts))
-            elif et == "hue":
-                parts: List[str] = []
-                if "h" in eff:
-                    parts.append(f"h={eff['h']}")
-                if "s" in eff:
-                    parts.append(f"s={eff['s']}")
-                if "b" in eff:
-                    parts.append(f"b={eff['b']}")
-                if parts:
-                    out.append("hue=" + ":".join(parts))
-            elif et == "curves":
-                preset = eff.get("preset")
-                if preset:
-                    out.append(f"curves=preset={preset}")
-            elif et == "unsharp":
-                lx = int(eff.get("lx", 5))
-                ly = int(eff.get("ly", 5))
-                la = float(eff.get("la", 1.0))
-                cx = int(eff.get("cx", 5))
-                cy = int(eff.get("cy", 5))
-                ca = float(eff.get("ca", 0.0))
-                out.append(f"unsharp={lx}:{ly}:{la}:{cx}:{cy}:{ca}")
-            elif et == "lut3d":
-                file = eff.get("file")
-                if file:
-                    out.append(f"lut3d=file={file}")
-            elif et == "rotate":
-                angle = eff.get("angle")
-                if angle is None and "degrees" in eff:
-                    # 度→ラジアン
-                    try:
-                        angle = float(eff.get("degrees")) * 3.141592653589793 / 180.0
-                    except Exception:
-                        angle = 0.0
-                try:
-                    ang = float(angle) if angle is not None else 0.0
-                except Exception:
-                    ang = 0.0
-                fill = eff.get("fill", "0x00000000")
-                out.append(f"rotate={ang}:fillcolor={fill}")
-            # zoompan は未対応（将来拡張）
-        return out
+        return resolve_overlay_effects(effects)
 
     async def apply_foreground_overlays(
         self, base_video: Path, overlays: List[Dict[str, Any]]
