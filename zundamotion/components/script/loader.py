@@ -1,9 +1,11 @@
-from typing import Any, Dict
+from copy import deepcopy
+from typing import Any, Dict, Iterable, Set
 
 from ...exceptions import ValidationError
 from ..config.io import load_config
 from ..config.merge import merge_configs
 from ..config.validate import validate_config
+from ...plugins.loader import default_plugin_paths, load_plugins_cached
 
 __all__ = ["load_script_and_config", "ValidationError"]
 
@@ -110,8 +112,67 @@ def load_script_and_config(script_path: str, default_config_path: str) -> Dict[s
             line.clear()
             line.update(merged_line_settings)
 
+    _inject_default_sound_effects(final_config)
+
     # Validate the final configuration
     validate_config(final_config)
 
     return final_config
+
+
+def _collect_overlay_effect_types(overlays: Iterable[Dict[str, Any]] | None) -> Set[str]:
+    effect_types: Set[str] = set()
+    for ov in overlays or []:
+        for eff in ov.get("effects", []) or []:
+            if isinstance(eff, str):
+                et = eff.strip().lower()
+                if et:
+                    effect_types.add(et)
+            elif isinstance(eff, dict):
+                et = eff.get("type")
+                if isinstance(et, str) and et.strip():
+                    effect_types.add(et.strip().lower())
+    return effect_types
+
+
+def _load_default_sound_effects(config: Dict[str, Any]) -> Dict[str, list[dict[str, Any]]]:
+    plugins_cfg = config.get("plugins", {}) or {}
+    roots = default_plugin_paths(plugins_cfg.get("paths"))
+    allow = plugins_cfg.get("allow")
+    deny = plugins_cfg.get("deny")
+
+    defaults: Dict[str, list[dict[str, Any]]] = {}
+    for plugin in load_plugins_cached(roots, allow=allow, deny=deny):
+        caps = getattr(plugin.meta, "capabilities", {}) or {}
+        sfx_map = caps.get("default_sound_effects")
+        if not isinstance(sfx_map, dict):
+            continue
+        for eff_type, sfx_list in sfx_map.items():
+            if not isinstance(eff_type, str) or not isinstance(sfx_list, list):
+                continue
+            cleaned: list[dict[str, Any]] = []
+            for sfx in sfx_list:
+                if isinstance(sfx, dict) and sfx.get("path"):
+                    cleaned.append(deepcopy(sfx))
+            if cleaned:
+                defaults[eff_type.strip().lower()] = cleaned
+    return defaults
+
+
+def _inject_default_sound_effects(config: Dict[str, Any]) -> None:
+    defaults = _load_default_sound_effects(config)
+    if not defaults:
+        return
+
+    script = config.get("script", {}) or {}
+    for scene in script.get("scenes", []):
+        scene_effects = _collect_overlay_effect_types(scene.get("fg_overlays"))
+        for line in scene.get("lines", []):
+            if line.get("sound_effects"):
+                continue
+            line_effects = scene_effects | _collect_overlay_effect_types(line.get("fg_overlays"))
+            for eff in line_effects:
+                if eff in defaults:
+                    line["sound_effects"] = deepcopy(defaults[eff])
+                    break
 

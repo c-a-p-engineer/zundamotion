@@ -30,6 +30,73 @@ class OverlayMixin:
 
         return resolve_overlay_effects(effects)
 
+    def _build_overlay_filter_parts(
+        self, in_stream: str, idx: int, ov: Dict[str, Any]
+    ) -> tuple[list[str], str]:
+        """Build filter_complex snippets for a single overlay entry.
+
+        The chain preserves the original alpha by splitting color/alpha planes,
+        applying effects only to the color stream, scaling alpha separately for
+        opacity, and merging them back with `alphamerge`.
+        """
+
+        filter_parts: list[str] = []
+        steps: list[str] = []
+
+        mode = ov.get("mode", "overlay")
+        if mode == "alpha":
+            mode = "overlay"
+
+        fps = ov.get("fps")
+        if fps:
+            steps.append(f"fps={int(fps)}")
+
+        scale_cfg = ov.get("scale", {})
+        w = scale_cfg.get("w")
+        h = scale_cfg.get("h")
+        keep = scale_cfg.get("keep_aspect")
+        if w and h:
+            if keep:
+                steps.append(
+                    f"scale={w}:{h}:flags={self.scale_flags}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
+                )
+            else:
+                steps.append(f"scale={w}:{h}:flags={self.scale_flags}")
+
+        if mode == "chroma":
+            chroma = ov.get("chroma", {})
+            key_color = chroma.get("key_color", "#000000").replace("#", "0x")
+            similarity = chroma.get("similarity", 0.1)
+            blend = chroma.get("blend", 0.0)
+            steps.append(f"colorkey={key_color}:{similarity}:{blend}")
+
+        effects = self._build_effect_filters(ov.get("effects"))
+        opacity = ov.get("opacity")
+
+        color_in = f"[ov{idx}_c_in]"
+        alpha_in = f"[ov{idx}_a_in]"
+        color_out = f"[ov{idx}_c]"
+        alpha_out = f"[ov{idx}_a]"
+        processed = f"[ov{idx}]"
+
+        # Base decode and optional fps/scale/chroma transforms
+        steps.insert(0, "format=rgba")
+        filter_parts.append(f"{in_stream}{','.join(steps)},split{color_in}{alpha_in}")
+
+        color_steps: list[str] = []
+        if effects:
+            color_steps.extend(effects)
+        filter_parts.append(f"{color_in}{','.join(color_steps or ['null'])}{color_out}")
+
+        alpha_steps = ["format=ya8"]
+        if opacity is not None:
+            alpha_steps.append(f"lut=a='val*{float(opacity):.6f}'")
+        filter_parts.append(f"{alpha_in}{','.join(alpha_steps)}{alpha_out}")
+
+        filter_parts.append(f"{color_out}{alpha_out}alphamerge{processed}")
+
+        return filter_parts, processed if mode != "blend" else processed
+
     async def apply_foreground_overlays(
         self, base_video: Path, overlays: List[Dict[str, Any]]
     ) -> Path:
@@ -69,38 +136,8 @@ class OverlayMixin:
         prev_stream = "[0:v]"
         for idx, ov in enumerate(overlays):
             in_stream = f"[{idx + 1}:v]"
-            steps: List[str] = []
-            mode = ov.get("mode", "overlay")
-            if mode == "alpha":
-                mode = "overlay"
-            fps = ov.get("fps")
-            if fps:
-                steps.append(f"fps={int(fps)}")
-            scale_cfg = ov.get("scale", {})
-            w = scale_cfg.get("w")
-            h = scale_cfg.get("h")
-            keep = scale_cfg.get("keep_aspect")
-            if w and h:
-                if keep:
-                    steps.append(
-                        f"scale={w}:{h}:flags={self.scale_flags}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
-                    )
-                else:
-                    steps.append(f"scale={w}:{h}:flags={self.scale_flags}")
-            if mode == "chroma":
-                chroma = ov.get("chroma", {})
-                key_color = chroma.get("key_color", "#000000").replace("#", "0x")
-                similarity = chroma.get("similarity", 0.1)
-                blend = chroma.get("blend", 0.0)
-                steps.append(f"colorkey={key_color}:{similarity}:{blend}")
-            steps.append("format=rgba")
-            opacity = ov.get("opacity")
-            if opacity is not None:
-                steps.append(f"colorchannelmixer=aa={float(opacity)}")
-            # effects (order-preserving)
-            steps.extend(self._build_effect_filters(ov.get("effects")))
-            processed = f"[ov{idx}]"
-            filter_parts.append(f"{in_stream}{','.join(steps)}{processed}")
+            overlay_filters, processed = self._build_overlay_filter_parts(in_stream, idx, ov)
+            filter_parts.extend(overlay_filters)
 
             pos = ov.get("position", {})
             x = pos.get("x", 0)
@@ -115,7 +152,7 @@ class OverlayMixin:
                 enable = f"gte(t,{start})"
 
             preserve_color = bool(ov.get("preserve_color", False))
-            if mode == "blend" and not preserve_color:
+            if ov.get("mode") == "blend" and not preserve_color:
                 blend_mode = ov.get("blend_mode", "screen")
                 filter_parts.append(
                     f"{prev_stream}{processed}blend=all_mode={blend_mode}:enable='{enable}'[tmp{idx}]"
@@ -172,37 +209,8 @@ class OverlayMixin:
 
         for idx, ov in enumerate(overlays or []):
             in_stream = f"[{idx + 1}:v]"
-            steps: List[str] = []
-            mode = ov.get("mode", "overlay")
-            if mode == "alpha":
-                mode = "overlay"
-            fps = ov.get("fps")
-            if fps:
-                steps.append(f"fps={int(fps)}")
-            scale_cfg = ov.get("scale", {})
-            w = scale_cfg.get("w")
-            h = scale_cfg.get("h")
-            keep = scale_cfg.get("keep_aspect")
-            if w and h:
-                if keep:
-                    steps.append(
-                        f"scale={w}:{h}:flags={self.scale_flags}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
-                    )
-                else:
-                    steps.append(f"scale={w}:{h}:flags={self.scale_flags}")
-            if mode == "chroma":
-                chroma = ov.get("chroma", {})
-                key_color = chroma.get("key_color", "#000000").replace("#", "0x")
-                similarity = chroma.get("similarity", 0.1)
-                blend = chroma.get("blend", 0.0)
-                steps.append(f"colorkey={key_color}:{similarity}:{blend}")
-            steps.append("format=rgba")
-            opacity = ov.get("opacity")
-            if opacity is not None:
-                steps.append(f"colorchannelmixer=aa={float(opacity)}")
-            steps.extend(self._build_effect_filters(ov.get("effects")))
-            processed = f"[ov{idx}]"
-            filter_parts.append(f"{in_stream}{','.join(steps)}{processed}")
+            overlay_filters, processed = self._build_overlay_filter_parts(in_stream, idx, ov)
+            filter_parts.extend(overlay_filters)
 
             pos = ov.get("position", {})
             x = pos.get("x", 0)
@@ -217,7 +225,7 @@ class OverlayMixin:
                 enable = f"gte(t,{start})"
 
             preserve_color = bool(ov.get("preserve_color", False))
-            if mode == "blend" and not preserve_color:
+            if ov.get("mode") == "blend" and not preserve_color:
                 blend_mode = ov.get("blend_mode", "screen")
                 filter_parts.append(
                     f"{prev_stream}{processed}blend=all_mode={blend_mode}:enable='{enable}'[tmp{idx}]"

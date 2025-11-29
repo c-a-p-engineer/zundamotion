@@ -22,6 +22,13 @@ def _write_plugin(tmpdir: Path, meta: dict, body: str) -> Path:
     return tmpdir
 
 
+def _write_inline_plugin(tmpdir: Path, meta: dict, body: str) -> Path:
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    inlined_body = f"PLUGIN_META = {meta!r}\n\n{body}"
+    (tmpdir / "plugin.py").write_text(inlined_body, encoding="utf-8")
+    return tmpdir
+
+
 def test_overlay_plugin_overrides_builtin(tmp_path: Path):
     reset_overlay_effect_registry()
     reset_subtitle_effect_registry()
@@ -78,6 +85,35 @@ BUILDERS = {"blur": builder}
     # Falls back to built-in blur builder
     blur_filters = resolve_overlay_effects([{"type": "blur", "sigma": 2}])
     assert blur_filters and blur_filters[0].startswith("gblur=sigma=")
+
+
+def test_inline_plugin_without_manifest_loads(tmp_path: Path):
+    reset_overlay_effect_registry()
+
+    meta = {
+        "id": "overlay.inline_blur",
+        "version": "1.0.0",
+        "kind": "overlay",
+        "provides": ["blur"],
+    }
+    body = """
+from typing import Dict, Any, List
+
+
+def builder(params: Dict[str, Any]) -> List[str]:
+    return ["inline_custom_blur"]
+
+
+BUILDERS = {"blur": builder}
+"""
+    plugin_dir = _write_inline_plugin(tmp_path / "overlay_inline", meta, body)
+
+    initialize_plugins(
+        config={"plugins": {"paths": [str(plugin_dir)], "allow": ["overlay.inline_blur"]}}
+    )
+
+    blur_filters = resolve_overlay_effects([{"type": "blur", "sigma": 2}])
+    assert blur_filters == ["inline_custom_blur"]
 
 
 def test_subtitle_plugin_registers_alias(tmp_path: Path):
@@ -146,6 +182,14 @@ BUILDERS = {"blur": builder}
 
     blur_filters = resolve_overlay_effects([{"type": "blur", "sigma": 2}])
     assert blur_filters and blur_filters[0].startswith("gblur=")
+
+
+def test_builtin_blur_preserves_alpha_by_default():
+    reset_overlay_effect_registry()
+
+    blur_filters = resolve_overlay_effects([{"type": "blur", "sigma": 5.5}])
+
+    assert blur_filters == ["gblur=sigma=5.5000:planes=7"]
 
 
 def test_invalid_manifest_is_skipped(tmp_path: Path):
@@ -219,3 +263,20 @@ def test_builtin_plugins_cached_between_calls(monkeypatch, tmp_path: Path):
     assert call_counter["loader"] == 2  # cache hit prevents re-import once
     assert first == second
     assert uncached[0].builders["blur"]({}) == ["cached_blur:1"]
+
+
+def test_example_user_simple_shake_presets_load():
+    reset_overlay_effect_registry()
+    reset_subtitle_effect_registry()
+
+    examples = Path(__file__).resolve().parents[1] / "plugins" / "examples"
+    initialize_plugins(config={"plugins": {"paths": [str(examples)]}})
+
+    basic = resolve_overlay_effects([{"type": "shake", "amplitude_deg": 2.0, "frequency_hz": 3.2}])
+    assert basic and "rotate=(" in basic[0]
+
+    soft = resolve_overlay_effects([{"type": "soft_shake"}])
+    assert soft and any("rotate=" in f for f in soft)
+
+    with_sfx = resolve_overlay_effects([{"type": "shake_fanfare"}])
+    assert with_sfx is not None and any("eq=contrast" in f for f in with_sfx)

@@ -1,0 +1,82 @@
+meta:
+  title: "ユーザープラグイン overlay エフェクトのスモークテスト"
+  version: 4
+
+video:
+  fps: 30
+
+defaults:
+  characters:
+    narrator:
+      speaker_id: 3
+      speed: 1.05
+      pitch: 0.05
+      subtitle:
+        font_color: "#90EE90" # LightGreen
+        stroke_color: "white"
+
+scenes:
+  - id: shake_minimal
+    bg: "assets/bg/room.png"
+    fg_overlays:
+      - id: shake_only
+        src: "assets/overlay/speedlines.png"
+        mode: overlay
+        opacity: 0.9
+        position: {x: 0, y: 0}
+        scale: {w: 1920, h: 1080, keep_aspect: true}
+        fps: 30
+        effects:
+          - type: shake  # user_simple プラグインの最小揺れ
+            amplitude_deg: 2.0
+            frequency_hz: 3.2
+        timing:
+          start: 0.0
+          duration: 4.0
+          loop: true
+    lines:
+      - text: "前景オーバーレイだけが揺れるテストだよ。画面シェイクとは別物なので揺れ方に注目してね。"
+        speaker_name: "narrator"
+      - wait: 4.0
+
+  - id: shake_preset_soft
+    bg: "assets/bg/room.png"
+    fg_overlays:
+      - id: soft_shake
+        src: "assets/overlay/speedlines.png"
+        mode: overlay
+        opacity: 0.85
+        position: {x: 0, y: 0}
+        scale: {w: 1920, h: 1080, keep_aspect: true}
+        fps: 30
+        effects:
+          - type: soft_shake  # 揺れ + ぼかし + 軽い色味プリセット
+        timing:
+          start: 0.0
+          duration: 4.0
+          loop: true
+    lines:
+      - text: "今度はプリセット版のソフト揺れだよ。ぼかしと薄い色味が足されているよ。"
+        speaker_name: "narrator"
+      - wait: 4.0
+
+  - id: shake_with_sound
+    bg: "assets/bg/room.png"
+    fg_overlays:
+      - id: shake_and_sound
+        src: "assets/overlay/speedlines.png"
+        mode: overlay
+        opacity: 0.75
+        position: {x: 0, y: 0}
+        scale: {w: 1920, h: 1080, keep_aspect: true}
+        fps: 30
+        effects:
+          - type: shake_fanfare  # 揺れ + 色味固定で効果音と合わせやすいプリセット
+        timing:
+          start: 0.0
+          duration: 4.0
+          loop: true
+    lines:
+      - text: "揺れプリセットにファンファーレを足したテストだよ。音と揺れの同期を見てね。"
+        speaker_name: "narrator"
+      - wait: 4.0

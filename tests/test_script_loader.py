@@ -63,3 +63,56 @@ def test_voice_layers_inherit_character_defaults(tmp_path):
     assert voice_layers[1]["speaker_id"] == 2
     # Explicit overrides on the layer should be preserved
     assert voice_layers[1]["speed"] == 0.9
+
+
+def test_auto_sound_effect_injected_from_overlay_preset(tmp_path):
+    root = Path.cwd()
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump(
+            {
+                "script": {"scenes": []},
+                "plugins": {
+                    "paths": [str(root / "plugins" / "examples")],
+                    "allow": ["example.overlay.user-simple"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "test", "version": 3},
+                "scenes": [
+                    {
+                        "id": "s1",
+                        "bg": str((root / "assets" / "bg" / "room.png").resolve()),
+                        "fg_overlays": [
+                            {
+                                "id": "shake_fanfare",
+                                "src": str((root / "assets" / "overlay" / "speedlines.png").resolve()),
+                                "mode": "overlay",
+                                "effects": ["shake_fanfare"],
+                            }
+                        ],
+                        "lines": [
+                            {
+                                "text": "fanfare付き揺れのテスト",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_script_and_config(str(script_path), str(default_config_path))
+    line = config["script"]["scenes"][0]["lines"][0]
+
+    assert line.get("sound_effects"), "shake_fanfare はデフォルトSEを自動付与する"
+    se = line["sound_effects"][0]
+    assert se["path"].endswith("rap_fanfare.mp3")

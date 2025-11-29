@@ -28,7 +28,8 @@ def _coerce_int(value: Any, *, default: int, min_value: int | None = None) -> in
 
 def _build_blur(params: Dict[str, Any]) -> List[str]:
     sigma = _coerce_float(params.get("sigma", params.get("r", 10.0)), default=10.0, min_value=0.0)
-    return [f"gblur=sigma={sigma:.4f}"]
+    planes = _coerce_int(params.get("planes", 7), default=7, min_value=0)
+    return [f"gblur=sigma={sigma:.4f}:planes={planes}"]
 
 
 def _build_vignette(_: Dict[str, Any]) -> List[str]:

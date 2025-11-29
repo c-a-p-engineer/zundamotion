@@ -101,15 +101,18 @@ def _deduplicate_paths(paths: Iterable[Path]) -> List[Path]:
 def discover_plugins(
     roots: Iterable[Path], *, allow: Optional[Iterable[str]] = None, deny: Optional[Iterable[str]] = None
 ) -> List[PluginSpec]:
-    """Scan plugin roots for ``plugin.yaml`` files and return validated specs."""
+    """Scan plugin roots for ``plugin.yaml`` or inline ``plugin.py`` metadata and return specs."""
 
     allow_set = {a for a in (allow or [])}
     deny_set = {d for d in (deny or [])}
 
     specs: List[PluginSpec] = []
+    seen_base_paths: set[Path] = set()
     for root in roots:
         if not root.exists():
             continue
+
+        # 1) Manifest-first discovery (keeps existing safety/allow list behavior)
         for manifest in root.rglob("plugin.yaml"):
             source = "builtin" if "builtin" in manifest.parts else "user"
             meta = _load_meta(manifest, source=source)
@@ -120,10 +123,35 @@ def discover_plugins(
             if meta.plugin_id in deny_set:
                 continue
             module_path = manifest.with_name("plugin.py")
+            base_dir = manifest.parent.resolve()
+            seen_base_paths.add(base_dir)
             specs.append(
                 PluginSpec(
                     meta=meta,
                     base_path=str(manifest.parent),
+                    module_path=str(module_path),
+                )
+            )
+
+        # 2) Manifest-less discovery: allow drop-in plugin.py with inline PLUGIN_META
+        for module_path in root.rglob("plugin.py"):
+            base_dir = module_path.parent.resolve()
+            if base_dir in seen_base_paths:
+                continue
+
+            source = "builtin" if "builtin" in module_path.parts else "user"
+            meta = _load_inline_meta(module_path, source=source)
+            if not meta:
+                continue
+            if allow_set and meta.plugin_id not in allow_set:
+                continue
+            if meta.plugin_id in deny_set:
+                continue
+            seen_base_paths.add(base_dir)
+            specs.append(
+                PluginSpec(
+                    meta=meta,
+                    base_path=str(module_path.parent),
                     module_path=str(module_path),
                 )
             )
@@ -238,6 +266,44 @@ def _load_meta(manifest: Path, *, source: str) -> Optional[PluginMeta]:
     if meta is None:
         logger.warning(
             "[PluginLoader] Invalid manifest for plugin at %s", manifest
+        )
+        return None
+    return meta
+
+
+def _load_inline_meta(module_path: Path, *, source: str) -> Optional[PluginMeta]:
+    """Parse inline ``PLUGIN_META`` style definitions without executing the module."""
+
+    try:
+        tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+    except Exception as exc:  # noqa: BLE001 - do not block main flow
+        logger.warning(
+            "[PluginLoader] Failed to read inline meta from %s: %s", module_path, exc
+        )
+        return None
+
+    meta_dict: Optional[dict] = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id in {"PLUGIN_META", "META", "PLUGIN"}:
+                    try:
+                        value = ast.literal_eval(node.value)
+                    except Exception:  # noqa: BLE001 - invalid literal
+                        continue
+                    if isinstance(value, dict):
+                        meta_dict = value
+                        break
+        if meta_dict is not None:
+            break
+
+    if meta_dict is None:
+        return None
+
+    meta = parse_plugin_meta(meta_dict, source=source, base_path=str(module_path.parent))
+    if meta is None:
+        logger.warning(
+            "[PluginLoader] Invalid inline meta for plugin at %s", module_path
         )
         return None
     return meta
