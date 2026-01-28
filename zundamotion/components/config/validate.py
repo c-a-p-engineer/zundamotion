@@ -387,10 +387,12 @@ def validate_config(config: Dict[str, Any]) -> None:
                 raise ValidationError(
                     f"Transition configuration for scene '{scene_id}' must be a dictionary."
                 )
-            transition_type = transition_config.get("type")
+            transition_type = transition_config.get("type") or transition_config.get(
+                "video"
+            )
             if not transition_type:
                 raise ValidationError(
-                    f"Transition for scene '{scene_id}' must have a 'type'."
+                    f"Transition for scene '{scene_id}' must have a 'type' or 'video'."
                 )
             if not isinstance(transition_type, str):
                 raise ValidationError(

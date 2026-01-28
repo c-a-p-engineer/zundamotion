@@ -1,4 +1,5 @@
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Dict, Iterable, Set
 
 from ...exceptions import ValidationError
@@ -6,11 +7,18 @@ from ..config.io import load_config
 from ..config.merge import merge_configs
 from ..config.validate import validate_config
 from ...plugins.loader import default_plugin_paths, load_plugins_cached
+from .resolver import resolve_script
 
 __all__ = ["load_script_and_config", "ValidationError"]
 
 
-def load_script_and_config(script_path: str, default_config_path: str) -> Dict[str, Any]:
+def load_script_and_config(
+    script_path: str,
+    default_config_path: str,
+    *,
+    dump_resolved_path: str | None = None,
+    debug_include: bool = False,
+) -> Dict[str, Any]:
     """
     Load the script YAML and merge it with the default configuration.
 
@@ -23,7 +31,12 @@ def load_script_and_config(script_path: str, default_config_path: str) -> Dict[s
     """
     # Load default config and script YAML
     default_config = load_config(default_config_path)
-    script_data = load_config(script_path)
+    resolved_script = resolve_script(
+        Path(script_path),
+        dump_resolved_path=Path(dump_resolved_path) if dump_resolved_path else None,
+        debug_include=debug_include,
+    )
+    script_data = resolved_script.data
 
     # Merge script into the 'script' key of the config
     final_config: Dict[str, Any] = default_config.copy()
@@ -175,4 +188,3 @@ def _inject_default_sound_effects(config: Dict[str, Any]) -> None:
                 if eff in defaults:
                     line["sound_effects"] = deepcopy(defaults[eff])
                     break
-

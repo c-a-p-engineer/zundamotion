@@ -141,6 +141,22 @@ async def main() -> None:
         action="store_true",
         help="Disable plugin discovery and use built-in registry only.",
     )
+    parser.add_argument(
+        "--no-voice",
+        action="store_true",
+        help="Disable VOICEVOX synthesis and use silent audio with estimated durations.",
+    )
+    parser.add_argument(
+        "--dump-resolved",
+        type=str,
+        default=None,
+        help="Write the resolved YAML (includes/vars expanded) to the given path.",
+    )
+    parser.add_argument(
+        "--debug-include",
+        action="store_true",
+        help="Print include resolution chains for debugging.",
+    )
 
     args = parser.parse_args()
 
@@ -194,6 +210,9 @@ async def main() -> None:
             plugin_paths=args.plugin_paths,
             plugin_allow=args.plugin_allow,
             plugin_deny=args.plugin_deny,
+            dump_resolved_path=args.dump_resolved,
+            debug_include=args.debug_include,
+            disable_voice=args.no_voice,
         )
         logger.kv_info(
             "Video generation completed successfully.",

@@ -360,13 +360,23 @@ async def run_generation(
     plugin_paths: Optional[List[str]] = None,
     plugin_allow: Optional[List[str]] = None,
     plugin_deny: Optional[List[str]] = None,
+    dump_resolved_path: Optional[str] = None,
+    debug_include: bool = False,
+    disable_voice: bool = False,
 ):
     """動画生成を高レベルに実行するユーティリティ関数。"""
     # Get the path to the default config file
     default_config_path = Path(__file__).parent / "templates" / "config.yaml"
 
     # Load script and config
-    config = load_script_and_config(script_path, str(default_config_path))
+    config = load_script_and_config(
+        script_path,
+        str(default_config_path),
+        dump_resolved_path=dump_resolved_path,
+        debug_include=debug_include,
+    )
+    if disable_voice:
+        config.setdefault("voice", {})["enabled"] = False
 
     # Override timeline settings from CLI
     if no_timeline:

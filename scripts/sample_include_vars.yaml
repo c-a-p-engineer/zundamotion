@@ -1,0 +1,41 @@
+vars:
+  EP: 12
+  TITLE: "S3 consistency"
+
+meta:
+  title: "${TITLE}"
+  version: 3
+
+defaults:
+  include:
+    - presets/defaults_base.yaml
+    - presets/subtitle_shorts.yaml
+  characters:
+    copetan:
+      speaker_id: 3
+  subtitle:
+    max_lines: 2
+
+scenes:
+  - include: parts/intro.yaml
+  - id: mid_scene
+    bg: assets/bg/room.png
+    lines:
+      - text: "インクルードの合間に通常シーンを挟むよ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "default"
+            enter: slide_left
+            enter_duration: 0.5
+            anchor: middle_left
+            scale: 0.85
+      - text: "変数もそのまま使えるね。EPは${EP}です。"
+        speaker_name: "copetan"
+      - wait: 0.3
+      - text: "それじゃアウトロへ。"
+        speaker_name: "copetan"
+  - include: parts/outro.yaml
+    transition:
+      video: fade
+      duration: 0.25

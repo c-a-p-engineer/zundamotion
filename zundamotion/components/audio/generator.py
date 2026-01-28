@@ -146,6 +146,7 @@ class AudioGenerator:
             )
             return mixed_wav_path, voice_usage, layer_voice_segments
 
+        voice_enabled = bool(self.voice_config.get("enabled", True))
         # Determine the required duration for the speech track based on SEs if text is empty
         required_speech_duration_for_ses = 0.0
         if not text.strip() and sound_effects:
@@ -162,7 +163,7 @@ class AudioGenerator:
                     0.001  # A very small duration to ensure a valid audio file
                 )
 
-        if text.strip():  # Only generate voice if text is not empty
+        if text.strip() and voice_enabled:  # Only generate voice if text is not empty
             # speaker_id, speed, and pitch should already be merged into line_config by script_loader.py
             # Use values directly from line_config, falling back to global voice_config if not present
             speaker = line_config.get("speaker_id", self.voice_config.get("speaker"))
@@ -218,19 +219,29 @@ class AudioGenerator:
                 }
             )
         else:
-            # If text is empty, create a silent WAV file with duration based on SEs
+            # If voice is disabled or text is empty, create a silent WAV file
             speech_wav_path = speech_wav_path_base.with_suffix(
                 ".wav"
             )  # キャッシュを使わないので、ここでパスを確定
+            estimated_duration = _estimate_silent_duration(
+                text,
+                line_config,
+                self.voice_config,
+            )
+            silent_duration = max(
+                estimated_duration,
+                required_speech_duration_for_ses,
+                0.001,
+            )
             logger.info(
-                f"[Audio] Empty text, creating silent WAV for {speech_wav_path.name} with duration {required_speech_duration_for_ses}s"
+                f"[Audio] Using silent WAV for {speech_wav_path.name} with duration {silent_duration}s"
             )
             await create_silent_audio(
                 str(speech_wav_path),
-                required_speech_duration_for_ses,
+                silent_duration,
                 self.audio_params,
             )
-            speech_duration = required_speech_duration_for_ses
+            speech_duration = silent_duration
 
         # Handle sound effects
         # sound_effects = line_config.get("sound_effects", []) # Already retrieved above
@@ -264,3 +275,22 @@ class AudioGenerator:
         )
 
         return mixed_wav_path, voice_usage, layer_voice_segments
+
+
+def _estimate_silent_duration(
+    text: str,
+    line_config: Dict[str, Any],
+    voice_config: Dict[str, Any],
+) -> float:
+    explicit = line_config.get("estimated_duration")
+    if isinstance(explicit, (int, float)) and explicit > 0:
+        return float(explicit)
+    override = line_config.get("duration")
+    if isinstance(override, (int, float)) and override > 0:
+        return float(override)
+    chars_per_second = float(voice_config.get("estimate_chars_per_second", 8.0))
+    min_duration = float(voice_config.get("estimate_min_duration", 1.0))
+    if chars_per_second <= 0:
+        chars_per_second = 8.0
+    estimated = len(text) / chars_per_second if text.strip() else 0.0
+    return max(min_duration, estimated)

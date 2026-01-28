@@ -1,0 +1,6 @@
+scenes:
+  - id: outro
+    bg: assets/bg/room.png
+    lines:
+      - text: "次回もお楽しみに。"
+        speaker_name: "copetan"

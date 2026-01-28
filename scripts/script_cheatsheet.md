@@ -9,6 +9,8 @@
 - [字幕設定](#字幕設定)
 - [行とシーン](#行とシーン)
 - [プラグイン設定](#プラグイン設定)
+- [台本の再利用 (`include` / `vars`)](#台本の再利用-include--vars)
+- [音声なしで生成する](#音声なしで生成する)
 - [シーン遷移 (`transition`)](#シーン遷移-transition)
 - [キャラクター表示](#キャラクター表示)
   - [立ち絵アニメーション](#立ち絵アニメーション)
@@ -37,6 +39,54 @@ plugins:
 
 - CLI から追加する場合: `python -m zundamotion.main --plugin-path ./my_plugins --plugin-allow my-blur`
 - レジストリ動作をまとめて確認したい場合は [`scripts/sample_registry_smoke.yaml`](./sample_registry_smoke.yaml) を実行すると、字幕とオーバーレイの両方でプラグイン読み込み・順序維持を検証できます。
+
+## 台本の再利用 (`include` / `vars`)
+
+台本を分割して `include` で再利用したり、`vars` で文字列を差し込めます。`${VAR}` 形式の文字列置換のみ対応しています。
+
+```yaml
+vars:
+  EP: 12
+  TITLE: "S3 consistency"
+
+defaults:
+  include:
+    - presets/defaults_base.yaml
+    - presets/subtitle_shorts.yaml
+  subtitle:
+    max_lines: 2
+
+scenes:
+  - include: parts/intro.yaml
+  - include: parts/outro.yaml
+    transition:
+      video: fade
+      duration: 0.25
+```
+
+- `include` はシーン配列にも、`defaults`/`assets`/`overlays` などの非シーンセクションにも使えます。
+- 非シーンの `include` は深いマージで合成し、配列は後勝ち（置換）です。
+- `transition` は `include` 呼び出し側で指定し、直前のシーン終端に適用されます。
+- サンプル台本: [`sample_include_vars.yaml`](./sample_include_vars.yaml)。
+
+## 音声なしで生成する
+
+VOICEVOX を使わず、無音の音声トラックを自動生成して動画を作る場合は `--no-voice` を指定します。
+セリフの長さから推定した秒数で無音を作成します。明示的に長さを指定したい場合は `duration` か
+`estimated_duration` を行に指定してください。
+
+```bash
+DISABLE_HWENC=1 python -m zundamotion.main scripts/sample_include_vars.yaml \\
+  --no-voice --no-cache -o output/sample_include_vars_no_voice.mp4
+```
+
+```yaml
+scenes:
+  - id: intro
+    lines:
+      - text: "音声なしで生成"
+        duration: 2.5
+```
 
 ## 基本構造
 

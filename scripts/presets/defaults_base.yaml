@@ -1,0 +1,6 @@
+subtitle:
+  max_lines: 3
+  font_color: "#90EE90"
+characters:
+  copetan:
+    speaker_id: 3

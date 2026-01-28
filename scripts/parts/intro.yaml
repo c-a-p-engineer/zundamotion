@@ -1,0 +1,6 @@
+scenes:
+  - id: intro
+    bg: assets/bg/room.png
+    lines:
+      - text: "EP${EP}の導入です。"
+        speaker_name: "copetan"

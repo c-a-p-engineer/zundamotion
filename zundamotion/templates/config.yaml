@@ -77,9 +77,12 @@ subtitle:
 
 # Voice settings (VOICEVOX defaults)
 voice:
+  enabled: true
   speaker_id: 3      # Example: Copetan (normal voice)
   speed: 1.0
   pitch: 0.0
+  estimate_chars_per_second: 8.0
+  estimate_min_duration: 1.0
 
 # Character settings
 characters:
