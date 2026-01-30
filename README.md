@@ -177,6 +177,78 @@ cd zundamotion
 ### 3. DevContainerの起動
 VS Codeでプロジェクトを開き、プロンプトが表示されたら「Reopen in Container」を選択します。これにより、必要な依存関係が自動的にインストールされ、開発環境が構築されます。
 
+### 4. Codex Cloud 環境向けセットアップ（CPUエンコード前提）
+
+Codex Cloud 上での実行を想定した最小セットアップ例です。Dockerfileに合わせた基本ツール、IPAゴシック、FFmpeg（CPU版）を導入します。
+
+```bash
+set -euo pipefail
+
+# =========================================================
+# 基本ツール（Dockerfile準拠）
+# =========================================================
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  curl git xz-utils ca-certificates \
+  gnupg2 software-properties-common
+
+# =========================================================
+# 日本語フォント（IPAゴシック）
+# =========================================================
+sudo apt-get install -y --no-install-recommends \
+  fonts-ipafont-gothic
+
+# =========================================================
+# Python pip 周り
+# ※ Python 3.13 は Codex Environment 側で指定済み前提
+# =========================================================
+python -m ensurepip --upgrade || true
+python -m pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# =========================================================
+# Python パッケージ
+# =========================================================
+python -m pip install --no-cache-dir -r requirements.txt
+
+# =========================================================
+# FFmpeg（CPU版 prebuilt / BtbN）
+# =========================================================
+FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl-shared.tar.xz"
+
+curl -L -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL"
+
+sudo mkdir -p /opt/ffmpeg
+sudo tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1
+
+sudo ln -sf /opt/ffmpeg/bin/ffmpeg  /usr/local/bin/ffmpeg
+sudo ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
+
+rm -f /tmp/ffmpeg.tar.xz
+
+# =========================================================
+# ライブラリパス設定（agent実行時にも有効化）
+# =========================================================
+echo "/opt/ffmpeg/lib" | sudo tee /etc/ld.so.conf.d/ffmpeg.conf >/dev/null
+sudo ldconfig
+echo 'export LD_LIBRARY_PATH="/opt/ffmpeg/lib:${LD_LIBRARY_PATH:-}"' >> ~/.bashrc
+
+# =========================================================
+# 動作確認（Dockerfileと同等）
+# =========================================================
+python --version
+pip --version
+
+ffmpeg -hide_banner -encoders | grep -E 'libx264|libx265'
+ffmpeg -hide_banner -filters | grep -E 'overlay_opencl|scale_opencl' || true
+```
+
+Codex Cloud 上でのテスト用コマンド（CPUエンコード + 音声なし）:
+
+```bash
+DISABLE_HWENC=1 python -m zundamotion.main scripts/sample_overlay_commands.yaml \
+  -o output/sample_overlay_commands.mp4 --no-cache --no-voice
+```
+
 ---
 
 ## 🧩 開発者向け: コード分割とAI向けガイド（要点）
