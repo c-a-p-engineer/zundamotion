@@ -9,6 +9,7 @@ import subprocess
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from .ffmpeg_filter_strings import build_scale_opencl_filter
 from .ffmpeg_hw import get_hw_filter_mode, set_hw_filter_mode
 from .ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from .logger import logger
@@ -59,6 +60,41 @@ _nvenc_availability_cache: Dict[str, bool] = {}
 # 同一プロセス内での重複スモークテスト実行を防ぐためのタスクキャッシュとロック
 _nvenc_availability_tasks: Dict[str, asyncio.Task] = {}
 _nvenc_lock = asyncio.Lock()
+_nvenc_diag_dumped: bool = False
+
+
+def _emit_nvenc_failure_hint(stderr: str) -> None:
+    """Emit actionable hints for common NVENC failures (log once per process)."""
+    global _nvenc_diag_dumped
+    if _nvenc_diag_dumped:
+        return
+    _nvenc_diag_dumped = True
+    msg = stderr or ""
+    hints: List[str] = []
+    if "Cannot load libnvidia-encode.so.1" in msg:
+        hints.append(
+            "libnvidia-encode.so.1 が見つかりません。Docker なら `--gpus all` と "
+            "`NVIDIA_DRIVER_CAPABILITIES=compute,utility,video`（または all）を指定し、"
+            "NVIDIA Container Toolkit を有効化してください。"
+        )
+    m = re.search(r"minimum required Nvidia driver.*?([0-9.]+)", msg, re.IGNORECASE)
+    if m:
+        hints.append(
+            f"NVIDIA ドライバの最小要件は {m.group(1)} 以上です。ホスト側のドライバを更新してください。"
+        )
+    if "No NVENC capable devices found" in msg:
+        hints.append(
+            "NVENC 対応 GPU が見つかりません。GPU が NVENC 対応か、コンテナに GPU が露出しているか確認してください。"
+        )
+    if "Driver/library version mismatch" in msg or "driver version is insufficient" in msg.lower():
+        hints.append(
+            "ドライバとライブラリのバージョン不一致が疑われます。ホスト側ドライバの更新と再起動を試してください。"
+        )
+    if hints:
+        logger.warning("[NVENC Hint] %s", " ".join(hints))
+        logger.warning(
+            "[NVENC Hint] 確認コマンド: `nvidia-smi`, `ffmpeg -hide_banner -encoders | rg nvenc`"
+        )
 
 
 async def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
@@ -112,6 +148,7 @@ async def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
                 "h264_nvenc smoke test failed. NVENC is not available or not configured correctly. Falling back to CPU."
             )
             logger.debug(f"FFmpeg stderr for smoke test:\n{e.stderr}")
+            _emit_nvenc_failure_hint(e.stderr or "")
             _nvenc_availability_cache[ffmpeg_path] = False
             return False
         except FileNotFoundError:
@@ -383,86 +420,21 @@ async def smoke_test_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
     global _cuda_smoke_result
     if _cuda_smoke_result is not None:
         return _cuda_smoke_result
-
-
-# ------------------------------
-# OpenCL overlay support (fallback)
-# ------------------------------
-_opencl_smoke_result: Optional[bool] = None
-_opencl_smoke_lock = asyncio.Lock()
-
-
-async def has_opencl_filters(ffmpeg_path: str = "ffmpeg") -> bool:
-    """Check presence of overlay_opencl and scale_opencl filters."""
-    try:
-        filters = await _list_ffmpeg_filters(ffmpeg_path)
-        return ("overlay_opencl" in filters) and ("scale_opencl" in filters or "hwupload" in filters)
-    except Exception:
-        return False
-
-
-async def smoke_test_opencl_filters(ffmpeg_path: str = "ffmpeg") -> bool:
-    """
-    Try a tiny OpenCL overlay graph using colors and hwupload with derive_device=opencl.
-    Cache the result per-process to avoid repeated probing.
-    """
-    global _opencl_smoke_result
-    if _opencl_smoke_result is not None:
-        return _opencl_smoke_result
-    async with _opencl_smoke_lock:
-        if _opencl_smoke_result is not None:
-            return _opencl_smoke_result
-        # Build a conservative filtergraph: hwupload both inputs to OpenCL, scale overlay, overlay_opencl, then hwdownload.
-        fc = (
-            "[0:v]format=rgba,hwupload[bg];"
-            "[1:v]format=rgba,hwupload,scale_opencl=32:32[ov];"
-            "[bg][ov]overlay_opencl=x=16:y=16,hwdownload,format=rgba[out]"
-        )
-        cmd = [
-            ffmpeg_path,
-            "-hide_banner",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=black:s=64x64:d=0.1",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=white:s=32x32:d=0.1",
-            "-filter_complex",
-            fc,
-            "-map",
-            "[out]",
-            "-f",
-            "null",
-            "-",
-        ]
-        try:
-            await _run_ffmpeg_async(cmd, error_log_level=logging.WARNING)
-            _opencl_smoke_result = True
-            return _opencl_smoke_result
-        except subprocess.CalledProcessError as e:  # pragma: no cover - environment dependent
-            logger.debug(
-                "OpenCL smoke test failed (exit=%s). STDERR=%s",
-                getattr(e, "returncode", None),
-                (e.stderr or "").strip(),
-            )
-            _opencl_smoke_result = False
-            return _opencl_smoke_result
-        except Exception as e:  # pragma: no cover - generic guard
-            logger.debug("OpenCL smoke test failed: %s", e)
-            _opencl_smoke_result = False
-            return _opencl_smoke_result
-
-    # The following block was accidentally placed under OpenCL scope; keep CUDA smoke below
     async with _cuda_smoke_lock:
         if _cuda_smoke_result is not None:
             return _cuda_smoke_result
         # 64x64黒 + 32x32白を GPU に上げて overlay_cuda。
         # 複数の候補フィルタグラフを試し、どれかが通れば True。
         filters = await _list_ffmpeg_filters(ffmpeg_path)
-        use_scale_npp = ("scale_npp" in filters) and ("scale_cuda" not in filters)
+        if not filters:
+            _cuda_smoke_result = False
+            return _cuda_smoke_result
+        has_overlay = "overlay_cuda" in filters
+        has_upload = "hwupload_cuda" in filters
+        has_scale = ("scale_cuda" in filters) or ("scale_npp" in filters)
+        if not (has_overlay and has_upload and has_scale):
+            _cuda_smoke_result = False
+            return _cuda_smoke_result
         scale_name_primary = "scale_cuda" if "scale_cuda" in filters else (
             "scale_npp" if "scale_npp" in filters else "scale_cuda"
         )
@@ -536,6 +508,78 @@ async def smoke_test_opencl_filters(ffmpeg_path: str = "ffmpeg") -> bool:
         return _cuda_smoke_result
 
 
+# ------------------------------
+# OpenCL overlay support (fallback)
+# ------------------------------
+_opencl_smoke_result: Optional[bool] = None
+_opencl_smoke_lock = asyncio.Lock()
+
+
+async def has_opencl_filters(ffmpeg_path: str = "ffmpeg") -> bool:
+    """Check presence of overlay_opencl and scale_opencl filters."""
+    try:
+        filters = await _list_ffmpeg_filters(ffmpeg_path)
+        return ("overlay_opencl" in filters) and ("scale_opencl" in filters or "hwupload" in filters)
+    except Exception:
+        return False
+
+
+async def smoke_test_opencl_filters(ffmpeg_path: str = "ffmpeg") -> bool:
+    """
+    Try a tiny OpenCL overlay graph using colors and hwupload with derive_device=opencl.
+    Cache the result per-process to avoid repeated probing.
+    """
+    global _opencl_smoke_result
+    if _opencl_smoke_result is not None:
+        return _opencl_smoke_result
+    async with _opencl_smoke_lock:
+        if _opencl_smoke_result is not None:
+            return _opencl_smoke_result
+        # Build a conservative filtergraph: hwupload both inputs to OpenCL, scale overlay, overlay_opencl, then hwdownload.
+        scale_32 = build_scale_opencl_filter(32, 32)
+        fc = (
+            "[0:v]format=rgba,hwupload[bg];"
+            f"[1:v]format=rgba,hwupload,{scale_32}[ov];"
+            "[bg][ov]overlay_opencl=x=16:y=16,hwdownload,format=rgba[out]"
+        )
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=64x64:d=0.1",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=white:s=32x32:d=0.1",
+            "-filter_complex",
+            fc,
+            "-map",
+            "[out]",
+            "-f",
+            "null",
+            "-",
+        ]
+        try:
+            await _run_ffmpeg_async(cmd, error_log_level=logging.WARNING)
+            _opencl_smoke_result = True
+            return _opencl_smoke_result
+        except subprocess.CalledProcessError as e:  # pragma: no cover - environment dependent
+            logger.debug(
+                "OpenCL smoke test failed (exit=%s). STDERR=%s",
+                getattr(e, "returncode", None),
+                (e.stderr or "").strip(),
+            )
+            _opencl_smoke_result = False
+            return _opencl_smoke_result
+        except Exception as e:  # pragma: no cover - generic guard
+            logger.debug("OpenCL smoke test failed: %s", e)
+            _opencl_smoke_result = False
+            return _opencl_smoke_result
+
+
 # ---------------------------------------------------------
 # OpenCL scale-only smoke test (for CPU-mode limited enable)
 # ---------------------------------------------------------
@@ -563,11 +607,12 @@ async def smoke_test_opencl_scale_only(ffmpeg_path: str = "ffmpeg") -> bool:
                 _opencl_scale_only_smoke_result = False
                 return _opencl_scale_only_smoke_result
             # Try a minimal graph: upload -> scale_opencl -> download
+            scale_64 = build_scale_opencl_filter(64, 64)
             fcandidates = [
                 # RGBA
-                "[0:v]format=rgba,hwupload,scale_opencl=64:64,hwdownload,format=rgba[out]",
+                f"[0:v]format=rgba,hwupload,{scale_64},hwdownload,format=rgba[out]",
                 # NV12
-                "[0:v]format=nv12,hwupload,scale_opencl=64:64,hwdownload,format=rgba[out]",
+                f"[0:v]format=nv12,hwupload,{scale_64},hwdownload,format=rgba[out]",
             ]
             for fc in fcandidates:
                 cmd = [
@@ -817,4 +862,3 @@ def _threading_flags(ffmpeg_path: str = "ffmpeg") -> List[str]:
         "-filter_complex_threads",
         str(fct_val),
     ]
-

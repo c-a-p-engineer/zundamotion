@@ -225,6 +225,19 @@ class VideoRenderer(OverlayMixin):
                 )
             except Exception:
                 pass
+        # If no GPU filter backend is usable, switch to CPU mode for thread tuning.
+        if inst.gpu_overlay_backend is None and inst.scale_only_backend is None:
+            if get_hw_filter_mode() != "cpu":
+                try:
+                    logger.info(
+                        "[Filters] No GPU filter backend available; forcing HW filter mode to 'cpu'."
+                    )
+                except Exception:
+                    pass
+                try:
+                    set_hw_filter_mode("cpu")
+                except Exception:
+                    pass
         logger.info(
             "[Filters] GPU overlay backend=%s (cuda=%s, opencl_ok=%s, scale_only=%s, scale_only_smoke_ok=%s)",
             inst.gpu_overlay_backend or "none",

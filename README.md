@@ -177,6 +177,11 @@ cd zundamotion
 ### 3. DevContainerの起動
 VS Codeでプロジェクトを開き、プロンプトが表示されたら「Reopen in Container」を選択します。これにより、必要な依存関係が自動的にインストールされ、開発環境が構築されます。
 
+#### GPUを使う場合（DevContainer）
+- `ZUNDA_DOCKER=Dockerfile.gpu` を指定して DevContainer を起動してください（例: `.env` に `ZUNDA_DOCKER=Dockerfile.gpu` を追加）。
+- ホスト側で NVIDIA Container Toolkit と GPU ドライバが有効である必要があります。
+- コンテナ内で `nvidia-smi` と `ffmpeg -filters` に `overlay_cuda`/`scale_cuda` が出ることを確認してください。
+
 ### 4. Codex Cloud 環境向けセットアップ（CPUエンコード前提）
 
 Codex Cloud 上での実行を想定した最小セットアップ例です。Dockerfileに合わせた基本ツール、IPAゴシック、FFmpeg（CPU版）を導入します。
@@ -245,8 +250,8 @@ ffmpeg -hide_banner -filters | grep -E 'overlay_opencl|scale_opencl' || true
 Codex Cloud 上でのテスト用コマンド（CPUエンコード + 音声なし）:
 
 ```bash
-DISABLE_HWENC=1 python -m zundamotion.main scripts/sample_overlay_commands.yaml \
-  -o output/sample_overlay_commands.mp4 --no-cache --no-voice
+DISABLE_HWENC=1 python -m zundamotion.main scripts/sample.yaml \
+  -o output/sample.mp4 --no-cache --no-voice
 ```
 
 ---
@@ -788,6 +793,18 @@ python -m zundamotion.main scripts/sample.yaml --jobs 4
 ```bash
 python -m zundamotion.main scripts/sample.yaml --hw-encoder gpu
 ```
+
+### Docker GPU/NVENC チェック
+
+GPUを使う場合、コンテナ内で以下を確認してください。
+
+```bash
+nvidia-smi
+ldconfig -p | rg libnvidia-encode
+ffmpeg -hide_banner -encoders | rg nvenc
+```
+
+`libnvidia-encode.so.1` が見つからない場合は、Docker起動時に `--gpus all` と `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video`（または `all`）を指定して、ホスト側のNVENCライブラリをコンテナへマウントしてください。
 
 エンコード品質を指定したい場合は、`--quality`オプションを使用します。`speed`, `balanced`, `quality`から選択できます。
 ```bash

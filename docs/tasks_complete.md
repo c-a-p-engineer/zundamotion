@@ -1,3 +1,15 @@
+1. **OpenCLスモークテストのscale_opencl互換修正** (完了日: 2026-02-01)  
+   - 完了内容: `scale_opencl` を named options（`w=`/`h=`）に統一し、OpenCL smoke test と clip renderer のフィルタグラフへ反映。ユーティリティとテストを追加。  
+   - メモ: FFmpeg 7+ の "No option name near 'WxH'" を回避。
+
+2. **GPUバックエンド不在時のCPUモード自動切替** (完了日: 2026-02-01)  
+   - 完了内容: GPU overlay/scale-only が両方無効な場合に HW filter mode を CPU へ切替え、スレッド設定の過剰並列を抑制。  
+   - メモ: 切替理由をログに記録。
+
+3. **Docker GPU/NVENC診断のREADME追記** (完了日: 2026-02-01)  
+   - 完了内容: `nvidia-smi`/`libnvidia-encode` の確認と `NVIDIA_DRIVER_CAPABILITIES=video` 指定をREADMEへ追記。  
+   - メモ: NVENCが使えない場合の対処手順を明文化。
+
 1. **台本のinclude/vars対応** (完了日: 2026-01-28)  
    - 完了内容: `include` による台本再利用、`${VAR}` 置換、include境界のトランジション指定、デバッグ用の解決結果ダンプを追加。  
    - メモ: サンプル台本とチートシートの記載も追加。

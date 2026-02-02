@@ -3,10 +3,20 @@
   "dockerComposeFile": "docker-compose.yml",
   "runArgs": [
     "--env-file",
-    ".env"
+    ".env",
+    "--gpus",
+    "all",
+    "--env",
+    "NVIDIA_DRIVER_CAPABILITIES=compute,utility,video",
+    "--env",
+    "NVIDIA_VISIBLE_DEVICES=all"
   ],
   "service": "app",
   "workspaceFolder": "/workspace",
+  "containerEnv": {
+    "NVIDIA_DRIVER_CAPABILITIES": "compute,utility,video",
+    "NVIDIA_VISIBLE_DEVICES": "all"
+  },
   "features": {
     "ghcr.io/devcontainers/features/node:1": {
       "version": "20"

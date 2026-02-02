@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ...exceptions import PipelineError
 from ...utils.ffmpeg_audio import has_audio_stream
+from ...utils.ffmpeg_filter_strings import build_scale_opencl_filter
 from ...utils.ffmpeg_hw import get_hw_filter_mode, get_profile_flags, set_hw_filter_mode
 from ...utils.ffmpeg_ops import (
     BACKGROUND_FIT_STRETCH,
@@ -365,7 +366,7 @@ async def render_clip(
             if renderer.scale_only_backend == "opencl":
                 filter_complex_parts.append("[0:v]format=rgba,hwupload[hw_bg_in]")
                 filter_complex_parts.append(
-                    f"[hw_bg_in]scale_opencl={width}:{height}{(f',fps={fps}' if renderer.apply_fps_filter else '')}[bg_gpu_scaled]"
+                    f"[hw_bg_in]{build_scale_opencl_filter(width, height)}{(f',fps={fps}' if renderer.apply_fps_filter else '')}[bg_gpu_scaled]"
                 )
                 filter_complex_parts.append(
                     "[bg_gpu_scaled]hwdownload,format=rgba[bg]"
