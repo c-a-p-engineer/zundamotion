@@ -50,6 +50,7 @@ async def render_clip(
     subtitle_text: Optional[str] = None,
     subtitle_line_config: Optional[Dict[str, Any]] = None,
     insert_config: Optional[Dict[str, Any]] = None,
+    image_layer_overlays: Optional[List[Dict[str, Any]]] = None,
     background_effects: Optional[List[Any]] = None,
     screen_effects: Optional[List[Any]] = None,
     subtitle_png_path: Optional[Path] = None,
@@ -242,6 +243,23 @@ async def render_clip(
         if not insert_is_image and await has_audio_stream(str(insert_path)):
             insert_audio_index = insert_ffmpeg_index
 
+    # 3.5) Image layer overlays (optional, CPU path)
+    image_layer_inputs: List[Dict[str, Any]] = []
+    if image_layer_overlays:
+        for ov in image_layer_overlays:
+            if not isinstance(ov, dict):
+                continue
+            path_str = ov.get("path") or ov.get("src")
+            if not path_str:
+                continue
+            img_path = Path(path_str)
+            cmd.extend(["-loop", "1", "-i", str(img_path.resolve())])
+            ff_idx = len(input_layers)
+            input_layers.append({"type": "video", "index": ff_idx})
+            ov_entry = dict(ov)
+            ov_entry["_ff_idx"] = ff_idx
+            image_layer_inputs.append(ov_entry)
+
     # 4) Characters (optional)
     char_inputs = await collect_character_inputs(
         renderer=renderer,
@@ -262,6 +280,7 @@ async def render_clip(
     uses_alpha_overlay = (
         any_character_visible
         or (insert_config and insert_is_image)
+        or bool(image_layer_inputs)
         or is_effective_subtitle_text(subtitle_text)
     )
     # If experimental flag is on, try GPU overlays even with RGBA inputs
@@ -484,6 +503,91 @@ async def render_clip(
                 f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}:flags={renderer.scale_flags}[insert_scaled]"
             )
             overlay_streams.append("[insert_scaled]")
+            overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
+
+    # 画像レイヤー overlay（常にCPU経路）
+    if image_layer_inputs:
+        for ov_idx, ov in enumerate(image_layer_inputs):
+            ff_idx = ov.get("_ff_idx")
+            if ff_idx is None:
+                continue
+            scale_cfg = ov.get("scale", 1.0)
+            scale_steps: List[str] = []
+            if isinstance(scale_cfg, dict):
+                w = scale_cfg.get("w")
+                h = scale_cfg.get("h")
+                keep = scale_cfg.get("keep_aspect")
+                if w and h:
+                    if keep:
+                        scale_steps.append(
+                            f"scale={w}:{h}:flags={renderer.scale_flags}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
+                        )
+                    else:
+                        scale_steps.append(f"scale={w}:{h}:flags={renderer.scale_flags}")
+            else:
+                try:
+                    scale_val = float(scale_cfg)
+                except Exception:
+                    scale_val = 1.0
+                scale_steps.append(
+                    f"scale=iw*{scale_val}:ih*{scale_val}:flags={renderer.scale_flags}"
+                )
+
+            steps: List[str] = ["format=rgba"]
+            if bool(ov.get("opaque", True)):
+                steps.append("colorchannelmixer=aa=1")
+
+            fade_in = ov.get("fade_in") or {}
+            if isinstance(fade_in, dict) and fade_in.get("type") == "fade":
+                try:
+                    dur = float(fade_in.get("duration", 0.0))
+                except Exception:
+                    dur = 0.0
+                if dur > 0:
+                    steps.append(f"fade=t=in:st=0.000:d={dur:.3f}:alpha=1")
+
+            fade_out = ov.get("fade_out") or {}
+            if isinstance(fade_out, dict) and fade_out.get("type") == "fade":
+                try:
+                    dur = float(fade_out.get("duration", 0.0))
+                except Exception:
+                    dur = 0.0
+                if dur > 0:
+                    align = fade_out.get("align")
+                    if align == "end":
+                        st = max(0.0, float(duration) - dur)
+                    else:
+                        st = 0.0
+                    steps.append(f"fade=t=out:st={st:.3f}:d={dur:.3f}:alpha=1")
+
+            opacity = ov.get("opacity")
+            if opacity is not None:
+                try:
+                    op_val = float(opacity)
+                except Exception:
+                    op_val = 1.0
+                op_val = max(0.0, min(1.0, op_val))
+                steps.append(f"lut=a='val*{op_val:.6f}'")
+
+            steps.extend(scale_steps)
+
+            label = f"[img_layer_{ov_idx}]"
+            filter_complex_parts.append(
+                f"[{ff_idx}:v]{','.join(steps)}{label}"
+            )
+
+            anchor = ov.get("anchor", "middle_center")
+            pos = ov.get("position", {"x": "0", "y": "0"}) or {}
+            x_expr, y_expr = calculate_overlay_position(
+                "W",
+                "H",
+                "w",
+                "h",
+                str(anchor),
+                _to_offset_expr(pos.get("x", "0")),
+                _to_offset_expr(pos.get("y", "0")),
+            )
+            overlay_streams.append(label)
             overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
 
     # 立ち絵 overlay
@@ -728,6 +832,7 @@ async def render_clip(
                     subtitle_text=subtitle_text,
                     subtitle_line_config=subtitle_line_config,
                     insert_config=insert_config,
+                    image_layer_overlays=image_layer_overlays,
                     subtitle_png_path=subtitle_png_path,
                     face_anim=face_anim,
                     _force_cpu=True,

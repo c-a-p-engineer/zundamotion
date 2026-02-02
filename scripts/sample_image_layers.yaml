@@ -1,0 +1,178 @@
+meta:
+  title: "画像レイヤー表示サンプル（4パターン）"
+  version: 3
+
+subtitle:
+  font_path: "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf"
+  size: 48
+  color: "white"
+  outline: "black"
+
+scenes:
+  - id: image_layers_show_separate
+    bg: "assets/bg/room.png"
+    lines:
+      - wait: 1.0
+      - text: "別々に表示するのだ（1枚目）。"
+        speaker_id: 3
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "default"
+            enter: true
+            enter_duration: 0.4
+            anchor: bottom_center
+            scale: 0.8
+        image_layers:
+          - show:
+              id: "street_thumb"
+              path: "assets/bg/street.png"
+              scale: 0.32
+              anchor: "bottom_right"
+              position: {x: -24, y: -24}
+              transition:
+                in: {type: "fade", duration: 0.6}
+                out: {type: "fade", duration: 0.4}
+      - wait: 1.5
+      - text: "別々に表示するのだ（2枚目）。"
+        speaker_id: 3
+        speaker_name: "copetan"
+        image_layers:
+          - show:
+              id: "sunset_thumb"
+              path: "assets/bg/sunset.png"
+              scale: 0.28
+              anchor: "bottom_left"
+              position: {x: 24, y: -24}
+              transition:
+                in: {type: "fade", duration: 0.5}
+
+  - id: image_layers_show_together
+    bg: "assets/bg/room.png"
+    lines:
+      - wait: 1.0
+      - text: "同時に表示するのだ。"
+        speaker_id: 3
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "default"
+            enter: true
+            enter_duration: 0.4
+            anchor: bottom_center
+            scale: 0.8
+        image_layers:
+          - show:
+              id: "street_thumb"
+              path: "assets/bg/street.png"
+              scale: 0.32
+              anchor: "bottom_right"
+              position: {x: -24, y: -24}
+              transition:
+                in: {type: "fade", duration: 0.6}
+                out: {type: "fade", duration: 0.4}
+          - show:
+              id: "sunset_thumb"
+              path: "assets/bg/sunset.png"
+              scale: 0.28
+              anchor: "bottom_left"
+              position: {x: 24, y: -24}
+              transition:
+                in: {type: "fade", duration: 0.5}
+
+  - id: image_layers_hide_separate
+    bg: "assets/bg/room.png"
+    lines:
+      - wait: 0.8
+      - text: "いったん同時に表示するのだ。"
+        speaker_id: 3
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "default"
+            enter: true
+            enter_duration: 0.4
+            anchor: bottom_center
+            scale: 0.8
+        image_layers:
+          - show:
+              id: "street_thumb"
+              path: "assets/bg/street.png"
+              scale: 0.32
+              anchor: "bottom_right"
+              position: {x: -24, y: -24}
+              transition:
+                in: {type: "fade", duration: 0.6}
+                out: {type: "fade", duration: 0.4}
+          - show:
+              id: "sunset_thumb"
+              path: "assets/bg/sunset.png"
+              scale: 0.28
+              anchor: "bottom_left"
+              position: {x: 24, y: -24}
+              transition:
+                in: {type: "fade", duration: 0.5}
+      - wait: 1.2
+      - text: "別々に非表示にするのだ（1枚目）。"
+        speaker_id: 3
+        speaker_name: "copetan"
+        image_layers:
+          - hide:
+              id: "street_thumb"
+              transition:
+                out: {type: "fade", duration: 0.5}
+      - wait: 1.0
+      - text: "別々に非表示にするのだ（2枚目）。"
+        speaker_id: 3
+        speaker_name: "copetan"
+        image_layers:
+          - hide:
+              id: "sunset_thumb"
+              transition:
+                out: {type: "fade", duration: 0.5}
+
+  - id: image_layers_hide_together
+    bg: "assets/bg/room.png"
+    lines:
+      - wait: 0.8
+      - text: "同時に表示してから、同時に非表示にするのだ。"
+        speaker_id: 3
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "default"
+            enter: true
+            enter_duration: 0.4
+            anchor: bottom_center
+            scale: 0.8
+        image_layers:
+          - show:
+              id: "street_thumb"
+              path: "assets/bg/street.png"
+              scale: 0.32
+              anchor: "bottom_right"
+              position: {x: -24, y: -24}
+              transition:
+                in: {type: "fade", duration: 0.6}
+                out: {type: "fade", duration: 0.4}
+          - show:
+              id: "sunset_thumb"
+              path: "assets/bg/sunset.png"
+              scale: 0.28
+              anchor: "bottom_left"
+              position: {x: 24, y: -24}
+              transition:
+                in: {type: "fade", duration: 0.5}
+      - wait: 1.5
+      - text: "同時に非表示にするのだ。"
+        speaker_id: 3
+        speaker_name: "copetan"
+        image_layers:
+          - hide:
+              id: "street_thumb"
+              transition:
+                out: {type: "fade", duration: 0.5}
+          - hide:
+              id: "sunset_thumb"
+              transition:
+                out: {type: "fade", duration: 0.5}

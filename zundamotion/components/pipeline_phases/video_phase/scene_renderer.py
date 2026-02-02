@@ -12,6 +12,7 @@ from ....utils.ffmpeg_ops import (
     BACKGROUND_FIT_STRETCH,
     DEFAULT_BACKGROUND_ANCHOR,
     DEFAULT_BACKGROUND_FILL_COLOR,
+    calculate_overlay_position,
 )
 from ....utils.logger import logger
 from ....utils.subtitle_text import is_effective_subtitle_text
@@ -117,6 +118,225 @@ class SceneRenderer:
             "anchor": str(anchor),
             "position": {"x": offset_x, "y": offset_y},
         }
+
+    def _collect_image_layers_by_line(
+        self, lines: List[Dict[str, Any]]
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        per_line: Dict[int, List[Dict[str, Any]]] = {}
+        active: Dict[str, Dict[str, Any]] = {}
+        last_line_idx = len(lines)
+
+        def _normalize_state(show: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                "id": show.get("id"),
+                "path": show.get("path"),
+                "anchor": show.get("anchor", "middle_center"),
+                "position": show.get("position") or {"x": "0", "y": "0"},
+                "scale": show.get("scale", 1.0),
+                "opacity": show.get("opacity"),
+                "opaque": bool(show.get("opaque", True)),
+                "transition_out": (show.get("transition") or {}).get("out"),
+            }
+
+        for idx, line in enumerate(lines, start=1):
+            actions = line.get("image_layers") or []
+            line_entries: Dict[str, Dict[str, Any]] = {}
+
+            for layer_id, state in active.items():
+                line_entries[layer_id] = dict(state)
+
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                if "show" in action:
+                    show = action.get("show") or {}
+                    layer_id = show.get("id")
+                    if not layer_id:
+                        continue
+                    state = _normalize_state(show)
+                    active[layer_id] = state
+                    entry = dict(state)
+                    trans = show.get("transition") or {}
+                    if isinstance(trans, dict) and trans.get("in"):
+                        entry["fade_in"] = {
+                            "type": trans["in"].get("type"),
+                            "duration": trans["in"].get("duration"),
+                            "align": "start",
+                        }
+                    line_entries[layer_id] = entry
+                elif "hide" in action:
+                    hide = action.get("hide") or {}
+                    layer_id = hide.get("id")
+                    if not layer_id or layer_id not in active:
+                        continue
+                    entry = line_entries.get(layer_id, dict(active[layer_id]))
+                    trans = hide.get("transition") or {}
+                    if isinstance(trans, dict) and trans.get("out"):
+                        entry["fade_out"] = {
+                            "type": trans["out"].get("type"),
+                            "duration": trans["out"].get("duration"),
+                            "align": "start",
+                        }
+                    elif active[layer_id].get("transition_out"):
+                        out_t = active[layer_id]["transition_out"]
+                        if isinstance(out_t, dict):
+                            entry["fade_out"] = {
+                                "type": out_t.get("type"),
+                                "duration": out_t.get("duration"),
+                                "align": "start",
+                            }
+                    line_entries[layer_id] = entry
+                    active.pop(layer_id, None)
+
+            per_line[idx] = list(line_entries.values())
+
+        if last_line_idx > 0 and active:
+            last_entries = {e.get("id"): e for e in per_line.get(last_line_idx, [])}
+            for layer_id, state in active.items():
+                out_t = state.get("transition_out")
+                if not isinstance(out_t, dict):
+                    continue
+                entry = last_entries.get(layer_id, dict(state))
+                entry["fade_out"] = {
+                    "type": out_t.get("type"),
+                    "duration": out_t.get("duration"),
+                    "align": "end",
+                }
+                last_entries[layer_id] = entry
+            per_line[last_line_idx] = list(last_entries.values())
+
+        return per_line
+
+    def _build_image_layer_overlays(
+        self,
+        *,
+        lines: List[Dict[str, Any]],
+        start_time_by_idx: Dict[int, float],
+        scene_duration: float,
+    ) -> List[Dict[str, Any]]:
+        overlays: List[Dict[str, Any]] = []
+        active: Dict[str, Dict[str, Any]] = {}
+
+        def _extract_transition(transition: Optional[Dict[str, Any]], key: str) -> Optional[Dict[str, Any]]:
+            if not isinstance(transition, dict):
+                return None
+            block = transition.get(key)
+            if not isinstance(block, dict):
+                return None
+            if block.get("type") == "fade":
+                try:
+                    duration = float(block.get("duration", 0.0))
+                except Exception:
+                    duration = 0.0
+                if duration > 0:
+                    return {"type": "fade", "duration": duration}
+            return None
+
+        def _finalize_layer(
+            state: Dict[str, Any],
+            end_time: float,
+            hide_transition: Optional[Dict[str, Any]] = None,
+        ) -> Optional[Dict[str, Any]]:
+            start_time = float(state.get("start_time", 0.0))
+            if end_time <= start_time:
+                return None
+            duration = end_time - start_time
+            anchor = state.get("anchor", "middle_center")
+            pos = state.get("position") or {}
+            offset_x = _to_offset_expr(pos.get("x"))
+            offset_y = _to_offset_expr(pos.get("y"))
+            x_expr, y_expr = calculate_overlay_position(
+                "W",
+                "H",
+                "w",
+                "h",
+                str(anchor),
+                offset_x,
+                offset_y,
+            )
+            overlay: Dict[str, Any] = {
+                "id": state.get("id"),
+                "src": state.get("path"),
+                "mode": state.get("mode", "overlay"),
+                "position": {"x": x_expr, "y": y_expr},
+                "timing": {"start": start_time, "duration": duration},
+                "opaque": True,
+            }
+            if state.get("scale") is not None:
+                overlay["scale"] = state.get("scale")
+            if state.get("opacity") is not None:
+                overlay["opacity"] = state.get("opacity")
+            if state.get("effects"):
+                overlay["effects"] = list(state.get("effects") or [])
+            if state.get("fps") is not None:
+                overlay["fps"] = state.get("fps")
+
+            fade_in = state.get("transition_in")
+            if isinstance(fade_in, dict) and fade_in.get("type") == "fade":
+                overlay["fade_in"] = {
+                    "start": start_time,
+                    "duration": fade_in.get("duration", 0.0),
+                }
+            fade_out = hide_transition or state.get("transition_out")
+            if isinstance(fade_out, dict) and fade_out.get("type") == "fade":
+                out_dur = float(fade_out.get("duration", 0.0))
+                out_start = max(start_time, end_time - out_dur)
+                if out_dur > 0 and out_start < end_time:
+                    overlay["fade_out"] = {
+                        "start": out_start,
+                        "duration": out_dur,
+                    }
+            return overlay
+
+        for idx, line in enumerate(lines, start=1):
+            actions = line.get("image_layers")
+            if not actions:
+                continue
+            t = float(start_time_by_idx.get(idx, 0.0))
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                if "show" in action:
+                    show = action.get("show") or {}
+                    layer_id = show.get("id")
+                    if not layer_id:
+                        continue
+                    if layer_id in active:
+                        finalized = _finalize_layer(active[layer_id], t)
+                        if finalized:
+                            overlays.append(finalized)
+                    active[layer_id] = {
+                        "id": layer_id,
+                        "path": show.get("path"),
+                        "anchor": show.get("anchor", "middle_center"),
+                        "position": show.get("position") or {"x": "0", "y": "0"},
+                        "scale": show.get("scale", 1.0),
+                        "opacity": show.get("opacity"),
+                        "effects": show.get("effects"),
+                        "fps": show.get("fps"),
+                        "mode": show.get("mode", "overlay"),
+                        "transition_in": _extract_transition(show.get("transition"), "in"),
+                        "transition_out": _extract_transition(show.get("transition"), "out"),
+                        "start_time": t,
+                    }
+                elif "hide" in action:
+                    hide = action.get("hide") or {}
+                    layer_id = hide.get("id")
+                    if not layer_id or layer_id not in active:
+                        continue
+                    hide_transition = _extract_transition(hide.get("transition"), "out")
+                    finalized = _finalize_layer(active[layer_id], t, hide_transition)
+                    if finalized:
+                        overlays.append(finalized)
+                    active.pop(layer_id, None)
+
+        for state in active.values():
+            finalized = _finalize_layer(state, scene_duration)
+            if finalized:
+                overlays.append(finalized)
+
+        overlays.sort(key=lambda o: float(o.get("timing", {}).get("start", 0.0)))
+        return overlays
 
     async def render_scene(self) -> List[Path]:
         scene = self.scene
@@ -606,6 +826,9 @@ class SceneRenderer:
             d = line_data_map[line_id2]["duration"]
             start_time_by_idx[idx] = t_acc
             t_acc += d
+        image_layers_by_line = self._collect_image_layers_by_line(
+            [line for _, line in lines]
+        )
 
         # 並列レンダリング用のタスクを構築
         import asyncio
@@ -703,10 +926,15 @@ class SceneRenderer:
                             "position": dict(bg_layout["position"]),
                         }
 
+                if line_data["type"] == "image_layer":
+                    results[idx - 1] = None
+                    return
+
                 if line_data["type"] == "wait":
                     logger.debug(
                         f"Rendering wait clip for {duration}s (Scene '{scene_id}', Line {idx})"
                     )
+                    line_image_layers = image_layers_by_line.get(idx, [])
                     wait_cache_data = {
                         "type": "wait",
                         "duration": duration,
@@ -715,6 +943,7 @@ class SceneRenderer:
                         "start_time": start_time_by_idx[idx],
                         "video_config": self.config.get("video", {}),
                         "line_config": line_config,
+                        "image_layer_overlays": line_image_layers,
                         "hw_kind": self.hw_kind,
                         "video_params": self.video_params.__dict__,
                         "audio_params": self.audio_params.__dict__,
@@ -729,6 +958,8 @@ class SceneRenderer:
                             background_config,
                             output_path.stem,
                             line_config,
+                            characters_config=line_config.get("characters", []) or [],
+                            image_layer_overlays=line_image_layers,
                         )
                         if clip_path is None:
                             raise PipelineError(
@@ -814,6 +1045,7 @@ class SceneRenderer:
                     face_anim_list = []
                 first_anim_meta = face_anim_list[0] if face_anim_list else {}
                 anim_meta = (first_anim_meta or {}).get("meta") or {}
+                line_image_layers = image_layers_by_line.get(idx, [])
                 video_cache_data = {
                     "type": "talk",
                     "audio_cache_key": self.cache_manager._generate_hash(
@@ -826,6 +1058,7 @@ class SceneRenderer:
                     "video_config": self.config.get("video", {}),
                     "bgm_config": self.config.get("bgm", {}),
                     "insert_config": effective_insert,
+                    "image_layer_overlays": line_image_layers,
                     "static_chars_in_base": bool(static_char_keys),
                     "static_insert_in_base": static_insert_in_base,
                     "hw_kind": self.hw_kind,
@@ -853,10 +1086,12 @@ class SceneRenderer:
                         characters_config=effective_characters,
                         output_filename=output_path.stem,
                         insert_config=effective_insert,
+                        image_layer_overlays=line_image_layers,
                         background_effects=line_config.get("background_effects"),
                         screen_effects=line_config.get("screen_effects"),
                         face_anim=face_anim_list,
                         audio_delay=pre_dur,
+                        _force_cpu=bool(line_image_layers),
                     )
                     if clip_path is None:
                         raise PipelineError(
@@ -1040,7 +1275,7 @@ class SceneRenderer:
             )
             logger.info(f"Concatenated scene clips -> {scene_output_path.name}")
 
-            fg_overlays = scene.get("fg_overlays")
+            fg_overlays = scene.get("fg_overlays") or []
             # Combine subtitle + foreground overlays in one pass when both exist
             if fg_overlays and subtitle_entries:
                 subtitle_entries.sort(key=lambda s: s["start"])

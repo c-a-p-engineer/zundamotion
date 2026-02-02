@@ -25,6 +25,11 @@ ANCHOR_CHOICES = {
     "bottom_right",
 }
 
+IMAGE_LAYER_TRANSITION_TYPES = {
+    "fade",
+    "none",
+}
+
 HEX_COLOR_RE = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
 RGB_COLOR_RE = re.compile(r"^rgba?\(.*\)$", re.IGNORECASE)
 HSL_COLOR_RE = re.compile(r"^hsla?\(.*\)$", re.IGNORECASE)
@@ -188,20 +193,26 @@ def _validate_fg_overlays(container: Dict[str, Any], container_id: str) -> None:
                 )
 
         scale = fg.get("scale", {})
-        if not isinstance(scale, dict):
-            raise ValidationError(
-                f"Foreground overlay '{fg_id}' in {container_id} scale must be a dictionary."
-            )
-        for dim in ("w", "h"):
-            val = scale.get(dim)
-            if val is not None and (not isinstance(val, (int, float)) or val <= 0):
+        if isinstance(scale, (int, float)):
+            if float(scale) <= 0:
                 raise ValidationError(
-                    f"Foreground overlay '{fg_id}' in {container_id} scale '{dim}' must be a positive number."
+                    f"Foreground overlay '{fg_id}' in {container_id} scale must be a positive number."
                 )
-        keep_aspect = scale.get("keep_aspect")
-        if keep_aspect is not None and not isinstance(keep_aspect, bool):
+        elif isinstance(scale, dict):
+            for dim in ("w", "h"):
+                val = scale.get(dim)
+                if val is not None and (not isinstance(val, (int, float)) or val <= 0):
+                    raise ValidationError(
+                        f"Foreground overlay '{fg_id}' in {container_id} scale '{dim}' must be a positive number."
+                    )
+            keep_aspect = scale.get("keep_aspect")
+            if keep_aspect is not None and not isinstance(keep_aspect, bool):
+                raise ValidationError(
+                    f"Foreground overlay '{fg_id}' in {container_id} scale 'keep_aspect' must be a boolean."
+                )
+        else:
             raise ValidationError(
-                f"Foreground overlay '{fg_id}' in {container_id} scale 'keep_aspect' must be a boolean."
+                f"Foreground overlay '{fg_id}' in {container_id} scale must be a dictionary or number."
             )
 
         timing = fg.get("timing", {})
@@ -258,6 +269,180 @@ def _validate_fg_overlays(container: Dict[str, Any], container_id: str) -> None:
                     raise ValidationError(
                         f"Foreground overlay '{fg_id}' in {container_id} effects[{eff_idx}] requires a string 'type'."
                     )
+
+
+def _validate_image_layer_transition(
+    transition: Dict[str, Any], container_id: str, label: str
+) -> None:
+    if not isinstance(transition, dict):
+        raise ValidationError(
+            f"Image layer transition '{label}' for {container_id} must be a dictionary."
+        )
+    ttype = transition.get("type")
+    if not isinstance(ttype, str) or ttype not in IMAGE_LAYER_TRANSITION_TYPES:
+        raise ValidationError(
+            f"Image layer transition '{label}' for {container_id} must be one of {sorted(IMAGE_LAYER_TRANSITION_TYPES)}."
+        )
+    if ttype != "none":
+        duration = transition.get("duration")
+        if not isinstance(duration, (int, float)) or duration <= 0:
+            raise ValidationError(
+                f"Image layer transition '{label}' for {container_id} must have a positive 'duration'."
+            )
+
+
+def _validate_image_layers(line: Dict[str, Any], container_id: str) -> None:
+    image_layers = line.get("image_layers")
+    if image_layers is None:
+        return
+    if not isinstance(image_layers, list):
+        raise ValidationError(
+            f"Image layers for {container_id} must be a list."
+        )
+    for idx, entry in enumerate(image_layers):
+        if not isinstance(entry, dict):
+            raise ValidationError(
+                f"Image layer entry at {container_id}, index {idx} must be a dictionary."
+            )
+        if "show" in entry:
+            show = entry.get("show")
+            if not isinstance(show, dict):
+                raise ValidationError(
+                    f"Image layer show at {container_id}, index {idx} must be a dictionary."
+                )
+            layer_id = show.get("id")
+            if not isinstance(layer_id, str) or not layer_id:
+                raise ValidationError(
+                    f"Image layer show at {container_id}, index {idx} requires a string 'id'."
+                )
+            path = show.get("path")
+            if not isinstance(path, str) or not path:
+                raise ValidationError(
+                    f"Image layer '{layer_id}' show in {container_id} requires a string 'path'."
+                )
+            path_obj = Path(path)
+            if not path_obj.exists() or not path_obj.is_file():
+                raise ValidationError(
+                    f"Image layer '{layer_id}' show path '{path}' not found for {container_id}."
+                )
+            anchor = show.get("anchor")
+            if anchor is not None and (
+                not isinstance(anchor, str) or anchor not in ANCHOR_CHOICES
+            ):
+                raise ValidationError(
+                    f"Image layer '{layer_id}' show anchor for {container_id} must be one of {sorted(ANCHOR_CHOICES)}."
+                )
+            position = show.get("position")
+            if position is not None:
+                if not isinstance(position, dict):
+                    raise ValidationError(
+                        f"Image layer '{layer_id}' show position for {container_id} must be a dictionary."
+                    )
+                for axis in ("x", "y"):
+                    val = position.get(axis)
+                    if val is None:
+                        continue
+                    if not isinstance(val, (int, float, str)):
+                        raise ValidationError(
+                            f"Image layer '{layer_id}' show position '{axis}' for {container_id} must be a number or string."
+                        )
+            scale = show.get("scale")
+            if scale is not None:
+                if isinstance(scale, (int, float)):
+                    if float(scale) <= 0:
+                        raise ValidationError(
+                            f"Image layer '{layer_id}' show scale for {container_id} must be positive."
+                        )
+                elif isinstance(scale, dict):
+                    for dim in ("w", "h"):
+                        val = scale.get(dim)
+                        if val is not None and (not isinstance(val, (int, float)) or val <= 0):
+                            raise ValidationError(
+                                f"Image layer '{layer_id}' show scale '{dim}' for {container_id} must be a positive number."
+                            )
+                    keep_aspect = scale.get("keep_aspect")
+                    if keep_aspect is not None and not isinstance(keep_aspect, bool):
+                        raise ValidationError(
+                            f"Image layer '{layer_id}' show scale 'keep_aspect' for {container_id} must be a boolean."
+                        )
+                else:
+                    raise ValidationError(
+                        f"Image layer '{layer_id}' show scale for {container_id} must be a number or dictionary."
+                    )
+            opacity = show.get("opacity")
+            if opacity is not None and (
+                not isinstance(opacity, (int, float)) or not (0.0 <= opacity <= 1.0)
+            ):
+                raise ValidationError(
+                    f"Image layer '{layer_id}' show opacity for {container_id} must be between 0.0 and 1.0."
+                )
+            opaque = show.get("opaque")
+            if opaque is not None and not isinstance(opaque, bool):
+                raise ValidationError(
+                    f"Image layer '{layer_id}' show opaque for {container_id} must be a boolean."
+                )
+            fps = show.get("fps")
+            if fps is not None and (not isinstance(fps, int) or fps <= 0):
+                raise ValidationError(
+                    f"Image layer '{layer_id}' show fps for {container_id} must be a positive integer."
+                )
+            effects = show.get("effects")
+            if effects is not None:
+                if not isinstance(effects, list):
+                    raise ValidationError(
+                        f"Image layer '{layer_id}' show effects for {container_id} must be a list."
+                    )
+                for eff_idx, eff in enumerate(effects):
+                    if isinstance(eff, str):
+                        continue
+                    if not isinstance(eff, dict):
+                        raise ValidationError(
+                            f"Image layer '{layer_id}' show effects[{eff_idx}] for {container_id} must be a string or dictionary."
+                        )
+                    eff_type = eff.get("type")
+                    if not isinstance(eff_type, str) or not eff_type:
+                        raise ValidationError(
+                            f"Image layer '{layer_id}' show effects[{eff_idx}] for {container_id} requires a string 'type'."
+                        )
+            transition = show.get("transition")
+            if transition is not None:
+                if not isinstance(transition, dict):
+                    raise ValidationError(
+                        f"Image layer '{layer_id}' show transition for {container_id} must be a dictionary."
+                    )
+                if transition.get("in") is not None:
+                    _validate_image_layer_transition(
+                        transition["in"], container_id, "in"
+                    )
+                if transition.get("out") is not None:
+                    _validate_image_layer_transition(
+                        transition["out"], container_id, "out"
+                    )
+        elif "hide" in entry:
+            hide = entry.get("hide")
+            if not isinstance(hide, dict):
+                raise ValidationError(
+                    f"Image layer hide at {container_id}, index {idx} must be a dictionary."
+                )
+            layer_id = hide.get("id")
+            if not isinstance(layer_id, str) or not layer_id:
+                raise ValidationError(
+                    f"Image layer hide at {container_id}, index {idx} requires a string 'id'."
+                )
+            transition = hide.get("transition")
+            if transition is not None:
+                if not isinstance(transition, dict):
+                    raise ValidationError(
+                        f"Image layer '{layer_id}' hide transition for {container_id} must be a dictionary."
+                    )
+                if transition.get("out") is not None:
+                    _validate_image_layer_transition(
+                        transition["out"], container_id, "out"
+                    )
+        else:
+            raise ValidationError(
+                f"Image layer entry at {container_id}, index {idx} must contain 'show' or 'hide'."
+            )
 
 
 def _validate_plugins_config(cfg: Dict[str, Any]) -> None:
@@ -473,6 +658,7 @@ def validate_config(config: Dict[str, Any]) -> None:
                 )
 
             _validate_fg_overlays(line, f"scene '{scene_id}', line {line_idx}")
+            _validate_image_layers(line, f"scene '{scene_id}', line {line_idx}")
 
             reset_flag = line.get("reset_characters")
             if reset_flag is not None and not isinstance(reset_flag, bool):
@@ -480,10 +666,12 @@ def validate_config(config: Dict[str, Any]) -> None:
                     f"Line at scene '{scene_id}', index {line_idx} reset_characters must be a boolean."
                 )
 
-            # 'text' or 'wait' key must exist
-            if "text" not in line and "wait" not in line:
+            has_image_layers = line.get("image_layers") is not None
+
+            # 'text' or 'wait' key must exist (or image layer control)
+            if "text" not in line and "wait" not in line and not has_image_layers:
                 raise ValidationError(
-                    f"Line at scene '{scene_id}', index {line_idx} must contain 'text' or 'wait'."
+                    f"Line at scene '{scene_id}', index {line_idx} must contain 'text', 'wait', or 'image_layers'."
                 )
 
             if "text" in line and "wait" in line:

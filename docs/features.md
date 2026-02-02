@@ -8,7 +8,7 @@
 | クリップ生成 | 背景画像/動画の正規化とシーン連結 | contain/cover/fit_width等でリサイズし、行ごとのクリップをconcat | utils/ffmpeg_ops.build_background_fit_steps, components/video/renderer.py, components/pipeline_phases/video_phase/scene_renderer.py |
 | キャラ配置 | アンカー＋座標＋スケール配置、揺れ系エフェクト | shake/bob/swayをoverlay式で表現、enter/leave余白計算あり | components/video/clip/effects/resolve.py |
 | 背景/画面効果 | 背景揺れ・画面揺れ | pad+crop方式でシェイク | components/video/clip/effects/resolve.py |
-| オーバーレイ | 画像/動画挿入・前景オーバーレイ・PiP | insert/fg_overlaysでロゴ・挿入映像を重畳 | components/video/renderer.py, components/pipeline_phases/video_phase/scene_renderer.py |
+| オーバーレイ | 画像レイヤー・前景オーバーレイ・PiP | image_layers/fg_overlays/insertでロゴ・挿入映像を重畳 | components/video/renderer.py, components/pipeline_phases/video_phase/scene_renderer.py |
 | 字幕 | PNG字幕焼き込み＋SRT/ASS出力、バウンス効果 | SubtitlePNGRendererでスタイル適用、text:bounce_text効果あり | components/subtitles, plugins/builtin/subtitle_text/plugin.py, main.py CLI `--subtitle-file` |
 | トランジション | xfade＋音声acrossfade（scene.transition） | fade/dissolve/wipe/zoom等のxfade typeを指定可能 | utils/ffmpeg_ops.apply_transition, components/pipeline_phases/finalize_phase.py |
 | BGM/SE | BGMミックス（音量・フェード・ディレイ）＋複数SE合成 | amixでBGMと映像音声を混合、fade in/out・delay対応 | utils/ffmpeg_audio.add_bgm_to_video, mix_audio_tracks, components/pipeline_phases/bgm_phase.py |
@@ -27,7 +27,7 @@
 | トランジション | フェードイン / フェードアウト | MVP | 実装済（xfade=fade） | シンプルな場面転換や開始/終了の自然な繋ぎ |
 | トランジション | クロスディゾルブ / スライド / ズーム | MVP | 実装済（xfade type指定でdissolve/wipeleft/zoom等） | 基本的なシーン間遷移で雰囲気を演出 |
 | テキスト | テロップ / タイトル（位置・スタイル・簡易アニメ） | MVP | 実装済（PNG字幕＋bounce effect、SRT/ASS出力） | 字幕・見出しを表示して情報を補足 |
-| オーバーレイ | PNG/ロゴ透過オーバーレイ | MVP | 実装済（fg_overlays/insertで重畳） | ロゴや枠などの静的重ね合わせ |
+| オーバーレイ | PNG/ロゴ透過オーバーレイ | MVP | 実装済（image_layers/fg_overlays/insertで重畳） | ロゴや枠などの静的重ね合わせ |
 | オーディオ | 音量調整 / ミュート / フェード | MVP | 実装済（BGM volume・fade、amix） | ナレーションやBGMの音量バランスを取る |
 | オーディオ | BGM / 効果音トラック（ループ） | MVP | 一部実装（BGM/SEミックス・delay、明示ループ未対応） | シーンを跨いでBGMを敷き詰める |
 | コンポジット | ピクチャーインピクチャー（ワイプ） | 優先高 | 実装済（動画insertを正規化して重畳） | 画面隅に別映像を重ねる実況/解説用途 |

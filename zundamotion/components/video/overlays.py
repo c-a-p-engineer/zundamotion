@@ -52,16 +52,23 @@ class OverlayMixin:
             steps.append(f"fps={int(fps)}")
 
         scale_cfg = ov.get("scale", {})
-        w = scale_cfg.get("w")
-        h = scale_cfg.get("h")
-        keep = scale_cfg.get("keep_aspect")
-        if w and h:
-            if keep:
+        if isinstance(scale_cfg, (int, float)):
+            scale_factor = float(scale_cfg)
+            if scale_factor > 0:
                 steps.append(
-                    f"scale={w}:{h}:flags={self.scale_flags}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
+                    f"scale=iw*{scale_factor}:ih*{scale_factor}:flags={self.scale_flags}"
                 )
-            else:
-                steps.append(f"scale={w}:{h}:flags={self.scale_flags}")
+        elif isinstance(scale_cfg, dict):
+            w = scale_cfg.get("w")
+            h = scale_cfg.get("h")
+            keep = scale_cfg.get("keep_aspect")
+            if w and h:
+                if keep:
+                    steps.append(
+                        f"scale={w}:{h}:flags={self.scale_flags}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
+                    )
+                else:
+                    steps.append(f"scale={w}:{h}:flags={self.scale_flags}")
 
         if mode == "chroma":
             chroma = ov.get("chroma", {})
@@ -70,8 +77,31 @@ class OverlayMixin:
             blend = chroma.get("blend", 0.0)
             steps.append(f"colorkey={key_color}:{similarity}:{blend}")
 
+        fade_in = ov.get("fade_in")
+        if isinstance(fade_in, dict):
+            try:
+                st = float(fade_in.get("start", 0.0))
+                dur = float(fade_in.get("duration", 0.0))
+            except Exception:
+                st = 0.0
+                dur = 0.0
+            if dur > 0:
+                steps.append(f"fade=t=in:st={st:.3f}:d={dur:.3f}:alpha=1")
+
+        fade_out = ov.get("fade_out")
+        if isinstance(fade_out, dict):
+            try:
+                st = float(fade_out.get("start", 0.0))
+                dur = float(fade_out.get("duration", 0.0))
+            except Exception:
+                st = 0.0
+                dur = 0.0
+            if dur > 0:
+                steps.append(f"fade=t=out:st={st:.3f}:d={dur:.3f}:alpha=1")
+
         effects = self._build_effect_filters(ov.get("effects"))
         opacity = ov.get("opacity")
+        force_opaque = bool(ov.get("opaque", False))
 
         color_in = f"[ov{idx}_c_in]"
         alpha_in = f"[ov{idx}_a_in]"
@@ -81,6 +111,8 @@ class OverlayMixin:
 
         # Base decode and optional fps/scale/chroma transforms
         steps.insert(0, "format=rgba")
+        if force_opaque:
+            steps.insert(1, "colorchannelmixer=aa=1")
         filter_parts.append(f"{in_stream}{','.join(steps)},split{color_in}{alpha_in}")
 
         color_steps: list[str] = []

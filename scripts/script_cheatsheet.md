@@ -290,19 +290,31 @@ lines:
 - `background_effects` はシーン合成前の背景ストリームに適用され、立ち絵や字幕の座標には影響しません。
 - `bg:shake_bg`: `pad`→`crop` チェーンで背景のみを平行移動します。`amplitude`, `freq`, `easing`, `offset`, `padding` が指定でき、サンプルは [`sample_bg_shake.yaml`](./sample_bg_shake.yaml) を参照してください。
 
-## 画像・動画の挿入 (`insert`)
+## 画像レイヤー (`image_layers`)
 
 ```yaml
 lines:
-  - text: "参考画像はこちら"
-    insert:
-      path: "assets/bg/room.png"
-      duration: 3.0              # 画像のみ有効。動画は自動で尺合わせ
-      scale: 0.3
-      anchor: bottom_right
-      position: {x: -20, y: -20}
-      volume: 0.2                # 動画の音量(省略可)
+  - text: "参考画像を表示"
+    image_layers:
+      - show:
+          id: "room_thumb"
+          path: "assets/bg/room.png"
+          scale: 0.3
+          anchor: bottom_right
+          position: {x: -20, y: -20}
+          transition:
+            in: {type: "fade", duration: 0.6}
+            out: {type: "fade", duration: 0.4}
+  - image_layers:
+      - hide:
+          id: "room_thumb"
+          transition:
+            out: {type: "fade", duration: 0.4}
 ```
+
+- `image_layers` は行境界で show/hide を明示し、シーン内の任意タイミングで画像を表示/終了できます。
+- `transition` は `fade` / `none` を選択可能。`fade` 時は `duration` を必須指定。
+- 画像は立ち絵より背面に合成されます（`insert` と同じレイヤー位置）。
 
 ## 前景オーバーレイ (`fg_overlays`)
 

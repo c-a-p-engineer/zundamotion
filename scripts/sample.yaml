@@ -308,21 +308,28 @@ scenes:
       - text: "（画像を右下に小さく表示するのだ）"
         speaker_id: 3
         speaker_name: "copetan"
-        insert:
-          path: "assets/bg/room.png"
-          duration: 3.0
-          scale: 0.3
-          anchor: "bottom_right"
-          position: {"x": "-20", "y": "-20"}
-      - text: "（動画を再生するのだ！）"
+        image_layers:
+          - show:
+              id: "room_thumb"
+              path: "assets/bg/room.png"
+              scale: 0.3
+              anchor: "bottom_right"
+              position: {"x": "-20", "y": "-20"}
+              transition:
+                in: {type: "fade", duration: 0.6}
+                out: {type: "fade", duration: 0.4}
+      - text: "（別の画像も表示するのだ！）"
         speaker_id: 3
         speaker_name: "copetan"
-        insert:
-          path: "assets/bg/countdown.mp4"
-          scale: 0.8
-          anchor: "middle_center"
-          position: {"x": "20", "y": "20"}
-          volume: 0.2
+        image_layers:
+          - show:
+              id: "sunset_thumb"
+              path: "assets/bg/sunset.png"
+              scale: 0.25
+              anchor: "bottom_left"
+              position: {"x": "20", "y": "-20"}
+              transition:
+                in: {type: "fade", duration: 0.5}
       - text: "チャンネル登録と高評価、よろしくお願いします！"
         speaker_id: 3 # こぴぺたんのスピーカーID
         speaker_name: "copetan" # 話しているキャラクターの名前
@@ -332,3 +339,12 @@ scenes:
             position: {"x": "300", "y": "500"}
             visible: true
         speed: 1.05                     # 音声速度 (0.5-2.0, オプション)
+        image_layers:
+          - hide:
+              id: "room_thumb"
+              transition:
+                out: {type: "fade", duration: 0.4}
+          - hide:
+              id: "sunset_thumb"
+              transition:
+                out: {type: "fade", duration: 0.4}

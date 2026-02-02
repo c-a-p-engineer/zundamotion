@@ -283,6 +283,7 @@ class VideoRenderer(OverlayMixin):
         subtitle_text: Optional[str] = None,
         subtitle_line_config: Optional[Dict[str, Any]] = None,
         insert_config: Optional[Dict[str, Any]] = None,
+        image_layer_overlays: Optional[List[Dict[str, Any]]] = None,
         background_effects: Optional[List[Any]] = None,
         screen_effects: Optional[List[Any]] = None,
         subtitle_png_path: Optional[Path] = None,
@@ -300,6 +301,7 @@ class VideoRenderer(OverlayMixin):
             subtitle_text=subtitle_text,
             subtitle_line_config=subtitle_line_config,
             insert_config=insert_config,
+            image_layer_overlays=image_layer_overlays,
             background_effects=background_effects,
             screen_effects=screen_effects,
             subtitle_png_path=subtitle_png_path,
@@ -359,6 +361,8 @@ class VideoRenderer(OverlayMixin):
         background_config: Dict[str, Any],
         output_filename: str,
         line_config: Dict[str, Any],
+        characters_config: Optional[List[Dict[str, Any]]] = None,
+        image_layer_overlays: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Path]:
         return await render_wait_clip_task(
             self,
@@ -366,6 +370,8 @@ class VideoRenderer(OverlayMixin):
             background_config=background_config,
             output_filename=output_filename,
             line_config=line_config,
+            characters_config=characters_config,
+            image_layer_overlays=image_layer_overlays,
         )
 
     # --------------------------

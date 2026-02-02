@@ -98,6 +98,21 @@ class AudioPhase:
                         pbar.update(1)
                         continue
 
+                    if "text" not in line and "wait" not in line and line.get("image_layers") is not None:
+                        pbar.set_description(
+                            f"Registering Image Layer Step (Scene '{scene_id}', Line {idx})"
+                        )
+                        timeline.add_event("(Image Layer)", 0.0, text=None)
+                        line_data_map[line_id] = {
+                            "type": "image_layer",
+                            "duration": 0.0,
+                            "line_config": line,
+                            "audio_path": None,
+                            "text": None,
+                        }
+                        pbar.update(1)
+                        continue
+
                     # テキスト（表示用）/読み（音声用）の分離
                     original_text = str(line.get("text", ""))
                     # Apply inline reading markup if explicit reading is not provided

@@ -19,6 +19,7 @@ from ...utils.ffmpeg_ops import (
     normalize_media,
 )
 from ...utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
+from .clip.characters import collect_character_inputs, build_character_overlays
 from .clip.effects import resolve_background_effects, resolve_screen_effects
 
 if TYPE_CHECKING:
@@ -264,6 +265,8 @@ async def render_wait_clip(
     background_config: Dict[str, Any],
     output_filename: str,
     line_config: Dict[str, Any],
+    characters_config: Optional[List[Dict[str, Any]]] = None,
+    image_layer_overlays: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Path]:
     output_path = renderer.temp_dir / f"{output_filename}.mp4"
     width = renderer.video_params.width
@@ -280,6 +283,7 @@ async def render_wait_clip(
         "warning",
     ]
     cmd.extend(renderer.ffmpeg_thread_flags())
+    input_layers: List[Dict[str, Any]] = []
 
     bg_path_str = background_config.get("path")
     if not bg_path_str:
@@ -347,6 +351,7 @@ async def render_wait_clip(
             cmd.extend(["-loop", "1", "-i", str(bg_path)])
     else:
         cmd.extend(["-loop", "1", "-i", str(bg_path)])
+    input_layers.append({"type": "video", "index": len(input_layers)})
 
     cmd.extend(
         [
@@ -356,6 +361,33 @@ async def render_wait_clip(
             f"anullsrc=channel_layout=stereo:sample_rate={renderer.audio_params.sample_rate}",
         ]
     )
+    input_layers.append({"type": "audio", "index": len(input_layers)})
+
+    image_layer_inputs: List[Dict[str, Any]] = []
+    if image_layer_overlays:
+        for ov in image_layer_overlays:
+            if not isinstance(ov, dict):
+                continue
+            path_str = ov.get("path") or ov.get("src")
+            if not path_str:
+                continue
+            img_path = Path(path_str)
+            cmd.extend(["-loop", "1", "-i", str(img_path.resolve())])
+            ff_idx = len(input_layers)
+            input_layers.append({"type": "video", "index": ff_idx})
+            ov_entry = dict(ov)
+            ov_entry["_ff_idx"] = ff_idx
+            image_layer_inputs.append(ov_entry)
+
+    char_inputs = await collect_character_inputs(
+        renderer=renderer,
+        characters_config=characters_config or [],
+        cmd=cmd,
+        input_layers=input_layers,
+    )
+    character_indices = char_inputs.indices
+    char_effective_scale = char_inputs.effective_scales
+    char_metadata = char_inputs.metadata
 
     screen_effects = None
     background_effects = None
@@ -408,9 +440,125 @@ async def render_wait_clip(
     filter_parts.append(f"{current_label}trim=duration={duration}[wait_trim]")
     current_label = "[wait_trim]"
 
+    overlay_streams: List[str] = []
+    overlay_filters: List[str] = []
+
+    # 画像レイヤー overlay（CPU）
+    if image_layer_inputs:
+        for ov_idx, ov in enumerate(image_layer_inputs):
+            ff_idx = ov.get("_ff_idx")
+            if ff_idx is None:
+                continue
+            scale_cfg = ov.get("scale", 1.0)
+            scale_steps: List[str] = []
+            if isinstance(scale_cfg, dict):
+                w = scale_cfg.get("w")
+                h = scale_cfg.get("h")
+                keep = scale_cfg.get("keep_aspect")
+                if w and h:
+                    if keep:
+                        scale_steps.append(
+                            f"scale={w}:{h}:flags={renderer.scale_flags}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
+                        )
+                    else:
+                        scale_steps.append(
+                            f"scale={w}:{h}:flags={renderer.scale_flags}"
+                        )
+            else:
+                try:
+                    scale_val = float(scale_cfg)
+                except Exception:
+                    scale_val = 1.0
+                scale_steps.append(
+                    f"scale=iw*{scale_val}:ih*{scale_val}:flags={renderer.scale_flags}"
+                )
+
+            steps: List[str] = ["format=rgba"]
+            if bool(ov.get("opaque", True)):
+                steps.append("colorchannelmixer=aa=1")
+
+            fade_in = ov.get("fade_in") or {}
+            if isinstance(fade_in, dict) and fade_in.get("type") == "fade":
+                try:
+                    dur = float(fade_in.get("duration", 0.0))
+                except Exception:
+                    dur = 0.0
+                if dur > 0:
+                    steps.append(f"fade=t=in:st=0.000:d={dur:.3f}:alpha=1")
+
+            fade_out = ov.get("fade_out") or {}
+            if isinstance(fade_out, dict) and fade_out.get("type") == "fade":
+                try:
+                    dur = float(fade_out.get("duration", 0.0))
+                except Exception:
+                    dur = 0.0
+                if dur > 0:
+                    align = fade_out.get("align")
+                    if align == "end":
+                        st = max(0.0, float(duration) - dur)
+                    else:
+                        st = 0.0
+                    steps.append(f"fade=t=out:st={st:.3f}:d={dur:.3f}:alpha=1")
+
+            opacity = ov.get("opacity")
+            if opacity is not None:
+                try:
+                    op_val = float(opacity)
+                except Exception:
+                    op_val = 1.0
+                op_val = max(0.0, min(1.0, op_val))
+                steps.append(f"lut=a='val*{op_val:.6f}'")
+
+            steps.extend(scale_steps)
+
+            label = f"[wait_img_{ov_idx}]"
+            filter_parts.append(f"[{ff_idx}:v]{','.join(steps)}{label}")
+
+            anchor = ov.get("anchor", "middle_center")
+            pos = ov.get("position", {"x": "0", "y": "0"}) or {}
+            x_expr, y_expr = calculate_overlay_position(
+                "W",
+                "H",
+                "w",
+                "h",
+                str(anchor),
+                _to_offset_expr(pos.get("x", "0")),
+                _to_offset_expr(pos.get("y", "0")),
+            )
+            overlay_streams.append(label)
+            overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
+
+    build_character_overlays(
+        renderer=renderer,
+        characters_config=characters_config or [],
+        duration=duration,
+        character_indices=character_indices,
+        char_effective_scale=char_effective_scale,
+        filter_complex_parts=filter_parts,
+        overlay_streams=overlay_streams,
+        overlay_filters=overlay_filters,
+        use_cuda_filters=False,
+        use_opencl=False,
+        metadata=char_metadata,
+    )
+
+    current_video_stream = current_label
+    if overlay_streams:
+        chain = current_video_stream
+        for i, stream in enumerate(overlay_streams):
+            chain += f"{stream}{overlay_filters[i]}"
+            if i < len(overlay_streams) - 1:
+                chain += f"[wait_tmp_{i}];[wait_tmp_{i}]"
+            else:
+                chain += "[wait_overlays]"
+        filter_parts.append(chain)
+        current_video_stream = "[wait_overlays]"
+    else:
+        current_video_stream = current_label
+
     screen_snippet = resolve_screen_effects(
         effects=screen_effects,
-        input_label=current_label,
+        input_label=current_video_stream,
         duration=duration,
         width=width,
         height=height,
@@ -418,9 +566,9 @@ async def render_wait_clip(
     )
     if screen_snippet:
         filter_parts.extend(screen_snippet.filter_chain)
-        current_label = screen_snippet.output_label
+        current_video_stream = screen_snippet.output_label
 
-    filter_parts.append(f"{current_label}format=yuv420p[final_v]")
+    filter_parts.append(f"{current_video_stream}format=yuv420p[final_v]")
 
     cmd.extend(["-filter_complex", ";".join(filter_parts)])
     cmd.extend(["-map", "[final_v]", "-map", "1:a"])

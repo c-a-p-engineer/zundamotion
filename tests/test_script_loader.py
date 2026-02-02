@@ -116,3 +116,74 @@ def test_auto_sound_effect_injected_from_overlay_preset(tmp_path):
     assert line.get("sound_effects"), "shake_fanfare はデフォルトSEを自動付与する"
     se = line["sound_effects"][0]
     assert se["path"].endswith("rap_fanfare.mp3")
+
+
+def test_image_layers_show_hide_supported(tmp_path):
+    root = Path.cwd()
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump(
+            {
+                "script": {"scenes": []},
+                "defaults": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "image_layers", "version": 3},
+                "scenes": [
+                    {
+                        "id": "s1",
+                        "bg": str((root / "assets" / "bg" / "room.png").resolve()),
+                        "lines": [
+                            {
+                                "text": "表示テスト",
+                                "image_layers": [
+                                    {
+                                        "show": {
+                                            "id": "room_thumb",
+                                            "path": str(
+                                                (root / "assets" / "bg" / "room.png").resolve()
+                                            ),
+                                            "scale": 0.3,
+                                            "anchor": "bottom_right",
+                                            "position": {"x": -20, "y": -20},
+                                            "transition": {
+                                                "in": {"type": "fade", "duration": 0.5},
+                                                "out": {"type": "fade", "duration": 0.4},
+                                            },
+                                        }
+                                    }
+                                ],
+                            },
+                            {
+                                "image_layers": [
+                                    {
+                                        "hide": {
+                                            "id": "room_thumb",
+                                            "transition": {
+                                                "out": {"type": "fade", "duration": 0.4}
+                                            },
+                                        }
+                                    }
+                                ]
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_script_and_config(str(script_path), str(default_config_path))
+    line0 = config["script"]["scenes"][0]["lines"][0]
+    line1 = config["script"]["scenes"][0]["lines"][1]
+
+    assert "image_layers" in line0
+    assert "image_layers" in line1
