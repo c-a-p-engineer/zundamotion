@@ -7,9 +7,9 @@ import time
 import traceback
 from pathlib import Path
 
-project_root = Path(__file__).parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
+repo_root = Path(__file__).parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 import asyncio
 
@@ -24,6 +24,35 @@ from zundamotion.utils.logger import (
 from zundamotion.utils.dependency_checks import ensure_ffmpeg_dependencies
 
 
+def _resolve_project_root(cli_value: str | None) -> Path | None:
+    raw = (cli_value or os.getenv("ZUNDAMOTION_PROJECT_ROOT") or "").strip()
+    if not raw:
+        return None
+    return Path(raw).expanduser()
+
+
+def _apply_project_root(cli_value: str | None) -> Path | None:
+    """Change working directory for relative-path resolution.
+
+    Priority: CLI ``--project-root`` > env ``ZUNDAMOTION_PROJECT_ROOT`` > current cwd.
+    Returns the previous working directory when a change is applied.
+    """
+
+    project_root = _resolve_project_root(cli_value)
+    if project_root is None:
+        return None
+
+    resolved = project_root.resolve()
+    if not resolved.exists():
+        raise ValueError(f"--project-root does not exist: {resolved}")
+    if not resolved.is_dir():
+        raise ValueError(f"--project-root is not a directory: {resolved}")
+
+    prev = Path.cwd()
+    os.chdir(resolved)
+    return prev
+
+
 async def main() -> None:
     """コマンドライン引数を解析し動画生成を実行する。"""
     parser = argparse.ArgumentParser(
@@ -33,6 +62,15 @@ async def main() -> None:
         "script_path",
         type=str,
         help="Path to the input YAML script file.",
+    )
+    parser.add_argument(
+        "--project-root",
+        type=str,
+        default=None,
+        help=(
+            "Base directory for resolving relative paths (assets/, plugins/, output/, etc.). "
+            "Overrides env var ZUNDAMOTION_PROJECT_ROOT."
+        ),
     )
     parser.add_argument(
         "-o",
@@ -159,6 +197,12 @@ async def main() -> None:
     )
 
     args = parser.parse_args()
+
+    try:
+        _apply_project_root(args.project_root)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(2)
 
     # Setup logging based on --log-json or --log-kv argument
     # If both are set, --log-kv takes precedence for console output
@@ -288,5 +332,10 @@ async def main() -> None:
         shutdown_logging()
 
 
+def cli() -> None:
+    """Synchronous entrypoint for console_scripts and ``python -m zundamotion``."""
+    asyncio.run(main())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())  # Run the async main function
+    cli()

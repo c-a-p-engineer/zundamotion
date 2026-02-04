@@ -75,7 +75,23 @@ class AudioPhase:
 
                 items = scene.get("items")
                 if not isinstance(items, list):
-                    items = []
+                    items = None
+                if items is None:
+                    lines = scene.get("lines")
+                    if isinstance(lines, list):
+                        derived_items: List[Dict[str, Any]] = []
+                        for line in lines:
+                            if not isinstance(line, dict):
+                                continue
+                            if "wait" in line:
+                                derived_items.append({"wait": line})
+                            elif "text" in line or line.get("image_layers") is None:
+                                derived_items.append({"say": line})
+                            else:
+                                derived_items.append({"image_layers": line})
+                        items = derived_items
+                    else:
+                        items = []
                 line_idx = 0
 
                 for _, item in enumerate(items, start=1):

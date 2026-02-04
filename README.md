@@ -258,6 +258,53 @@ DISABLE_HWENC=1 python -m zundamotion.main scripts/sample.yaml \
 
 ---
 
+## 🧩 Git submoduleとして使う（利用側プロジェクトから）
+
+このリポジトリを **動画生成エンジン** として利用側プロジェクトに取り込みたい場合は、`git submodule` + `pip install -e` を推奨します。
+詳細版は `docs/guides/submodule.md` を参照してください。
+
+### 1) submodule 追加（利用側リポジトリで実行）
+
+```bash
+git submodule add <GIT_URL> vendor/zundamotion
+git submodule update --init --recursive
+```
+
+### 2) インストール（推奨: editable）
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -e vendor/zundamotion
+```
+
+フォールバック（editableを使わない場合）:
+
+```bash
+pip install -r vendor/zundamotion/requirements.txt
+```
+
+### 3) 実行例
+
+利用側プロジェクトを基準に実行（相対パスは利用側リポジトリ基準）:
+
+```bash
+zundamotion path/to/script.yaml -o output/out.mp4
+```
+
+サブモジュール同梱のサンプル台本を試す（相対パス基準をサブモジュールに切り替え）:
+
+```bash
+zundamotion scripts/sample.yaml --project-root vendor/zundamotion
+```
+
+### 相対パスの基準（`--project-root` / `ZUNDAMOTION_PROJECT_ROOT`）
+
+- 未指定: 実行時のカレントディレクトリ基準
+- 指定: `--project-root`（または `ZUNDAMOTION_PROJECT_ROOT`）を基準に `assets/`・`plugins/`・`output/` 等の相対パスを解決します
+
+---
+
 ## 🧩 開発者向け: コード分割とAI向けガイド（要点）
 
 - ファイル規模の目安: 1ファイル200–400行（最大500行）
@@ -967,6 +1014,7 @@ video:
 ## ⚠️ ライセンスと利用ガイドライン
 
 本プロジェクトはMITライセンスの下で公開されています。詳細については[LICENSE](LICENSE)ファイルをご確認ください。
+同梱素材（`assets/`）の出典・ライセンス・再配布可否は **コードとは別** に管理します。公開前に必ず [assets/ATTRIBUTION.md](assets/ATTRIBUTION.md) を確認・更新してください。
 VOICEVOXの利用に関しては、キャラクターごとに商用利用の可否が異なります。必ず[VOICEVOX公式サイトの利用規約](https://voicevox.hiroshiba.jp/)をご確認ください。
 
 ---

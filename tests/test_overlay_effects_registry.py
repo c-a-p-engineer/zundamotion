@@ -21,7 +21,7 @@ def test_overlay_effects_are_resolved_in_order():
     ]
 
     assert resolve_overlay_effects(effects) == [
-        "gblur=sigma=5.0000",
+        "gblur=sigma=5.0000:planes=7",
         "eq=contrast=1.100000:brightness=0.050000",
         "hue=h=90.000000:s=1.200000",
         "curves=preset=medium_contrast",
