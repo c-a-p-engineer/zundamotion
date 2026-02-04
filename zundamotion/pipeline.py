@@ -18,6 +18,7 @@ from .exceptions import PipelineError
 from .timeline import Timeline
 from .plugins.manager import initialize_plugins
 from .utils.ffmpeg_params import AudioParams, VideoParams
+from .utils.ffmpeg_probe import get_media_duration
 from .utils.logger import KVLogger, logger, time_log
 
 
@@ -196,13 +197,7 @@ class GenerationPipeline:
                 for clip in all_clips
             ]
             self.stats["clip_durations"] = await asyncio.gather(*clip_durations_tasks)
-            # Phase 3: BGM Mixing
-            bgm_phase = BGMPhase(self.config, temp_dir)
-            final_clips_for_concat = await self._run_phase(
-                "BGMPhase", bgm_phase.run, scenes, all_clips
-            )
-
-            # Phase 4: Finalize Video
+            # Phase 3: Finalize Video
             finalize_phase = FinalizePhase(
                 self.config,
                 temp_dir,
@@ -219,8 +214,16 @@ class GenerationPipeline:
                 scenes,
                 self.timeline,
                 line_data_map,
-                final_clips_for_concat,
+                all_clips,
                 used_voicevox_info,
+            )
+            # Phase 4: BGM Mixing (timeline driven)
+            bgm_phase = BGMPhase(self.config, temp_dir, self.audio_params)
+            final_video_path = await self._run_phase(
+                "BGMPhase",
+                bgm_phase.run,
+                final_video_path,
+                self.timeline,
             )
             # 最終的な動画をoutput_pathにコピー
             shutil.copy(final_video_path, output_path)
@@ -291,6 +294,46 @@ class GenerationPipeline:
                         logger.info(
                             f"Subtitle file saved to {subtitle_output_path_ass}"
                         )
+
+            topics = self.timeline.get_topics()
+            if topics:
+                formatted_topics = [
+                    f"{self.timeline.format_chapter_timestamp(t['time'])} {t['title']}"
+                    for t in topics
+                ]
+                logger.info("Topics: %s", formatted_topics)
+                output_path_base = Path(output_path)
+                chapters_output_path = output_path_base.with_suffix(".chapters.txt")
+                self.timeline.save_chapters(chapters_output_path)
+                if isinstance(logger, KVLogger):
+                    logger.kv_info(
+                        f"Chapters saved to {chapters_output_path}",
+                        kv_pairs={"ChaptersPath": str(chapters_output_path)},
+                    )
+                else:
+                    logger.info(f"Chapters saved to {chapters_output_path}")
+
+                try:
+                    video_duration = await get_media_duration(str(final_video_path))
+                    ffmetadata_output_path = output_path_base.with_suffix(".ffmetadata")
+                    with open(ffmetadata_output_path, "w", encoding="utf-8") as f:
+                        f.write(";FFMETADATA1\n")
+                        for idx, topic in enumerate(topics):
+                            start_ms = int(float(topic["time"]) * 1000)
+                            if idx + 1 < len(topics):
+                                end_ms = int(float(topics[idx + 1]["time"]) * 1000)
+                            else:
+                                end_ms = int(float(video_duration) * 1000)
+                            if end_ms <= start_ms:
+                                end_ms = start_ms + 1
+                            f.write("[CHAPTER]\n")
+                            f.write("TIMEBASE=1/1000\n")
+                            f.write(f"START={start_ms}\n")
+                            f.write(f"END={end_ms}\n")
+                            f.write(f"title={topic['title']}\n")
+                    logger.info(f"FFmetadata saved to {ffmetadata_output_path}")
+                except Exception as e:
+                    logger.debug("Failed to save ffmetadata: %s", e)
 
             pipeline_end_time = time.time()
             self.stats["total_duration"] = pipeline_end_time - pipeline_start_time

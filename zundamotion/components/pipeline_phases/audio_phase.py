@@ -18,6 +18,7 @@ from zundamotion.utils.subtitle_text import (
 )
 from zundamotion.utils.ffmpeg_params import AudioParams
 from zundamotion.utils.ffmpeg_probe import get_audio_duration
+from zundamotion.utils.ffmpeg_audio import apply_audio_filter
 from zundamotion.utils.text_processing import parse_reading_markup
 from zundamotion.utils.logger import logger, time_log
 from zundamotion.utils.face_anim import (
@@ -38,6 +39,7 @@ class AudioPhase:
         self.config = config
         self.temp_dir = temp_dir
         self.cache_manager = cache_manager
+        self.audio_params = audio_params
         self.audio_gen = AudioGenerator(
             self.config, self.temp_dir, audio_params, self.cache_manager
         )  # cache_managerを渡す
@@ -71,12 +73,55 @@ class AudioPhase:
                 bg = scene.get("bg", self.config.get("background", {}).get("default"))
                 timeline.add_scene_change(scene_id, bg)
 
-                for idx, line in enumerate(scene.get("lines", []), start=1):
-                    line_id = f"{scene_id}_{idx}"
+                items = scene.get("items")
+                if not isinstance(items, list):
+                    items = []
+                line_idx = 0
+
+                for _, item in enumerate(items, start=1):
+                    if not isinstance(item, dict):
+                        continue
+
+                    if "bgm" in item:
+                        bgm_cfg = item.get("bgm") or {}
+                        timeline.add_bgm_event(
+                            str(bgm_cfg.get("id")),
+                            str(bgm_cfg.get("action")),
+                            fade=bgm_cfg.get("fade"),
+                        )
+                        continue
+
+                    if "topic" in item:
+                        timeline.add_topic(str(item.get("topic")))
+                        continue
+
+                    if "say" in item:
+                        say_val = item.get("say")
+                        if isinstance(say_val, dict):
+                            line = say_val
+                        else:
+                            line = {"text": str(say_val or "")}
+                    elif "wait" in item:
+                        wait_val = item.get("wait")
+                        if isinstance(wait_val, dict) and "wait" in wait_val:
+                            line = wait_val
+                        else:
+                            line = {"wait": wait_val}
+                    elif "image_layers" in item:
+                        image_val = item.get("image_layers")
+                        if isinstance(image_val, dict):
+                            line = image_val
+                        else:
+                            line = {"image_layers": image_val}
+                    else:
+                        continue
+
+                    line_idx += 1
+                    line_id = f"{scene_id}_{line_idx}"
 
                     if "wait" in line:
                         pbar.set_description(
-                            f"Calculating Wait Step (Scene '{scene_id}', Line {idx})"
+                            f"Calculating Wait Step (Scene '{scene_id}', Line {line_idx})"
                         )
                         wait_value = line["wait"]
                         if isinstance(wait_value, dict):
@@ -100,7 +145,7 @@ class AudioPhase:
 
                     if "text" not in line and "wait" not in line and line.get("image_layers") is not None:
                         pbar.set_description(
-                            f"Registering Image Layer Step (Scene '{scene_id}', Line {idx})"
+                            f"Registering Image Layer Step (Scene '{scene_id}', Line {line_idx})"
                         )
                         timeline.add_event("(Image Layer)", 0.0, text=None)
                         line_data_map[line_id] = {
@@ -143,7 +188,7 @@ class AudioPhase:
                         display_text if is_effective_subtitle_text(display_text) else ""
                     )
                     pbar.set_description(
-                        f"Audio Generation (Scene '{scene_id}', Line {idx}: '{text[:30]}...')"
+                        f"Audio Generation (Scene '{scene_id}', Line {line_idx}: '{text[:30]}...')"
                     )
 
                     # Generate audio and get speaker info
@@ -187,6 +232,30 @@ class AudioPhase:
                         audio_path = (
                             self.temp_dir / f"{line_id}_speech.wav"
                         )  # Use the original temp path
+
+                    audio_filter = line.get("audio_filter")
+                    if audio_filter:
+                        filter_key = {
+                            **audio_cache_data,
+                            "audio_filter": audio_filter,
+                            "audio_params": self.audio_params.__dict__,
+                        }
+
+                        async def _filter_creator(output_path: Path) -> Path:
+                            await apply_audio_filter(
+                                str(audio_path),
+                                str(output_path),
+                                audio_filter,
+                                self.audio_params,
+                            )
+                            return output_path
+
+                        audio_path = await self.cache_manager.get_or_create(
+                            key_data=filter_key,
+                            file_name=f"{line_id}_{audio_filter}",
+                            extension="wav",
+                            creator_func=_filter_creator,
+                        )
 
                     insert_config = line.get("insert")
                     duration = 0.0
@@ -436,6 +505,13 @@ class AudioPhase:
                         "face_anim": face_anim,
                     }
                     pbar.update(1)
+                if line_idx != len(scene.get("lines", []) or []):
+                    logger.debug(
+                        "AudioPhase: Line count mismatch in scene '%s' (items=%s, lines=%s).",
+                        scene_id,
+                        line_idx,
+                        len(scene.get("lines", []) or []),
+                    )
         # Ensure a clean newline after closing the progress bar
         try:
             tqdm.write("", file=sys.stderr)

@@ -56,6 +56,8 @@ def load_script_and_config(
                 final_config.get(top_key, {}), script_data[top_key]
             )
 
+    _normalize_scene_items(final_config)
+
     # Extract defaults for easier access
     global_defaults = final_config.get("defaults", {})
     character_defaults = global_defaults.get("characters", {})
@@ -128,9 +130,66 @@ def load_script_and_config(
     _inject_default_sound_effects(final_config)
 
     # Validate the final configuration
+    _normalize_scene_items(final_config)
     validate_config(final_config)
 
     return final_config
+
+
+def _items_from_lines(lines: Iterable[Dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        if "wait" in line:
+            items.append({"wait": line})
+        elif "text" in line or line.get("image_layers") is None:
+            items.append({"say": line})
+        else:
+            items.append({"image_layers": line})
+    return items
+
+
+def _lines_from_items(items: Iterable[Dict[str, Any]]) -> list[dict[str, Any]]:
+    lines: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if "say" in item:
+            say_val = item.get("say")
+            if isinstance(say_val, dict):
+                lines.append(say_val)
+            elif isinstance(say_val, str):
+                lines.append({"text": say_val})
+        elif "wait" in item:
+            wait_val = item.get("wait")
+            if isinstance(wait_val, dict) and "wait" in wait_val:
+                lines.append(wait_val)
+            elif isinstance(wait_val, dict) and "duration" in wait_val:
+                lines.append({"wait": wait_val})
+            else:
+                lines.append({"wait": wait_val})
+        elif "image_layers" in item:
+            image_val = item.get("image_layers")
+            if isinstance(image_val, dict):
+                lines.append(image_val)
+            else:
+                lines.append({"image_layers": image_val})
+    return lines
+
+
+def _normalize_scene_items(config: Dict[str, Any]) -> None:
+    script = config.get("script", {}) or {}
+    scenes = script.get("scenes", []) or []
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        items = scene.get("items")
+        lines = scene.get("lines")
+        if isinstance(items, list):
+            scene["lines"] = _lines_from_items(items)
+        elif isinstance(lines, list):
+            scene["items"] = _items_from_lines(lines)
 
 
 def _collect_overlay_effect_types(overlays: Iterable[Dict[str, Any]] | None) -> Set[str]:

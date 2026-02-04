@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from importlib import import_module
 
 from ...utils.ffmpeg_probe import get_media_duration
+from ...utils.filter_presets import get_video_filter_chain
 from .overlay_effects import resolve_overlay_effects
 
 
@@ -100,6 +101,7 @@ class OverlayMixin:
                 steps.append(f"fade=t=out:st={st:.3f}:d={dur:.3f}:alpha=1")
 
         effects = self._build_effect_filters(ov.get("effects"))
+        video_filter = ov.get("filter")
         opacity = ov.get("opacity")
         force_opaque = bool(ov.get("opaque", False))
 
@@ -118,6 +120,8 @@ class OverlayMixin:
         color_steps: list[str] = []
         if effects:
             color_steps.extend(effects)
+        if video_filter:
+            color_steps.extend(get_video_filter_chain(str(video_filter)))
         filter_parts.append(f"{color_in}{','.join(color_steps or ['null'])}{color_out}")
 
         alpha_steps = ["format=ya8"]

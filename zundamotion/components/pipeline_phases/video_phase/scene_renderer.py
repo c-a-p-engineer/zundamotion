@@ -926,6 +926,12 @@ class SceneRenderer:
                             "position": dict(bg_layout["position"]),
                         }
 
+                video_filter = line_config.get("video_filter") or self.scene.get(
+                    "video_filter"
+                )
+                if video_filter:
+                    background_config["video_filter"] = video_filter
+
                 if line_data["type"] == "image_layer":
                     results[idx - 1] = None
                     return
@@ -950,6 +956,7 @@ class SceneRenderer:
                         "screen_effects": line_config.get("screen_effects"),
                         "background_effects": line_config.get("background_effects"),
                         "background_layout": bg_layout,
+                        "video_filter": background_config.get("video_filter"),
                     }
 
                     async def wait_creator_func(output_path: Path) -> Path:
@@ -1076,6 +1083,7 @@ class SceneRenderer:
                     "screen_effects": line_config.get("screen_effects"),
                     "background_effects": line_config.get("background_effects"),
                     "background_layout": bg_layout,
+                    "video_filter": background_config.get("video_filter"),
                 }
 
                 async def clip_creator_func(output_path: Path) -> Path:

@@ -24,6 +24,8 @@ class Timeline:
 
     def __init__(self):
         self.events: List[Dict[str, Any]] = []
+        self.bgm_events: List[Dict[str, Any]] = []
+        self.topics: List[Dict[str, Any]] = []
         self.current_time: float = 0.0
 
     def add_event(self, description: str, duration: float, text: Optional[str] = None):
@@ -55,6 +57,25 @@ class Timeline:
             }
         )
 
+    def add_bgm_event(self, bgm_id: str, action: str, fade: Optional[float] = None):
+        """BGMイベントをタイムラインに追加する（時間は進めない）。"""
+        self.bgm_events.append(
+            {
+                "time": float(self.current_time),
+                "id": bgm_id,
+                "action": action,
+                "fade": float(fade) if fade is not None else None,
+            }
+        )
+
+    def add_topic(self, title: str):
+        """トピック（チャプター）を現在時刻で記録する。"""
+        record = {"time": float(self.current_time), "title": title}
+        if self.topics and abs(self.topics[-1]["time"] - record["time"]) < 1e-6:
+            self.topics[-1] = record
+        else:
+            self.topics.append(record)
+
     def get_scene_start_time(self, scene_id: str) -> Optional[float]:
         """指定したシーンIDの開始時刻を返す。"""
         for event in self.events:
@@ -64,6 +85,27 @@ class Timeline:
             ):
                 return float(event.get("start_time", 0.0))
         return None
+
+    def get_topics(self) -> List[Dict[str, Any]]:
+        """収集したトピック一覧を返す。"""
+        return list(self.topics)
+
+    @staticmethod
+    def format_chapter_timestamp(seconds: float) -> str:
+        """YouTubeチャプター向けの時刻表現に変換する。"""
+        total = max(0, int(seconds))
+        h, rem = divmod(total, 3600)
+        m, s = divmod(rem, 60)
+        if h > 0:
+            return f"{h:02}:{m:02}:{s:02}"
+        return f"{m:02}:{s:02}"
+
+    def save_chapters(self, output_path: Path) -> None:
+        """チャプター一覧を保存する。"""
+        with open(output_path, "w", encoding="utf-8") as f:
+            for topic in self.topics:
+                stamp = self.format_chapter_timestamp(topic["time"])
+                f.write(f"{stamp} {topic['title']}\n")
 
     def insert_gap(
         self,

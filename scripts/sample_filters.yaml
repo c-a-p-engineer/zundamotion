@@ -1,0 +1,69 @@
+meta:
+  title: "Audio/Video Filter サンプル"
+  version: 1
+
+defaults:
+  speaker_id: 3
+
+# audio_filter presets: phone / echo / radio / muffled
+# video_filter presets: invert / sepia / grayscale / high_contrast / night
+scenes:
+  - id: audio_filters
+    bg: "assets/bg/room.png"
+    items:
+      - say:
+          text: "音声フィルタなしの基準音声です。"
+          speaker_name: "copetan"
+      - say:
+          text: "電話越しっぽい音にします。"
+          speaker_name: "copetan"
+          audio_filter: phone
+      - say:
+          text: "エコーをかけた音声です。"
+          speaker_name: "copetan"
+          audio_filter: echo
+      - say:
+          text: "ラジオ風の音質です。"
+          speaker_name: "copetan"
+          audio_filter: radio
+      - say:
+          text: "こもった音声フィルタです。"
+          speaker_name: "copetan"
+          audio_filter: muffled
+  - id: video_filters
+    bg: "assets/bg/room.png"
+    items:
+      - say:
+          text: "映像フィルタなしの基準映像です。"
+          speaker_name: "copetan"
+      - say:
+          text: "セピア調にします。"
+          speaker_name: "copetan"
+          video_filter: sepia
+      - say:
+          text: "白黒（グレースケール）です。"
+          speaker_name: "copetan"
+          video_filter: grayscale
+      - say:
+          text: "コントラスト強めの映像です。"
+          speaker_name: "copetan"
+          video_filter: high_contrast
+      - say:
+          text: "夜景風の映像です。"
+          speaker_name: "copetan"
+          video_filter: night
+      - say:
+          text: "色反転フィルタです。"
+          speaker_name: "copetan"
+          video_filter: invert
+  - id: overlay_filters
+    bg: "assets/bg/room.png"
+    items:
+      - say:
+          text: "オーバーレイのフィルタを適用します。"
+          speaker_name: "copetan"
+          fg_overlays:
+            - id: speedlines
+              src: "assets/overlay/speedlines.png"
+              mode: overlay
+              filter: grayscale

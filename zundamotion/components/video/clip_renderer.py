@@ -11,6 +11,7 @@ from ...exceptions import PipelineError
 from ...utils.ffmpeg_audio import has_audio_stream
 from ...utils.ffmpeg_filter_strings import build_scale_opencl_filter
 from ...utils.ffmpeg_hw import get_hw_filter_mode, get_profile_flags, set_hw_filter_mode
+from ...utils.filter_presets import get_video_filter_chain
 from ...utils.ffmpeg_ops import (
     BACKGROUND_FIT_STRETCH,
     DEFAULT_BACKGROUND_ANCHOR,
@@ -449,6 +450,16 @@ async def render_clip(
         if bg_effect_snippet.output_label:
             bg_stream_label = bg_effect_snippet.output_label
 
+    video_filter = background_config.get("video_filter")
+    if video_filter:
+        chain = get_video_filter_chain(str(video_filter))
+        if chain:
+            filtered_label = "[bg_filtered]"
+            filter_complex_parts.append(
+                f"{bg_stream_label}{','.join(chain)}{filtered_label}"
+            )
+            bg_stream_label = filtered_label
+
     if opencl_upload_label:
         filter_complex_parts.append(
             f"{bg_stream_label}format=rgba,hwupload{opencl_upload_label}"
@@ -660,7 +671,7 @@ async def render_clip(
         else:
             current_video_stream = "[final_v_overlays]"
     else:
-        current_video_stream = "[bg]"
+        current_video_stream = bg_stream_label
 
     # 字幕スニペットを反映（存在時）
     subtitle_snippet = None

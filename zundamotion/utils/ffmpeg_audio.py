@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import subprocess
 
 from .ffmpeg_capabilities import _threading_flags
@@ -12,6 +12,7 @@ from .ffmpeg_params import AudioParams
 from .ffmpeg_probe import get_audio_duration, get_media_duration, get_media_info
 from .ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from .logger import logger
+from .filter_presets import get_audio_filter_chain
 
 
 async def has_audio_stream(file_path: str) -> bool:
@@ -120,6 +121,138 @@ async def add_bgm_to_video(
         logger.error(f"FFmpeg stdout:\n{e.stdout}")
         logger.error(f"FFmpeg stderr:\n{e.stderr}")
         raise
+
+
+async def apply_audio_filter(
+    input_path: str,
+    output_path: str,
+    preset: str,
+    audio_params: AudioParams,
+    ffmpeg_path: str = "ffmpeg",
+) -> None:
+    """Apply a preset audio filter to a WAV file."""
+    chain = get_audio_filter_chain(preset)
+    if not chain:
+        cmd = [ffmpeg_path, "-y", "-i", input_path, output_path]
+        await _run_ffmpeg_async(cmd)
+        return
+
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        *get_profile_flags(),
+        "-i",
+        input_path,
+        "-filter:a",
+        ",".join(chain),
+        "-ar",
+        str(audio_params.sample_rate),
+        "-ac",
+        str(audio_params.channels),
+        "-c:a",
+        "pcm_s16le",
+        output_path,
+    ]
+    try:
+        proc = await _run_ffmpeg_async(cmd)
+        logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
+        logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
+        logger.info("Applied audio filter '%s' -> %s", preset, output_path)
+    except subprocess.CalledProcessError as e:
+        logger.error("Error applying audio filter '%s': %s", preset, e)
+        logger.error(f"FFmpeg stdout:\n{e.stdout}")
+        logger.error(f"FFmpeg stderr:\n{e.stderr}")
+        raise
+
+
+async def add_bgm_segments_to_video(
+    video_path: str,
+    output_path: str,
+    *,
+    bgm_layers: List[Dict[str, Any]],
+    segments: List[Dict[str, Any]],
+    audio_params: AudioParams,
+    ffmpeg_path: str = "ffmpeg",
+) -> str:
+    """Apply BGM segments onto a video and return the filter_complex string."""
+    if not segments:
+        raise ValueError("No BGM segments provided.")
+
+    cmd = [ffmpeg_path, "-y", *get_profile_flags()]
+    cmd.extend(_threading_flags(ffmpeg_path))
+    cmd.extend(["-i", video_path])
+
+    layer_index: Dict[str, int] = {}
+    for idx, layer in enumerate(bgm_layers, start=1):
+        if layer.get("loop"):
+            cmd.extend(["-stream_loop", "-1"])
+        cmd.extend(["-i", layer["file"]])
+        layer_index[str(layer["id"])] = idx
+
+    filter_parts: List[str] = []
+    seg_labels: List[str] = []
+    for seg_idx, seg in enumerate(segments):
+        bgm_id = str(seg["id"])
+        input_idx = layer_index[bgm_id]
+        start = float(seg["source_start_pos"])
+        end = float(seg["source_start_pos"] + seg["duration"])
+        chain = f"[{input_idx}:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS"
+        gain = seg.get("gain")
+        if gain is not None:
+            chain += f",volume={float(gain):.3f}dB"
+        fade_in = seg.get("fade_in") or 0.0
+        fade_out = seg.get("fade_out") or 0.0
+        if fade_in > 0:
+            chain += f",afade=t=in:st=0:d={fade_in:.3f}"
+        if fade_out > 0:
+            fade_start = max(0.0, float(seg["duration"]) - float(fade_out))
+            chain += f",afade=t=out:st={fade_start:.3f}:d={fade_out:.3f}"
+        seg_label = f"[bgm_seg_{seg_idx}]"
+        filter_parts.append(f"{chain}{seg_label}")
+
+        delay_ms = int(float(seg["timeline_start"]) * 1000)
+        delayed_label = f"[bgm_delayed_{seg_idx}]"
+        filter_parts.append(
+            f"{seg_label}adelay={delay_ms}:all=1{delayed_label}"
+        )
+        seg_labels.append(delayed_label)
+
+    mix_inputs = "".join(seg_labels)
+    filter_parts.append(
+        f"{mix_inputs}amix=inputs={len(seg_labels)}:duration=longest[bgm_mix]"
+    )
+
+    video_has_audio = await has_audio_stream(video_path)
+    if video_has_audio:
+        filter_parts.append(
+            "[0:a][bgm_mix]amix=inputs=2:duration=longest[aout]"
+        )
+        output_audio = "[aout]"
+    else:
+        output_audio = "[bgm_mix]"
+
+    filter_complex = ";".join(filter_parts)
+    cmd.extend(["-filter_complex", filter_complex])
+    cmd.extend(["-map", "0:v", "-map", output_audio, "-c:v", "copy"])
+    cmd.extend(audio_params.to_ffmpeg_opts())
+    cmd.extend(["-shortest", output_path])
+
+    try:
+        proc = await _run_ffmpeg_async(cmd)
+        logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
+        logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
+        logger.info(
+            "Successfully mixed BGM segments into %s -> %s",
+            video_path,
+            output_path,
+        )
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error mixing BGM segments: {e}")
+        logger.error(f"FFmpeg stdout:\n{e.stdout}")
+        logger.error(f"FFmpeg stderr:\n{e.stderr}")
+        raise
+
+    return filter_complex
 
 
 async def mix_audio_tracks(

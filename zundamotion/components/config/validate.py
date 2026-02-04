@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from ...exceptions import ValidationError
+from ...utils.filter_presets import AUDIO_FILTER_PRESETS, VIDEO_FILTER_PRESETS
 
 
 BACKGROUND_FIT_CHOICES = {
@@ -136,6 +137,17 @@ def _validate_fg_overlays(container: Dict[str, Any], container_id: str) -> None:
             raise ValidationError(
                 f"Foreground overlay '{fg_id}' source file '{src}' not found for {container_id}."
             )
+
+        video_filter = fg.get("filter")
+        if video_filter is not None:
+            if not isinstance(video_filter, str):
+                raise ValidationError(
+                    f"Foreground overlay '{fg_id}' in {container_id} filter must be a string."
+                )
+            if video_filter.strip().lower() not in VIDEO_FILTER_PRESETS:
+                raise ValidationError(
+                    f"Foreground overlay '{fg_id}' in {container_id} has invalid filter '{video_filter}'."
+                )
 
         mode = fg.get("mode")
         if mode not in {"overlay", "blend", "chroma", "alpha"}:
@@ -499,6 +511,47 @@ def validate_config(config: Dict[str, Any]) -> None:
     if not isinstance(script, dict):
         raise ValueError("Script data must be a dictionary under the 'script' key.")
 
+    bgm_layers = script.get("bgm_layers")
+    if bgm_layers is not None:
+        if not isinstance(bgm_layers, list):
+            raise ValidationError("'bgm_layers' must be a list.")
+        seen_ids = set()
+        for idx, layer in enumerate(bgm_layers):
+            if not isinstance(layer, dict):
+                raise ValidationError(f"bgm_layers entry {idx} must be a dictionary.")
+            layer_id = layer.get("id")
+            if not isinstance(layer_id, str) or not layer_id.strip():
+                raise ValidationError(
+                    f"bgm_layers entry {idx} must have a non-empty 'id'."
+                )
+            if layer_id in seen_ids:
+                raise ValidationError(f"bgm_layers id '{layer_id}' is duplicated.")
+            seen_ids.add(layer_id)
+            file_path = layer.get("file")
+            if not isinstance(file_path, str) or not file_path.strip():
+                raise ValidationError(
+                    f"bgm_layers '{layer_id}' must have a 'file' path."
+                )
+            file_full_path = Path(file_path)
+            if not file_full_path.exists():
+                raise ValidationError(
+                    f"bgm_layers '{layer_id}' file '{file_path}' does not exist."
+                )
+            if not file_full_path.is_file():
+                raise ValidationError(
+                    f"bgm_layers '{layer_id}' file '{file_path}' is not a file."
+                )
+            gain = layer.get("gain")
+            if gain is not None and not isinstance(gain, (int, float)):
+                raise ValidationError(
+                    f"bgm_layers '{layer_id}' gain must be a number."
+                )
+            loop = layer.get("loop")
+            if loop is not None and not isinstance(loop, bool):
+                raise ValidationError(
+                    f"bgm_layers '{layer_id}' loop must be a boolean."
+                )
+
     defaults = config.get("defaults", {})
     if defaults:
         cp = defaults.get("characters_persist")
@@ -528,6 +581,63 @@ def validate_config(config: Dict[str, Any]) -> None:
     if not isinstance(scenes, list):
         raise ValueError("Script must contain a 'scenes' list.")
 
+    def _line_from_item(
+        scene_id: str, item: Dict[str, Any], idx: int
+    ) -> Dict[str, Any] | None:
+        if "say" in item:
+            say_val = item.get("say")
+            if isinstance(say_val, str):
+                return {"text": say_val}
+            if isinstance(say_val, dict):
+                return say_val
+            raise ValidationError(
+                f"Scene '{scene_id}' item {idx} say must be a string or dictionary."
+            )
+        if "wait" in item:
+            wait_val = item.get("wait")
+            if isinstance(wait_val, dict) and "wait" in wait_val:
+                return wait_val
+            if isinstance(wait_val, dict) and "duration" in wait_val:
+                return {"wait": wait_val}
+            return {"wait": wait_val}
+        if "image_layers" in item:
+            image_val = item.get("image_layers")
+            if isinstance(image_val, dict):
+                return image_val
+            return {"image_layers": image_val}
+        if "bgm" in item:
+            bgm_val = item.get("bgm")
+            if not isinstance(bgm_val, dict):
+                raise ValidationError(
+                    f"Scene '{scene_id}' item {idx} bgm must be a dictionary."
+                )
+            bgm_id = bgm_val.get("id")
+            if not isinstance(bgm_id, str) or not bgm_id.strip():
+                raise ValidationError(
+                    f"Scene '{scene_id}' item {idx} bgm requires a non-empty id."
+                )
+            action = bgm_val.get("action")
+            if action not in {"start", "stop", "resume"}:
+                raise ValidationError(
+                    f"Scene '{scene_id}' item {idx} bgm action must be start/stop/resume."
+                )
+            fade = bgm_val.get("fade")
+            if fade is not None and not isinstance(fade, (int, float)):
+                raise ValidationError(
+                    f"Scene '{scene_id}' item {idx} bgm fade must be a number."
+                )
+            return None
+        if "topic" in item:
+            topic_val = item.get("topic")
+            if not isinstance(topic_val, str) or not topic_val.strip():
+                raise ValidationError(
+                    f"Scene '{scene_id}' item {idx} topic must be a non-empty string."
+                )
+            return None
+        raise ValidationError(
+            f"Scene '{scene_id}' item {idx} must contain say/wait/bgm/topic."
+        )
+
     for scene_idx, scene in enumerate(scenes):
         if not isinstance(scene, dict):
             raise ValidationError(f"Scene at index {scene_idx} must be a dictionary.")
@@ -548,9 +658,34 @@ def validate_config(config: Dict[str, Any]) -> None:
                 f"Scene '{scene_id}' characters_persist must be a boolean."
             )
 
+        items = scene.get("items")
         lines = scene.get("lines")
+        if items is not None:
+            if not isinstance(items, list):
+                raise ValidationError(f"Scene '{scene_id}' items must be a list.")
+            derived_lines = []
+            for item_idx, item in enumerate(items):
+                if not isinstance(item, dict):
+                    raise ValidationError(
+                        f"Scene '{scene_id}' item {item_idx} must be a dictionary."
+                    )
+                line_entry = _line_from_item(scene_id, item, item_idx)
+                if line_entry is not None:
+                    derived_lines.append(line_entry)
+            lines = derived_lines
         if not isinstance(lines, list):
             raise ValidationError(f"Scene '{scene_id}' must contain a 'lines' list.")
+
+        scene_video_filter = scene.get("video_filter")
+        if scene_video_filter is not None:
+            if not isinstance(scene_video_filter, str):
+                raise ValidationError(
+                    f"Scene '{scene_id}' video_filter must be a string."
+                )
+            if scene_video_filter.strip().lower() not in VIDEO_FILTER_PRESETS:
+                raise ValidationError(
+                    f"Scene '{scene_id}' video_filter must be one of {sorted(VIDEO_FILTER_PRESETS)}."
+                )
 
         # Validate background image/video path
         bg_path = scene.get("bg", config.get("background", {}).get("default"))
@@ -596,32 +731,6 @@ def validate_config(config: Dict[str, Any]) -> None:
             if transition_duration <= 0:
                 raise ValidationError(
                     f"Transition duration for scene '{scene_id}' must be positive, but got {transition_duration}."
-                )
-
-        # Validate BGM path
-        bgm_config = scene.get("bgm")
-        if bgm_config:
-            if not isinstance(bgm_config, dict):
-                raise ValidationError(
-                    f"BGM configuration for scene '{scene_id}' must be a dictionary."
-                )
-            bgm_path = bgm_config.get("path")
-            if bgm_path:
-                bgm_full_path = Path(bgm_path)
-                if not bgm_full_path.exists():
-                    raise ValidationError(
-                        f"BGM file '{bgm_path}' for scene '{scene_id}' does not exist."
-                    )
-                if not bgm_full_path.is_file():
-                    raise ValidationError(
-                        f"BGM path '{bgm_path}' for scene '{scene_id}' is not a file."
-                    )
-
-            # Validate bgm_volume range
-            bgm_volume = bgm_config.get("volume")
-            if bgm_volume is not None and not (0.0 <= bgm_volume <= 1.0):
-                raise ValidationError(
-                    f"BGM volume for scene '{scene_id}' must be between 0.0 and 1.0, but got {bgm_volume}."
                 )
 
         # Validate foreground overlays
@@ -773,3 +882,14 @@ def validate_config(config: Dict[str, Any]) -> None:
                         raise ValidationError(
                             f"Sound effect volume for scene '{scene_id}', line {line_idx}, index {se_idx} must be between 0.0 and 1.0, but got {se_volume}."
                         )
+
+            audio_filter = line.get("audio_filter")
+            if audio_filter is not None:
+                if not isinstance(audio_filter, str):
+                    raise ValidationError(
+                        f"Audio filter for scene '{scene_id}', line {line_idx} must be a string."
+                    )
+                if audio_filter.strip().lower() not in AUDIO_FILTER_PRESETS:
+                    raise ValidationError(
+                        f"Audio filter for scene '{scene_id}', line {line_idx} must be one of {sorted(AUDIO_FILTER_PRESETS)}."
+                    )

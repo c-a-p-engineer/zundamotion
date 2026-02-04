@@ -1,0 +1,23 @@
+meta:
+  title: "Topicチャプターサンプル"
+  version: 1
+
+defaults:
+  speaker_id: 3
+
+scenes:
+  - id: topic_markers
+    bg: "assets/bg/room.png"
+    items:
+      - topic: "導入"
+      - say:
+          text: "ここから導入パートです。"
+          speaker_name: "copetan"
+      - topic: "本題"
+      - say:
+          text: "本題のチャプターに切り替わりました。"
+          speaker_name: "copetan"
+      - topic: "まとめ"
+      - say:
+          text: "最後のまとめパートです。"
+          speaker_name: "copetan"

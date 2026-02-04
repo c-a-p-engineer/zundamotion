@@ -19,6 +19,7 @@ from ...utils.ffmpeg_ops import (
     normalize_media,
 )
 from ...utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
+from ...utils.filter_presets import get_video_filter_chain
 from .clip.characters import collect_character_inputs, build_character_overlays
 from .clip.effects import resolve_background_effects, resolve_screen_effects
 
@@ -436,6 +437,16 @@ async def render_wait_clip(
         filter_parts.extend(bg_snippet.filter_chain)
         if bg_snippet.output_label:
             current_label = bg_snippet.output_label
+
+    video_filter = background_config.get("video_filter")
+    if video_filter:
+        chain = get_video_filter_chain(str(video_filter))
+        if chain:
+            filtered_label = "[wait_filtered]"
+            filter_parts.append(
+                f"{current_label}{','.join(chain)}{filtered_label}"
+            )
+            current_label = filtered_label
 
     filter_parts.append(f"{current_label}trim=duration={duration}[wait_trim]")
     current_label = "[wait_trim]"

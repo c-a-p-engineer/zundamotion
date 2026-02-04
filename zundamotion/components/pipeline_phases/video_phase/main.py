@@ -206,8 +206,9 @@ class VideoPhase:
         return {
             "id": scene.get("id"),
             "lines": scene.get("lines", []),
+            "items": scene.get("items", []),
             "bg": scene.get("bg"),
-            "bgm": scene.get("bgm"),
+            "video_filter": scene.get("video_filter"),
             "fg_overlays": scene.get("fg_overlays"),
             "voice_config": self.config.get("voice", {}),
             "video_config": self.config.get("video", {}),

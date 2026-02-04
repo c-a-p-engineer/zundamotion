@@ -20,6 +20,8 @@
 - [画像・動画の挿入 (`insert`)](#画像動画の挿入-insert)
 - [前景オーバーレイ (`fg_overlays`)](#前景オーバーレイ-fg_overlays)
 - [BGM と音声チューニング](#bgm-と音声チューニング)
+- [Topic（チャプター）](#topicチャプター)
+- [音声・映像フィルタ](#音声映像フィルタ)
 - [効果音 (`sound_effects`)](#効果音-sound_effects)
 - [顔アニメ用差分素材](#顔アニメ用差分素材)
 - [読みと字幕テキストの制御](#読みと字幕テキストの制御)
@@ -354,8 +356,51 @@ lines:
 ```
 
 - シーンレベル `bgm` でループBGMを設定。フェードや開始位置を細かく制御できます。サンプル: [`sample.yaml`](./sample.yaml)。
+- BGMの start/stop 切り替え例は [`sample_bgm.yaml`](./sample_bgm.yaml) を参照してください。
 - 行ごとの `speed` / `pitch` / `voice_style` は VOICEVOX の音声チューニングに利用します。
 - `defaults.characters.<name>.speaker_id` や行の `speaker_id` で話者を指定してください。
+
+## Topic（チャプター）
+
+`topic` を挿入するとタイムライン上でチャプター情報を生成できます。
+
+```yaml
+items:
+  - topic: "導入"
+  - say:
+      text: "導入パートです。"
+      speaker_name: "copetan"
+  - topic: "本題"
+```
+
+- YouTube などのチャプター用メタデータに利用されます。
+- まとまった例は [`sample_topics.yaml`](./sample_topics.yaml) を参照してください。
+
+## 音声・映像フィルタ
+
+音声には `audio_filter`、映像には `video_filter` を行単位で指定します。
+オーバーレイの色味変更は `fg_overlays[*].filter` で行えます。
+
+```yaml
+items:
+  - say:
+      text: "電話越しの音"
+      audio_filter: phone
+  - say:
+      text: "セピア調の映像"
+      video_filter: sepia
+  - say:
+      text: "オーバーレイのグレースケール"
+      fg_overlays:
+        - id: speedlines
+          src: assets/overlay/speedlines.png
+          mode: overlay
+          filter: grayscale
+```
+
+- audio_filter presets: `phone` / `echo` / `radio` / `muffled`
+- video_filter presets: `invert` / `sepia` / `grayscale` / `high_contrast` / `night`
+- まとめた例は [`sample_filters.yaml`](./sample_filters.yaml) を参照してください。
 
 ## 効果音 (`sound_effects`)
 

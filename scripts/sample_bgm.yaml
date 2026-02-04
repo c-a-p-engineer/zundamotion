@@ -1,0 +1,53 @@
+meta:
+  title: "BGM制御サンプル"
+  version: 1
+
+defaults:
+  characters:
+    copetan:
+      speaker_id: 3
+    engy:
+      speaker_id: 8
+
+bgm_layers:
+  - id: main
+    file: assets/bgm/intro.wav
+    gain: 12.0
+    loop: true
+  - id: alt
+    file: assets/bgm/street.wav
+    gain: 14.0
+    loop: true
+
+scenes:
+  - id: bgm_switch
+    bg: "assets/bg/room.png"
+    items:
+      - bgm:
+          id: main
+          action: start
+          fade: 1.0
+      - say:
+          text: "最初のBGMで会話を始めるのだ。"
+          speaker_name: "copetan"
+      - say:
+          text: "ここでいったんBGMを止めます。"
+          speaker_name: "engy"
+      - bgm:
+          id: main
+          action: stop
+          fade: 0.5
+      - say:
+          text: "無音の区間が入るよ。"
+          speaker_name: "copetan"
+      - bgm:
+          id: alt
+          action: start
+          fade: 0.5
+      - say:
+          text: "別BGMに切り替わりました。"
+          speaker_name: "engy"
+      - bgm:
+          id: alt
+          action: stop
+          fade: 0.5
