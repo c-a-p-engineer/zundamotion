@@ -9,6 +9,7 @@ import yaml
 from yaml import YAMLError
 
 from ...exceptions import ValidationError
+from ..markdown import load_markdown_script
 
 
 VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -70,7 +71,7 @@ class ScriptResolver:
             chain = " -> ".join(str(p) for p in stack + [resolved_path])
             raise ValidationError(f"Include cycle detected: {chain}")
 
-        data = self._load_yaml(resolved_path)
+        data = self._load_source(resolved_path)
         current_stack = stack + [resolved_path]
         base_dir = resolved_path.parent
 
@@ -230,7 +231,10 @@ class ScriptResolver:
             result.append(scene)
         return result
 
-    def _load_yaml(self, path: Path) -> Any:
+    def _load_source(self, path: Path) -> Any:
+        if path.suffix.lower() in {".md", ".markdown"}:
+            return load_markdown_script(path)
+
         try:
             with path.open("r", encoding="utf-8") as fh:
                 return yaml.safe_load(fh) or {}

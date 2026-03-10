@@ -1,3 +1,23 @@
+1. **字幕の自動折り返し推定とキャラクター別字幕スタイル例の追加** (完了日: 2026-03-10)  
+   - 完了内容: `subtitle.max_chars_per_line: auto` で `max_pixel_width` とフォント実測幅から字幕ごとの折り返し文字数を推定するようにした。`sample_markdown.md` では左右下寄せの立ち位置と、キャラクター別 `subtitle` 色設定も追加。  
+   - メモ: 既存の `wrap_mode: chars` / 数値指定も後方互換のまま維持。
+
+1. **Markdownパネルの見出し/箇条書き描画対応** (完了日: 2026-03-09)  
+   - 完了内容: Markdown パネル描画をプレーンテキスト表示から改善し、`#` 見出し・箇条書き・引用を見た目付きで描画するようにした。`sample_markdown.md` に字幕設定も追加。  
+   - メモ: 軽量レンダラのため、HTML や複雑なインライン装飾までは未対応。
+
+1. **Markdown入力パネルの表示カスタマイズ対応** (完了日: 2026-03-09)  
+   - 完了内容: Markdown frontmatter に `markdown.layer/panel/text` を追加し、パネル位置・縮尺・余白・背景色・枠線色・フォントサイズを指定可能にした。文字は CJK フォントを優先し、パネル内に収まるまで自動縮小する。  
+   - メモ: `scripts/sample_markdown.md` を左下/右下のキャラクター配置と読みやすいパネル設定に更新。
+
+1. **字幕オーバーレイ座標の型エラー修正** (完了日: 2026-03-09)  
+   - 完了内容: `SubtitleGenerator` が行全体の設定を字幕スタイルへ誤マージしていたため、キャラクター座標の数値 `x` / `y` を拾って `.replace()` で異常終了していた問題を修正。字幕設定は `subtitle` 配下のみ反映し、数値座標も受け付けるように回帰テストを追加。  
+   - メモ: `scripts/sample_markdown.md` のようにキャラクター座標を持つ Markdown 入力でも字幕焼き込みが継続可能になった。
+
+1. **Markdown入力→画像生成→中間台本→動画生成パイプラインの導入** (完了日: 2026-03-09)  
+   - 完了内容: Frontmatter付きMarkdown（`.md`）入力の解析、本文由来の背景画像生成、既存YAML互換の中間シーン生成、既存`load_script_and_config`/`validate_config`経路への接続を実装。  
+   - メモ: `output/intermediate/<script名>/images/` に決定論的な背景画像を保存し、既存YAML入力は後方互換を維持。
+
 1. **OpenCLスモークテストのscale_opencl互換修正** (完了日: 2026-02-01)  
    - 完了内容: `scale_opencl` を named options（`w=`/`h=`）に統一し、OpenCL smoke test と clip renderer のフィルタグラフへ反映。ユーティリティとテストを追加。  
    - メモ: FFmpeg 7+ の "No option name near 'WxH'" を回避。

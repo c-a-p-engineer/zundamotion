@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import statistics
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path  # Pathをインポート
 from typing import Any, Dict, Tuple
@@ -261,6 +262,53 @@ def _build_background_layer(
     return layer
 
 
+def _measure_text_width(font: ImageFont.FreeTypeFont, text: str) -> int:
+    if hasattr(font, "getbbox"):
+        try:
+            bbox = font.getbbox(text)
+            return max(0, bbox[2] - bbox[0])
+        except Exception:
+            pass
+    width, _ = font.getsize(text)
+    return max(0, int(width))
+
+
+def _estimate_auto_max_chars(
+    text: str, font: ImageFont.FreeTypeFont, max_width: int
+) -> int:
+    if max_width <= 0:
+        return 0
+
+    sample_chars = [char for char in text.replace("\\n", "\n") if not char.isspace()]
+    if not sample_chars:
+        sample_chars = list("あいうえお漢字ABC123")
+
+    widths = []
+    for char in sample_chars[:64]:
+        width = _measure_text_width(font, char)
+        if width > 0:
+            widths.append(width)
+
+    if not widths:
+        fallback_width = _measure_text_width(font, "あ") or _measure_text_width(font, "W")
+        widths.append(max(1, fallback_width))
+
+    median_width = statistics.median(widths)
+    if median_width <= 0:
+        return 0
+
+    return max(4, int(max_width // median_width))
+
+
+def _fits_within_width(
+    wrapped_text: str, font: ImageFont.FreeTypeFont, max_width: int
+) -> bool:
+    for line in wrapped_text.split("\n"):
+        if _measure_text_width(font, line) > max_width:
+            return False
+    return True
+
+
 class SubtitlePNGRenderer:
     """
     Generates and caches subtitle images using Pillow.
@@ -450,6 +498,10 @@ def _render_subtitle_png(
     font_color = style_.get("font_color", "white")
     max_width = style_.get("max_pixel_width", 1800)
     try:
+        max_width_i = max(1, int(max_width))
+    except (TypeError, ValueError):
+        max_width_i = 1800
+    try:
         stroke_width = int(style_.get("stroke_width", 0) or 0)
     except (TypeError, ValueError):
         stroke_width = 0
@@ -489,14 +541,27 @@ def _render_subtitle_png(
 
     wrap_mode = (style_.get("wrap_mode") or "").strip().lower()
     max_chars = style_.get("max_chars_per_line")
+    auto_char_wrap = isinstance(max_chars, str) and max_chars.strip().lower() == "auto"
+
     if wrap_mode == "chars" or (max_chars is not None and wrap_mode != "pixel"):
-        try:
-            max_chars_i = int(max_chars) if max_chars is not None else 0
-        except (TypeError, ValueError):
-            max_chars_i = 0
-        wrapped_text = SubtitlePNGRenderer._wrap_text_by_chars_static(text_, max_chars_i)
+        if auto_char_wrap:
+            max_chars_i = _estimate_auto_max_chars(text_, font, max_width_i)
+            wrapped_text = SubtitlePNGRenderer._wrap_text_by_chars_static(text_, max_chars_i)
+            while max_chars_i > 4 and not _fits_within_width(
+                wrapped_text, font, max_width_i
+            ):
+                max_chars_i -= 1
+                wrapped_text = SubtitlePNGRenderer._wrap_text_by_chars_static(
+                    text_, max_chars_i
+                )
+        else:
+            try:
+                max_chars_i = int(max_chars) if max_chars is not None else 0
+            except (TypeError, ValueError):
+                max_chars_i = 0
+            wrapped_text = SubtitlePNGRenderer._wrap_text_by_chars_static(text_, max_chars_i)
     else:
-        wrapped_text = SubtitlePNGRenderer._wrap_text_by_pixel_static(text_, font, max_width)
+        wrapped_text = SubtitlePNGRenderer._wrap_text_by_pixel_static(text_, font, max_width_i)
     lines = wrapped_text.split("\n")
 
     text_w = 0

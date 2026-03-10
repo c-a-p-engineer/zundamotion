@@ -56,12 +56,12 @@ def _apply_project_root(cli_value: str | None) -> Path | None:
 async def main() -> None:
     """コマンドライン引数を解析し動画生成を実行する。"""
     parser = argparse.ArgumentParser(
-        description="Generate a video from a YAML script using VOICEVOX and FFmpeg."
+        description="Generate a video from a YAML/Markdown script using VOICEVOX and FFmpeg."
     )
     parser.add_argument(
         "script_path",
         type=str,
-        help="Path to the input YAML script file.",
+        help="Path to the input script file (.yaml/.yml or frontmatter .md).",
     )
     parser.add_argument(
         "--project-root",

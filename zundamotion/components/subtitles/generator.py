@@ -19,6 +19,15 @@ class SubtitleGenerator:
         self.subtitle_config = config.get("subtitle", {})
         self.png_renderer = SubtitlePNGRenderer(cache_manager)
 
+    @staticmethod
+    def _normalize_overlay_expr(value: Any, default: str) -> str:
+        if value is None:
+            return default
+        if isinstance(value, (int, float)):
+            return str(value)
+        expr = str(value).strip()
+        return expr or default
+
     async def build_subtitle_overlay(
         self,
         text: str,
@@ -38,7 +47,6 @@ class SubtitleGenerator:
         text = normalize_subtitle_text(text)
 
         style = self.subtitle_config.copy()
-        style.update(line_config)
         if "subtitle" in line_config and isinstance(line_config["subtitle"], dict):
             style.update(line_config["subtitle"])
 
@@ -72,7 +80,8 @@ class SubtitleGenerator:
 
         # 位置式（あなたの置換ロジックはそのまま活かす）
         # Convert drawtext-style expr to overlay(_cuda) variables
-        def convert_expr(expr: str) -> str:
+        def convert_expr(expr: Any, default: str) -> str:
+            expr = self._normalize_overlay_expr(expr, default)
             # Preserve text_* first using placeholders to avoid nested replacements
             expr = expr.replace("text_w", "{OVERLAY_W}").replace("text_h", "{OVERLAY_H}")
             # drawtext: w/h => main width/height; overlay: W/H are main dims
@@ -84,8 +93,8 @@ class SubtitleGenerator:
             expr = expr.replace("{OVERLAY_W}", "w").replace("{OVERLAY_H}", "h")
             return expr
 
-        y_expr = convert_expr(style.get("y", "H-100"))
-        x_expr = convert_expr(style.get("x", "(W-w)/2"))
+        y_expr = convert_expr(style.get("y"), "H-100")
+        x_expr = convert_expr(style.get("x"), "(W-w)/2")
 
         effect_snippet = resolve_subtitle_effects(
             effects=effects_cfg,

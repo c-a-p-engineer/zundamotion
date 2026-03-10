@@ -52,8 +52,9 @@ subtitle:
   font_path: "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf" # IPAexGothic font path
   font_color: "white"
   font_size: 64
-  max_chars_per_line: 28 # Widen lines (~1.5x) for fewer breaks
+  max_chars_per_line: 28 # Number or "auto" (estimate from max_pixel_width and font)
   wrap_mode: chars       # Prefer character-based wrapping for CJK text
+  max_pixel_width: 1800  # Used by pixel wrap and auto char estimation
   stroke_color: "black"
   stroke_width: 2
   background:
