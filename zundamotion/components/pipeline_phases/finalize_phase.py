@@ -136,6 +136,7 @@ class FinalizePhase:
                         self.video_params,
                         self.audio_params,
                         wait_padding=self.transition_wait_padding,
+                        hw_encoder=self.hw_encoder,
                     )
                     if (
                         effective_gap > 0

@@ -371,6 +371,7 @@ async def apply_transition(
     audio_params: AudioParams,
     ffmpeg_path: str = "ffmpeg",
     wait_padding: float = 0.0,
+    hw_encoder: str = "auto",
 ):
     """
     映像: xfade、音声: acrossfade でクロスフェード。
@@ -381,7 +382,7 @@ async def apply_transition(
     has_a1 = await has_audio_stream(input_video1_path)
     has_a2 = await has_audio_stream(input_video2_path)
 
-    hw_kind = await get_hw_encoder_kind_for_video_params(ffmpeg_path)
+    hw_kind = await get_hw_encoder_kind_for_video_params(ffmpeg_path, hw_encoder)
     video_opts = video_params.to_ffmpeg_opts(hw_kind)
     audio_opts = audio_params.to_ffmpeg_opts()
 

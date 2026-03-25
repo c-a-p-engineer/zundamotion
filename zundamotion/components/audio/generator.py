@@ -1,14 +1,17 @@
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+import httpx
 
 from ...cache import CacheManager  # CacheManagerをインポート
+from ...exceptions import CacheError
 from ...utils.ffmpeg_params import AudioParams
 from ...utils.ffmpeg_probe import get_audio_duration
 from ...utils.ffmpeg_audio import create_silent_audio, mix_audio_tracks
 
 from ...utils.logger import logger  # loggerをインポート
-from .voicevox_client import generate_voice
+from .voicevox_client import generate_voice, get_speakers_info
 
 
 class AudioGenerator:
@@ -27,6 +30,47 @@ class AudioGenerator:
         )
         self.audio_params = audio_params
         self.cache_manager = cache_manager  # インスタンス変数として保持
+        self._speaker_info_cache: Optional[Dict[int, Dict[str, Any]]] = None
+        self._speaker_validation_unavailable = False
+
+    async def _get_speaker_info(self) -> Optional[Dict[int, Dict[str, Any]]]:
+        if self._speaker_info_cache is not None:
+            return self._speaker_info_cache
+        if self._speaker_validation_unavailable:
+            return None
+
+        try:
+            self._speaker_info_cache = await get_speakers_info(self.voicevox_url)
+        except Exception as exc:
+            logger.warning(
+                "Skipping VOICEVOX speaker validation because speaker info could not be fetched from %s: %s",
+                self.voicevox_url,
+                exc,
+            )
+            self._speaker_validation_unavailable = True
+            return None
+
+        return self._speaker_info_cache
+
+    async def _validate_speaker(self, speaker: int, line_config: Dict[str, Any]) -> None:
+        speaker_info = await self._get_speaker_info()
+        if not speaker_info or speaker in speaker_info:
+            return
+
+        available_ids = sorted(speaker_info)
+        examples = ", ".join(
+            f"{sid}:{info['speaker_name']}({info['name']})"
+            for sid, info in list(sorted(speaker_info.items()))[:8]
+        )
+        character_name = line_config.get("speaker_name")
+        character_hint = (
+            f" for speaker_name='{character_name}'" if character_name else ""
+        )
+        raise ValueError(
+            f"VOICEVOX speaker_id={speaker}{character_hint} is not available at "
+            f"{self.voicevox_url}. Update the script/defaults to use an installed "
+            f"speaker ID. Available speaker IDs: {available_ids}. Examples: {examples}"
+        )
 
     async def generate_audio(
         self, text: str, line_config: Dict[str, Any], output_filename: str
@@ -175,6 +219,7 @@ class AudioGenerator:
                     f"Speaker ID not found for line: '{text[:30]}...'. "
                     "Please ensure 'speaker_id' is defined in defaults or line_config."
                 )
+            await self._validate_speaker(int(speaker), line_config)
 
             # VOICEVOX合成パラメータをキャッシュキーに含める
             voice_key_data = {
@@ -200,24 +245,51 @@ class AudioGenerator:
                 )
                 return output_path
 
-            speech_wav_path = await self.cache_manager.get_or_create(
-                key_data=voice_key_data,
-                file_name=f"{output_filename}_speech",
-                extension="wav",
-                creator_func=creator_func,
-            )
-            speech_duration = await get_audio_duration(str(speech_wav_path))
-            voice_usage.append((int(speaker), text))
-            layer_voice_segments.append(
-                {
-                    "speaker_name": line_config.get("speaker_name"),
-                    "audio_path": speech_wav_path,
-                    "start_time": 0.0,
-                    "duration": speech_duration,
-                    "volume": 1.0,
-                    "layer_origin": None,
-                }
-            )
+            try:
+                speech_wav_path = await self.cache_manager.get_or_create(
+                    key_data=voice_key_data,
+                    file_name=f"{output_filename}_speech",
+                    extension="wav",
+                    creator_func=creator_func,
+                )
+                speech_duration = await get_audio_duration(str(speech_wav_path))
+                voice_usage.append((int(speaker), text))
+                layer_voice_segments.append(
+                    {
+                        "speaker_name": line_config.get("speaker_name"),
+                        "audio_path": speech_wav_path,
+                        "start_time": 0.0,
+                        "duration": speech_duration,
+                        "volume": 1.0,
+                        "layer_origin": None,
+                    }
+                )
+            except (CacheError, httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+                speech_wav_path = speech_wav_path_base.with_suffix(".wav")
+                estimated_duration = _estimate_silent_duration(
+                    text,
+                    line_config,
+                    self.voice_config,
+                )
+                silent_duration = max(
+                    estimated_duration,
+                    required_speech_duration_for_ses,
+                    0.001,
+                )
+                logger.warning(
+                    "[Audio] VOICEVOX synthesis failed for %s (speaker_id=%s): %s. "
+                    "Falling back to silent WAV with estimated duration %.3fs.",
+                    output_filename,
+                    speaker,
+                    exc,
+                    silent_duration,
+                )
+                await create_silent_audio(
+                    str(speech_wav_path),
+                    silent_duration,
+                    self.audio_params,
+                )
+                speech_duration = silent_duration
         else:
             # If voice is disabled or text is empty, create a silent WAV file
             speech_wav_path = speech_wav_path_base.with_suffix(

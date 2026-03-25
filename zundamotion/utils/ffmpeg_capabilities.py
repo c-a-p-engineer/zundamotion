@@ -763,12 +763,13 @@ async def get_encoder_options(
 
 async def get_hw_encoder_kind_for_video_params(
     ffmpeg_path: str = "ffmpeg",
+    hw_encoder: str = "auto",
 ) -> Optional[str]:
     """
     VideoParams.to_ffmpeg_opts で使用するためのハードウェアエンコーダの種類を判定して返す。
     環境変数による強制設定も考慮する。
     """
-    hw_force_off = os.getenv("DISABLE_HWENC", "0") == "1"
+    hw_force_off = os.getenv("DISABLE_HWENC", "0") == "1" or hw_encoder == "cpu"
 
     hw_kind_env = (
         "nvenc"
@@ -782,6 +783,16 @@ async def get_hw_encoder_kind_for_video_params(
 
     if hw_force_off:
         hw_kind = None
+    elif hw_encoder == "gpu":
+        if hw_kind_env:
+            hw_kind = hw_kind_env
+        elif await is_nvenc_available(ffmpeg_path):
+            hw_kind = "nvenc"
+        else:
+            hw_kind = None
+            logger.warning(
+                "GPU encoding was requested, but NVENC is not available. Falling back to CPU."
+            )
     elif hw_kind_env:
         hw_kind = hw_kind_env
     else:

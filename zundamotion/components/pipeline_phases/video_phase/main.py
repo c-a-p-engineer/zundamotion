@@ -114,8 +114,11 @@ class VideoPhase:
         temp_dir: Path,
         cache_manager: CacheManager,
         jobs: str,
+        hw_encoder: str = "auto",
     ):
-        hw_kind = await get_hw_encoder_kind_for_video_params()
+        hw_kind = await get_hw_encoder_kind_for_video_params(
+            hw_encoder=hw_encoder
+        )
         video_params = VideoParams(
             width=config.get("video", {}).get("width", 1920),
             height=config.get("video", {}).get("height", 1080),

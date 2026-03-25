@@ -11,7 +11,7 @@ from tenacity import (
 )
 
 # VOICEVOX APIとの通信エラー時にリトライする例外を指定
-RETRY_EXCEPTIONS = (httpx.RequestError, httpx.HTTPStatusError, asyncio.TimeoutError)
+RETRY_EXCEPTIONS = (httpx.RequestError, asyncio.TimeoutError)
 
 
 @retry(
@@ -118,7 +118,12 @@ async def generate_voice(
             print("Please ensure the VOICEVOX engine is running.")
             raise
         except httpx.HTTPStatusError as e:
-            print(f"HTTP error occurred during voice generation: {e}")
+            body = ""
+            if e.response is not None:
+                body_text = e.response.text.strip()
+                if body_text:
+                    body = f" Response body: {body_text[:500]}"
+            print(f"HTTP error occurred during voice generation: {e}.{body}")
             raise
         except asyncio.TimeoutError as e:
             print(f"Timeout occurred during voice generation: {e}")

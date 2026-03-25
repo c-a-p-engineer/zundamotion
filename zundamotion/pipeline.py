@@ -185,6 +185,7 @@ class GenerationPipeline:
                 temp_dir,
                 self.cache_manager,
                 self.jobs,
+                self.hw_encoder,
             )
             all_clips = await self._run_phase(
                 "VideoPhase", video_phase.run, scenes, line_data_map, self.timeline
