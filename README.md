@@ -264,6 +264,8 @@ DISABLE_HWENC=1 python -m zundamotion.main scripts/sample.yaml \
 このリポジトリを **動画生成エンジン** として利用側プロジェクトに取り込みたい場合は、`git submodule` + `pip install -e` を推奨します。
 詳細版は `docs/guides/submodule.md` を参照してください。
 
+`zundamotion-video-workspace` のように、親リポジトリ直下に `assets/` `scripts/` `output/` を置き、`vendor/zundamotion` をサブモジュール化した Dev Container 運用もできます。`.devcontainer` の構成例を含めた手順は [docs/guides/submodule.md](./docs/guides/submodule.md) の「zundamotion-video-workspace のような開発環境を作る」を参照してください。
+
 ### 1) submodule 追加（利用側リポジトリで実行）
 
 ```bash
