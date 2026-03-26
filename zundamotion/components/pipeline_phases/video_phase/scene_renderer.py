@@ -119,6 +119,18 @@ class SceneRenderer:
             "position": {"x": offset_x, "y": offset_y},
         }
 
+    def _resolve_background_source(
+        self,
+        line_config: Dict[str, Any],
+        scene_bg_default: Optional[str],
+    ) -> Optional[str]:
+        line_bg_cfg = line_config.get("background") if isinstance(line_config, dict) else None
+        if isinstance(line_bg_cfg, dict):
+            line_bg_path = line_bg_cfg.get("path")
+            if line_bg_path:
+                return str(line_bg_path)
+        return scene_bg_default
+
     def _collect_image_layers_by_line(
         self, lines: List[Dict[str, Any]]
     ) -> Dict[int, List[Dict[str, Any]]]:
@@ -393,7 +405,14 @@ class SceneRenderer:
         scene_results: List[Path] = []
 
         bg_image = scene.get("bg", bg_default)
+        if not bg_image:
+            raise PipelineError(f"Scene '{scene_id}' does not define a background.")
         is_bg_video = Path(bg_image).suffix.lower() in self.video_extensions
+        has_line_bg_override = any(
+            isinstance((line.get("background") or {}), dict)
+            and bool((line.get("background") or {}).get("path"))
+            for line in scene.get("lines", [])
+        )
 
         # キャラクターの登場/退場アニメーション秒数を行ごとに反映
         for idx, line in enumerate(scene.get("lines", []), start=1):
@@ -570,7 +589,9 @@ class SceneRenderer:
             self.config.get("video", {}).get("scene_base_min_lines", 6)
         )
         should_generate_base = False
-        if static_overlays:
+        if has_line_bg_override:
+            should_generate_base = False
+        elif static_overlays:
             should_generate_base = True
         elif is_bg_video and total_lines_in_scene >= min_lines_for_base:
             # 静的オーバーレイは無いが、行数が多い場合はベース生成の方が有利
@@ -674,7 +695,7 @@ class SceneRenderer:
 
         # 連続行で静的レイヤが不変な“ラン”のベース（行ブロック前処理）を検討
         run_bases: List[Dict[str, Any]] = []
-        if scene_base_path is None and not scene_cp:
+        if scene_base_path is None and not scene_cp and not has_line_bg_override:
             try:
                 talk_lines2 = [
                     l
@@ -847,6 +868,15 @@ class SceneRenderer:
                 pre_dur = float(line_data.get("pre_duration", 0.0))
                 line_config = line_data["line_config"]
                 bg_layout = self._resolve_background_layout(line_config)
+                line_bg_image = self._resolve_background_source(line_config, bg_image)
+                if not line_bg_image:
+                    raise PipelineError(
+                        f"Background is not defined for scene '{scene_id}', line {idx}."
+                    )
+                line_is_bg_video = (
+                    Path(line_bg_image).suffix.lower() in self.video_extensions
+                )
+                uses_scene_background = line_bg_image == bg_image
 
                 # シーンベース or 連続ランのベースがあればそれを使用
                 run_base = None
@@ -854,7 +884,11 @@ class SceneRenderer:
                     if rb["start"] <= idx <= rb["end"]:
                         run_base = rb
                         break
-                if scene_base_path is not None and scene_base_path.exists():
+                if (
+                    uses_scene_background
+                    and scene_base_path is not None
+                    and scene_base_path.exists()
+                ):
                     background_config = {
                         "type": "video",
                         "path": str(scene_base_path),
@@ -866,7 +900,11 @@ class SceneRenderer:
                         "anchor": bg_layout["anchor"],
                         "position": dict(bg_layout["position"]),
                     }
-                elif run_base is not None and Path(run_base["path"]).exists():
+                elif (
+                    uses_scene_background
+                    and run_base is not None
+                    and Path(run_base["path"]).exists()
+                ):
                     # ラン内でのオフセットを算出（キャッシュ）
                     if run_base.get("offsets") is None:
                         offs = {}
@@ -889,9 +927,9 @@ class SceneRenderer:
                     }
                 else:
                     # フォールバック（従来動作）: ベースなしで個別処理
-                    if is_bg_video:
+                    if line_is_bg_video:
                         # シーン単位で正規化済みなら二重スケールを回避
-                        if normalized_bg_path is not None and Path(
+                        if uses_scene_background and normalized_bg_path is not None and Path(
                             normalized_bg_path
                         ).exists():
                             background_config = {
@@ -908,7 +946,7 @@ class SceneRenderer:
                         else:
                             background_config = {
                                 "type": "video",
-                                "path": str(bg_image),
+                                "path": str(line_bg_image),
                                 "start_time": start_time_by_idx[idx],
                                 "fit": bg_layout["fit"],
                                 "fill_color": bg_layout["fill_color"],
@@ -918,7 +956,7 @@ class SceneRenderer:
                     else:
                         background_config = {
                             "type": "image",
-                            "path": str(bg_image),
+                            "path": str(line_bg_image),
                             "start_time": start_time_by_idx[idx],
                             "fit": bg_layout["fit"],
                             "fill_color": bg_layout["fill_color"],
@@ -944,8 +982,8 @@ class SceneRenderer:
                     wait_cache_data = {
                         "type": "wait",
                         "duration": duration,
-                        "bg_image_path": bg_image,
-                        "is_bg_video": is_bg_video,
+                        "bg_image_path": line_bg_image,
+                        "is_bg_video": line_is_bg_video,
                         "start_time": start_time_by_idx[idx],
                         "video_config": self.config.get("video", {}),
                         "line_config": line_config,
@@ -1059,8 +1097,8 @@ class SceneRenderer:
                         audio_cache_key_data
                     ),
                     "duration": duration,
-                    "bg_image_path": bg_image,
-                    "is_bg_video": is_bg_video,
+                    "bg_image_path": line_bg_image,
+                    "is_bg_video": line_is_bg_video,
                     "start_time": start_time_by_idx[idx],
                     "video_config": self.config.get("video", {}),
                     "bgm_config": self.config.get("bgm", {}),

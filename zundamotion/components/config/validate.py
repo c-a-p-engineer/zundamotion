@@ -55,6 +55,18 @@ def _is_valid_color_string(value: str) -> bool:
 def _validate_background_options(
     cfg: Dict[str, Any], container_id: str
 ) -> None:
+    bg_path = cfg.get("path")
+    if bg_path is not None:
+        if not isinstance(bg_path, str):
+            raise ValidationError(
+                f"Background path for {container_id} must be a string."
+            )
+        resolved = Path(bg_path)
+        if not resolved.exists() or not resolved.is_file():
+            raise ValidationError(
+                f"Background path '{bg_path}' not found for {container_id}."
+            )
+
     fit = cfg.get("fit")
     if fit is not None:
         if not isinstance(fit, str):

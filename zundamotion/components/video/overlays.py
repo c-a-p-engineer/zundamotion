@@ -10,6 +10,7 @@ from importlib import import_module
 
 from ...utils.ffmpeg_probe import get_media_duration
 from ...utils.filter_presets import get_video_filter_chain
+from ...utils.logger import logger
 from .overlay_effects import resolve_overlay_effects
 
 
@@ -21,6 +22,29 @@ async def _run_ffmpeg(cmd: List[str]) -> None:
 
 class OverlayMixin:
     """FFmpegを用いたオーバーレイ合成機能のMixinクラス。"""
+
+    def _max_cuda_subtitle_overlays(self) -> int:
+        video_cfg = getattr(self, "video_config", {}) or {}
+        try:
+            value = int(video_cfg.get("max_cuda_subtitle_overlays", 8))
+        except Exception:
+            value = 8
+        return max(0, value)
+
+    def _should_use_cuda_for_subtitles(self, subtitles: List[Dict[str, Any]]) -> bool:
+        if self.gpu_overlay_backend != "cuda":
+            return False
+
+        limit = self._max_cuda_subtitle_overlays()
+        count = len(subtitles or [])
+        if limit and count > limit:
+            logger.info(
+                "[SubtitleOverlay] Falling back to CPU filters because subtitle count=%s exceeds CUDA limit=%s",
+                count,
+                limit,
+            )
+            return False
+        return True
 
     def _is_image(self, path: Path) -> bool:
         ext = path.suffix.lower()
@@ -242,6 +266,7 @@ class OverlayMixin:
 
         filter_parts: List[str] = []
         prev_stream = "[0:v]"
+        use_cuda_for_subtitles = self._should_use_cuda_for_subtitles(subtitles or [])
 
         for idx, ov in enumerate(overlays or []):
             in_stream = f"[{idx + 1}:v]"
@@ -282,7 +307,7 @@ class OverlayMixin:
                 sub.get("line_config", {}),
                 in_label=prev_stream.strip("[]"),
                 index=png_input_index,
-                allow_cuda=self.gpu_overlay_backend == "cuda",
+                allow_cuda=use_cuda_for_subtitles,
             )
             for k, v in extra_input.items():
                 cmd.extend([k, v])
@@ -322,6 +347,7 @@ class OverlayMixin:
 
         filter_parts: List[str] = []
         prev_stream = "[0:v]"
+        use_cuda_for_subtitles = self._should_use_cuda_for_subtitles(subtitles)
         for idx, sub in enumerate(subtitles):
             extra_input, snippet = await self.subtitle_gen.build_subtitle_overlay(
                 sub["text"],
@@ -329,7 +355,7 @@ class OverlayMixin:
                 sub.get("line_config", {}),
                 in_label=prev_stream.strip("[]"),
                 index=idx + 1,
-                allow_cuda=self.gpu_overlay_backend == "cuda",
+                allow_cuda=use_cuda_for_subtitles,
             )
             for k, v in extra_input.items():
                 cmd.extend([k, v])

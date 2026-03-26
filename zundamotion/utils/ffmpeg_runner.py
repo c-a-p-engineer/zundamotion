@@ -6,11 +6,98 @@ import asyncio
 import contextlib
 import logging
 import os
+from pathlib import Path
 import subprocess
 import time
 from typing import List, Optional
 
 from .logger import logger
+
+
+def _guess_ffmpeg_output_path(args: List[str]) -> Optional[Path]:
+    if not args:
+        return None
+    if os.path.basename(str(args[0])).startswith("ffprobe"):
+        return None
+
+    for token in reversed(args[1:]):
+        value = str(token)
+        if not value or value.startswith("-"):
+            continue
+        if value in {"pipe:1", "pipe:2", "-", "NUL", "/dev/null"}:
+            return None
+        return Path(value)
+    return None
+
+
+def _format_progress_size(path: Optional[Path]) -> str:
+    if path is None:
+        return "output=unknown"
+    try:
+        if not path.exists():
+            return f"output={path.name} pending"
+        size = path.stat().st_size
+        return f"output={path.name} size={size / (1024 * 1024):.1f}MB"
+    except Exception:
+        return f"output={path.name} status=unavailable"
+
+
+def _estimate_eta_seconds(
+    output_path: Optional[Path],
+    last_size: Optional[int],
+    last_at: Optional[float],
+) -> tuple[Optional[float], Optional[int], Optional[float]]:
+    if output_path is None or not output_path.exists():
+        return None, last_size, last_at
+
+    try:
+        current_size = output_path.stat().st_size
+    except Exception:
+        return None, last_size, last_at
+
+    now = time.monotonic()
+    eta = None
+    if last_size is not None and last_at is not None and current_size > last_size:
+        elapsed = now - last_at
+        delta = current_size - last_size
+        if elapsed > 0 and delta > 0:
+            growth_per_sec = delta / elapsed
+            # Heuristic: current size to roughly 2x current size for long-running subtitle finalize.
+            remaining = current_size
+            eta = remaining / growth_per_sec if growth_per_sec > 0 else None
+
+    return eta, current_size, now
+
+
+async def _log_ffmpeg_heartbeat(
+    process: asyncio.subprocess.Process,
+    base: str,
+    output_path: Optional[Path],
+    started_at: float,
+    interval_sec: float,
+) -> None:
+    if interval_sec <= 0:
+        return
+
+    last_size: Optional[int] = None
+    last_at: Optional[float] = None
+    while process.returncode is None:
+        await asyncio.sleep(interval_sec)
+        if process.returncode is not None:
+            break
+        elapsed = time.monotonic() - started_at
+        eta, last_size, last_at = _estimate_eta_seconds(output_path, last_size, last_at)
+        eta_str = ""
+        if eta is not None:
+            eta_str = f" eta~{eta:.0f}s"
+        logger.info(
+            "[FFmpeg Progress] pid=%s exe=%s elapsed=%.1fs%s %s",
+            process.pid,
+            base,
+            elapsed,
+            eta_str,
+            _format_progress_size(output_path),
+        )
 
 
 async def run_ffmpeg_async(
@@ -39,12 +126,20 @@ async def run_ffmpeg_async(
             logger.debug(f"Running command: {cmd_str}")
 
         t0 = time.monotonic()
+        output_path = _guess_ffmpeg_output_path(args)
+        try:
+            heartbeat_interval = float(os.getenv("FFMPEG_PROGRESS_LOG_INTERVAL_SEC", "15") or 15)
+        except Exception:
+            heartbeat_interval = 15.0
         process = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         logger.debug(f"Spawned PID={process.pid} for {base}")
+        heartbeat_task = asyncio.create_task(
+            _log_ffmpeg_heartbeat(process, base, output_path, t0, heartbeat_interval)
+        )
 
         try:
             if timeout is not None and timeout > 0:
@@ -79,6 +174,10 @@ async def run_ffmpeg_async(
             with contextlib.suppress(Exception):
                 process.kill()
             raise
+        finally:
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await heartbeat_task
 
         stdout_str = stdout.decode(errors="ignore")
         stderr_str = stderr.decode(errors="ignore")

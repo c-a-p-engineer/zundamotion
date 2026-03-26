@@ -190,6 +190,7 @@ class GenerationPipeline:
             all_clips = await self._run_phase(
                 "VideoPhase", video_phase.run, scenes, line_data_map, self.timeline
             )
+            no_sub_clips = self._derive_no_subtitle_clips(all_clips)
             self.stats["clips_processed"] = len(all_clips)
             # all_clips が Path オブジェクトのリストであると仮定し、get_media_duration を使用して duration を取得
             # get_media_duration は非同期関数なので、asyncio.gather を使って並行して duration を取得
@@ -218,6 +219,17 @@ class GenerationPipeline:
                 all_clips,
                 used_voicevox_info,
             )
+            no_sub_final_video_path = None
+            if no_sub_clips:
+                no_sub_final_video_path = await self._run_phase(
+                    "FinalizePhase",
+                    finalize_phase.run,
+                    scenes,
+                    self.timeline,
+                    line_data_map,
+                    no_sub_clips,
+                    used_voicevox_info,
+                )
             # Phase 4: BGM Mixing (timeline driven)
             bgm_phase = BGMPhase(self.config, temp_dir, self.audio_params)
             final_video_path = await self._run_phase(
@@ -226,6 +238,13 @@ class GenerationPipeline:
                 final_video_path,
                 self.timeline,
             )
+            if no_sub_final_video_path is not None:
+                no_sub_final_video_path = await self._run_phase(
+                    "BGMPhase",
+                    bgm_phase.run,
+                    no_sub_final_video_path,
+                    self.timeline,
+                )
             # 最終的な動画をoutput_pathにコピー
             shutil.copy(final_video_path, output_path)
             if isinstance(logger, KVLogger):
@@ -235,6 +254,13 @@ class GenerationPipeline:
                 )
             else:
                 logger.info(f"Final video saved to {output_path}")
+            if no_sub_final_video_path is not None:
+                output_path_base = Path(output_path)
+                no_sub_output_path = output_path_base.with_name(
+                    f"{output_path_base.stem}_no_sub{output_path_base.suffix}"
+                )
+                shutil.copy(no_sub_final_video_path, no_sub_output_path)
+                logger.info(f"No-sub video saved to {no_sub_output_path}")
 
             # Save the timeline if enabled
             timeline_config = self.config.get("system", {}).get("timeline", {})
@@ -352,18 +378,22 @@ class GenerationPipeline:
 
     def _log_final_summary(self):
         """Log aggregated statistics after the pipeline completes."""
+        clip_durations = self.stats["clip_durations"]
+        avg_duration = None
+        p95_duration = None
+        if clip_durations:
+            avg_duration = statistics.mean(clip_durations)
+            if len(clip_durations) >= 2:
+                p95_duration = statistics.quantiles(clip_durations, n=100)[94]
+            else:
+                p95_duration = clip_durations[0]
+
         if isinstance(logger, KVLogger):
             summary_kv = {"Event": "PipelineSummary"}
             summary_kv["TotalDuration"] = f"{self.stats['total_duration']:.2f}s"
             summary_kv["ClipsProcessed"] = self.stats["clips_processed"]
 
-            if self.stats["clip_durations"]:
-                avg_duration = statistics.mean(self.stats["clip_durations"])
-                p95_duration = statistics.quantiles(
-                    self.stats["clip_durations"], n=100
-                )[
-                    94
-                ]  # 95th percentile
+            if avg_duration is not None and p95_duration is not None:
                 summary_kv["ClipAvgDuration"] = f"{avg_duration:.2f}s"
                 summary_kv["ClipP95Duration"] = f"{p95_duration:.2f}s"
 
@@ -375,16 +405,27 @@ class GenerationPipeline:
             logger.info("--- Pipeline Summary ---")
             logger.info(f"Total Duration: {self.stats['total_duration']:.2f}s")
             logger.info(f"Clips Processed: {self.stats['clips_processed']}")
-            if self.stats["clip_durations"]:
-                avg_duration = statistics.mean(self.stats["clip_durations"])
-                p95_duration = statistics.quantiles(
-                    self.stats["clip_durations"], n=100
-                )[94]
+            if avg_duration is not None and p95_duration is not None:
                 logger.info(f"Clip Average Duration: {avg_duration:.2f}s")
                 logger.info(f"Clip P95 Duration: {p95_duration:.2f}s")
             for phase_name, data in self.stats["phases"].items():
                 logger.info(f"  {phase_name} Duration: {data['duration']:.2f}s")
             logger.info("------------------------")
+
+    @staticmethod
+    def _derive_no_subtitle_clips(all_clips: list[Path]) -> list[Path]:
+        derived: list[Path] = []
+        found_distinct_no_sub = False
+        for clip in all_clips:
+            candidate = clip
+            stem = clip.stem
+            if stem.endswith("_sub"):
+                maybe = clip.with_name(f"{stem[:-4]}{clip.suffix}")
+                if maybe.exists():
+                    candidate = maybe
+                    found_distinct_no_sub = True
+            derived.append(candidate)
+        return derived if found_distinct_no_sub else []
 
 
 async def run_generation(
