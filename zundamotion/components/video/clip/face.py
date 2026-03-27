@@ -9,13 +9,16 @@ from ...utils.logger import logger
 
 
 def _enable_expr(
-    segments: List[Dict[str, Any]], *, start_offset: float = 0.0
+    segments: List[Dict[str, Any]],
+    *,
+    start_offset: float = 0.0,
+    time_shift: float = 0.0,
 ) -> Optional[str]:
     try:
         parts: List[str] = []
         for seg in segments:
-            end = float(seg.get("end", 0))
-            start = float(seg.get("start", 0))
+            end = float(seg.get("end", 0)) + time_shift
+            start = float(seg.get("start", 0)) + time_shift
             if start_offset > 0.0:
                 if end <= start_offset:
                     continue
@@ -72,6 +75,7 @@ async def apply_face_overlays(
     filter_complex_parts: List[str],
     overlay_streams: List[str],
     overlay_filters: List[str],
+    audio_delay: float = 0.0,
 ) -> None:
     """Apply mouth/eye overlays for face animation."""
 
@@ -242,8 +246,14 @@ async def apply_face_overlays(
             enter_effect,
         )
 
+    mouth_time_shift = max(0.0, float(audio_delay or 0.0))
+
     if half_segments:
-        half_expr = _enable_expr(half_segments, start_offset=start_offset)
+        half_expr = _enable_expr(
+            half_segments,
+            start_offset=start_offset,
+            time_shift=mouth_time_shift,
+        )
         if half_expr and mouth_half.exists():
             idx = await _add_preprocessed_overlay(mouth_half, float(scale))
             if idx is not None:
@@ -255,7 +265,11 @@ async def apply_face_overlays(
                 )
 
     if open_segments:
-        open_expr = _enable_expr(open_segments, start_offset=start_offset)
+        open_expr = _enable_expr(
+            open_segments,
+            start_offset=start_offset,
+            time_shift=mouth_time_shift,
+        )
         if open_expr and mouth_open.exists():
             idx = await _add_preprocessed_overlay(mouth_open, float(scale))
             if idx is not None:

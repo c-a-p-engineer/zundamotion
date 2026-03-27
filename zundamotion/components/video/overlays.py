@@ -4,6 +4,7 @@ VideoRendererに継承させることで、前景動画や字幕PNGを
 ベース映像に重ねるユーティリティを提供する。
 """
 from pathlib import Path
+from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
 from importlib import import_module
@@ -12,6 +13,7 @@ from ...utils.ffmpeg_probe import get_media_duration
 from ...utils.filter_presets import get_video_filter_chain
 from ...utils.logger import logger
 from .overlay_effects import resolve_overlay_effects
+from .threading import build_ffmpeg_thread_flags
 
 
 async def _run_ffmpeg(cmd: List[str]) -> None:
@@ -49,6 +51,69 @@ class OverlayMixin:
     def _is_image(self, path: Path) -> bool:
         ext = path.suffix.lower()
         return ext in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+    def _subtitle_render_mode(self, subtitles: List[Dict[str, Any]]) -> str:
+        if not subtitles:
+            return "none"
+        mode = self.subtitle_gen.subtitle_render_mode()
+        if mode == "png":
+            return "png"
+        return "ass"
+
+    @staticmethod
+    def _escape_filter_path(path: Path) -> str:
+        return str(path.resolve()).replace("\\", "\\\\").replace(":", "\\:")
+
+    def _build_ass_filter(self, ass_path: Path) -> str:
+        font_dir = ""
+        try:
+            font_path = self.subtitle_gen.subtitle_config.get("font_path")
+            if font_path:
+                font_dir = str(Path(str(font_path)).resolve().parent)
+        except Exception:
+            font_dir = ""
+        ass_arg = self._escape_filter_path(ass_path)
+        if font_dir:
+            return f"ass={ass_arg}:fontsdir={self._escape_filter_path(Path(font_dir))}"
+        return f"ass={ass_arg}"
+
+    def _build_ass_subtitle_file(
+        self,
+        output_stem: str,
+        subtitles: List[Dict[str, Any]],
+    ) -> Path:
+        ass_path = self.temp_dir / f"{output_stem}.ass"
+        return self.subtitle_gen.build_ass_subtitle_file(subtitles, ass_path)
+
+    def _single_job_thread_flags(self) -> List[str]:
+        """単発の最終合成ジョブでは clip_workers に依存しない。"""
+        return build_ffmpeg_thread_flags(
+            getattr(self, "jobs", "0"),
+            1,
+            getattr(self, "hw_kind", None),
+        )
+
+    def _subtitle_burn_video_opts(self, subtitle_mode: str) -> List[str]:
+        params = self.video_params
+        if self.hw_kind is None and subtitle_mode == "ass":
+            burn_preset = (
+                (self.subtitle_gen.subtitle_config or {}).get("ass_burn_preset")
+                or "ultrafast"
+            )
+            try:
+                crf_delta = int(
+                    (self.subtitle_gen.subtitle_config or {}).get("ass_burn_crf_delta", 0)
+                    or 0
+                )
+            except Exception:
+                crf_delta = 0
+            burn_params = replace(
+                params,
+                preset=str(burn_preset),
+                crf=None if params.crf is None else max(0, int(params.crf) + crf_delta),
+            )
+            return burn_params.to_ffmpeg_opts(self.hw_kind)
+        return params.to_ffmpeg_opts(self.hw_kind)
 
     def _build_effect_filters(self, effects: Optional[List[Any]]) -> List[str]:
         """fg_overlays[*].effects を FFmpeg フィルタ列に変換する。"""
@@ -190,7 +255,7 @@ class OverlayMixin:
                 cmd.extend(["-loop", "1", "-framerate", str(fps), "-t", f"{(base_dur or 0):.3f}"])
             cmd.extend(["-i", str(src_path)])
 
-        cmd.extend(self._thread_flags())
+        cmd.extend(self._single_job_thread_flags())
 
         filter_parts: List[str] = []
         prev_stream = "[0:v]"
@@ -262,11 +327,12 @@ class OverlayMixin:
                 cmd.extend(["-loop", "1", "-framerate", str(fps), "-t", f"{(base_dur or 0):.3f}"])
             cmd.extend(["-i", str(src_path)])
 
-        cmd.extend(self._thread_flags())
+        cmd.extend(self._single_job_thread_flags())
 
         filter_parts: List[str] = []
         prev_stream = "[0:v]"
         use_cuda_for_subtitles = self._should_use_cuda_for_subtitles(subtitles or [])
+        subtitle_mode = self._subtitle_render_mode(subtitles or [])
 
         for idx, ov in enumerate(overlays or []):
             in_stream = f"[{idx + 1}:v]"
@@ -298,31 +364,42 @@ class OverlayMixin:
             prev_stream = f"[tmp{idx}]"
 
         overlay_input_count = len(overlays or [])
-        png_added = 0
-        for sub in subtitles or []:
-            png_input_index = overlay_input_count + png_added + 1
-            extra_input, snippet = await self.subtitle_gen.build_subtitle_overlay(
-                sub.get("text", ""),
-                float(sub.get("duration", 0.0)),
-                sub.get("line_config", {}),
-                in_label=prev_stream.strip("[]"),
-                index=png_input_index,
-                allow_cuda=use_cuda_for_subtitles,
+        if subtitle_mode == "ass" and subtitles:
+            ass_path = self._build_ass_subtitle_file(
+                f"{base_video.stem}_subtitle_overlay",
+                subtitles,
             )
-            for k, v in extra_input.items():
-                cmd.extend([k, v])
-            png_added += 1
-            start = float(sub.get("start", 0.0))
-            end = start + float(sub.get("duration", 0.0))
-            snippet = snippet.replace(
-                f"between(t,0,{sub.get('duration')})", f"between(t,{start},{end})"
+            logger.info("[SubtitleOverlay] Using ASS/libass mode for %s subtitle(s)", len(subtitles))
+            filter_parts.append(
+                f"{prev_stream}{self._build_ass_filter(ass_path)}[with_subtitle_ass]"
             )
-            filter_parts.append(snippet)
-            prev_stream = f"[with_subtitle_{png_input_index}]"
+            prev_stream = "[with_subtitle_ass]"
+        else:
+            png_added = 0
+            for sub in subtitles or []:
+                png_input_index = overlay_input_count + png_added + 1
+                extra_input, snippet = await self.subtitle_gen.build_subtitle_overlay(
+                    sub.get("text", ""),
+                    float(sub.get("duration", 0.0)),
+                    sub.get("line_config", {}),
+                    in_label=prev_stream.strip("[]"),
+                    index=png_input_index,
+                    allow_cuda=use_cuda_for_subtitles,
+                )
+                for k, v in extra_input.items():
+                    cmd.extend([k, v])
+                png_added += 1
+                start = float(sub.get("start", 0.0))
+                end = start + float(sub.get("duration", 0.0))
+                snippet = snippet.replace(
+                    f"between(t,0,{sub.get('duration')})", f"between(t,{start},{end})"
+                )
+                filter_parts.append(snippet)
+                prev_stream = f"[with_subtitle_{png_input_index}]"
 
         filter_complex = ";".join(filter_parts)
         cmd.extend(["-filter_complex", filter_complex, "-map", prev_stream, "-map", "0:a?"])
-        cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
+        cmd.extend(self._subtitle_burn_video_opts(subtitle_mode))
         cmd.extend(["-c:a", "copy"])
         if base_dur and base_dur > 0:
             cmd.extend(["-t", f"{base_dur:.3f}"])
@@ -339,6 +416,7 @@ class OverlayMixin:
             return base_video
 
         output_path = self.temp_dir / f"{base_video.stem}_sub.mp4"
+        subtitle_mode = self._subtitle_render_mode(subtitles)
         try:
             base_dur = await get_media_duration(str(base_video))
         except Exception:
@@ -347,31 +425,42 @@ class OverlayMixin:
 
         filter_parts: List[str] = []
         prev_stream = "[0:v]"
-        use_cuda_for_subtitles = self._should_use_cuda_for_subtitles(subtitles)
-        for idx, sub in enumerate(subtitles):
-            extra_input, snippet = await self.subtitle_gen.build_subtitle_overlay(
-                sub["text"],
-                sub["duration"],
-                sub.get("line_config", {}),
-                in_label=prev_stream.strip("[]"),
-                index=idx + 1,
-                allow_cuda=use_cuda_for_subtitles,
+        if subtitle_mode == "ass":
+            ass_path = self._build_ass_subtitle_file(
+                f"{base_video.stem}_subtitle_only",
+                subtitles,
             )
-            for k, v in extra_input.items():
-                cmd.extend([k, v])
-
-            start = float(sub["start"])
-            end = start + float(sub["duration"])
-            snippet = snippet.replace(
-                f"between(t,0,{sub['duration']})", f"between(t,{start},{end})"
+            logger.info("[SubtitleOverlay] Using ASS/libass mode for %s subtitle(s)", len(subtitles))
+            filter_parts.append(
+                f"{prev_stream}{self._build_ass_filter(ass_path)}[with_subtitle_ass]"
             )
-            filter_parts.append(snippet)
-            prev_stream = f"[with_subtitle_{idx + 1}]"
+            prev_stream = "[with_subtitle_ass]"
+        else:
+            use_cuda_for_subtitles = self._should_use_cuda_for_subtitles(subtitles)
+            for idx, sub in enumerate(subtitles):
+                extra_input, snippet = await self.subtitle_gen.build_subtitle_overlay(
+                    sub["text"],
+                    sub["duration"],
+                    sub.get("line_config", {}),
+                    in_label=prev_stream.strip("[]"),
+                    index=idx + 1,
+                    allow_cuda=use_cuda_for_subtitles,
+                )
+                for k, v in extra_input.items():
+                    cmd.extend([k, v])
 
-        cmd.extend(self._thread_flags())
+                start = float(sub["start"])
+                end = start + float(sub["duration"])
+                snippet = snippet.replace(
+                    f"between(t,0,{sub['duration']})", f"between(t,{start},{end})"
+                )
+                filter_parts.append(snippet)
+                prev_stream = f"[with_subtitle_{idx + 1}]"
+
+        cmd.extend(self._single_job_thread_flags())
         filter_complex = ";".join(filter_parts)
         cmd.extend(["-filter_complex", filter_complex, "-map", prev_stream, "-map", "0:a?"])
-        cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
+        cmd.extend(self._subtitle_burn_video_opts(subtitle_mode))
         cmd.extend(["-c:a", "copy"])
         if base_dur and base_dur > 0:
             cmd.extend(["-t", f"{base_dur:.3f}"])

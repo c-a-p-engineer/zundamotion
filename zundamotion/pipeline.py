@@ -190,7 +190,14 @@ class GenerationPipeline:
             all_clips = await self._run_phase(
                 "VideoPhase", video_phase.run, scenes, line_data_map, self.timeline
             )
-            no_sub_clips = self._derive_no_subtitle_clips(all_clips)
+            generate_no_sub_video = bool(
+                self.config.get("system", {}).get("generate_no_sub_video", False)
+            )
+            no_sub_clips = (
+                self._derive_no_subtitle_clips(all_clips)
+                if generate_no_sub_video
+                else []
+            )
             self.stats["clips_processed"] = len(all_clips)
             # all_clips が Path オブジェクトのリストであると仮定し、get_media_duration を使用して duration を取得
             # get_media_duration は非同期関数なので、asyncio.gather を使って並行して duration を取得
@@ -218,6 +225,7 @@ class GenerationPipeline:
                 line_data_map,
                 all_clips,
                 used_voicevox_info,
+                "final_output",
             )
             no_sub_final_video_path = None
             if no_sub_clips:
@@ -229,6 +237,7 @@ class GenerationPipeline:
                     line_data_map,
                     no_sub_clips,
                     used_voicevox_info,
+                    "final_output_no_sub",
                 )
             # Phase 4: BGM Mixing (timeline driven)
             bgm_phase = BGMPhase(self.config, temp_dir, self.audio_params)

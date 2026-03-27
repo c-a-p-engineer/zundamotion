@@ -64,6 +64,7 @@ class FinalizePhase:
         line_data_map: Dict[str, Dict[str, Any]],
         scene_video_paths: List[Path],
         used_voicevox_info: List[Tuple[int, str]],
+        output_stem: str = "final_output",
     ) -> Path:
         """Phase 4: Finalize the video."""
         logger.info("FinalizePhase: Finalizing video...")
@@ -186,7 +187,8 @@ class FinalizePhase:
             merged.append(current)
             processed_paths = merged
 
-        output_video_path = self.temp_dir / "final_output.mp4"
+        safe_output_stem = output_stem or "final_output"
+        output_video_path = self.temp_dir / f"{safe_output_stem}.mp4"
         input_video_str_paths = [str(p.resolve()) for p in processed_paths]
 
         if await compare_media_params(input_video_str_paths):

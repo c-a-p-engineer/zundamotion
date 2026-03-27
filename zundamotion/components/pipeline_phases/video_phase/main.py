@@ -1,11 +1,12 @@
+import asyncio
 import hashlib
 import json
+import os
 import time  # Import time module
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from tqdm import tqdm
-import os
 import sys
 
 from zundamotion.cache import CacheManager
@@ -16,6 +17,7 @@ from zundamotion.utils.ffmpeg_capabilities import (
     get_hw_encoder_kind_for_video_params,  # 追加
     get_ffmpeg_version,
 )
+from zundamotion.utils.ffmpeg_hw import get_hw_filter_mode
 from zundamotion.utils.ffmpeg_ops import normalize_media
 from zundamotion.utils.ffmpeg_hw import set_hw_filter_mode  # Auto-tuneでのバックオフに使用
 from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
@@ -61,6 +63,10 @@ class VideoPhase:
         self.auto_tune_enabled = bool(vcfg.get("auto_tune", True))
         self._profile_samples: List[Dict[str, Any]] = []
         self._retuned = False
+        self.parallel_scene_rendering = False
+        self.scene_workers = self._determine_scene_workers(
+            vcfg, self.hw_kind, self.clip_workers
+        )
         # Detailed per-line clip timing samples for diagnostics
         self._clip_samples_all: List[Dict[str, Any]] = []
 
@@ -106,6 +112,30 @@ class VideoPhase:
             return decided
         except Exception:
             return 1 if hw_kind == "nvenc" else 2
+
+    @staticmethod
+    def _determine_scene_workers(
+        video_cfg: Dict[str, Any],
+        hw_kind: Optional[str],
+        clip_workers: int,
+    ) -> int:
+        raw = os.getenv(
+            "ZUNDAMOTION_SCENE_WORKERS",
+            video_cfg.get("scene_workers", "1"),
+        )
+        try:
+            if isinstance(raw, str):
+                normalized = raw.strip().lower()
+                if normalized in {"", "0", "auto"}:
+                    cpu_count = os.cpu_count() or 2
+                    if hw_kind == "nvenc":
+                        return 1
+                    spare = max(1, cpu_count // max(1, clip_workers))
+                    return max(1, min(2, spare))
+                return max(1, int(normalized))
+            return max(1, int(raw))
+        except Exception:
+            return 1
 
     @classmethod
     async def create(
@@ -289,6 +319,61 @@ class VideoPhase:
             }
         return entries
 
+    @staticmethod
+    def _scene_is_overlay_heavy(scene: Dict[str, Any]) -> bool:
+        if scene.get("fg_overlays"):
+            return True
+        for line in scene.get("lines", []) or []:
+            if not isinstance(line, dict):
+                continue
+            if line.get("fg_overlays") or line.get("image_layers"):
+                return True
+            if any(
+                isinstance(ch, dict) and ch.get("visible", False)
+                for ch in (line.get("characters", []) or [])
+            ):
+                return True
+            insert_cfg = line.get("insert") or {}
+            insert_path = str(insert_cfg.get("path", "")).lower()
+            if insert_path.endswith((".png", ".jpg", ".jpeg", ".bmp", ".webp")):
+                return True
+            if line.get("background_effects") or line.get("screen_effects"):
+                return True
+        return False
+
+    def _apply_initial_worker_backoff(self, scenes: List[Dict[str, Any]]) -> None:
+        if self.clip_workers <= 2:
+            return
+        jobs_mode = str(self.jobs or "").strip().lower()
+        if jobs_mode not in {"", "0", "auto"}:
+            return
+        try:
+            if self.hw_kind is None:
+                reason = "cpu_encoder"
+            elif get_hw_filter_mode() == "cpu":
+                reason = "global_cpu_filter_mode"
+            else:
+                heavy_scenes = sum(
+                    1 for scene in scenes if self._scene_is_overlay_heavy(scene)
+                )
+                if heavy_scenes <= 0:
+                    return
+                reason = f"overlay_heavy_scenes={heavy_scenes}/{len(scenes) or 1}"
+            prev_workers = self.clip_workers
+            self.clip_workers = 2
+            try:
+                self.video_renderer.clip_workers = self.clip_workers
+            except Exception:
+                pass
+            logger.info(
+                "VideoPhase: reducing clip_workers %s -> %s (%s)",
+                prev_workers,
+                self.clip_workers,
+                reason,
+            )
+        except Exception:
+            return
+
     @time_log(logger)
     async def run(
         self,
@@ -299,12 +384,21 @@ class VideoPhase:
         """Phase 2: Render video clips for each scene."""
         start_time = time.time()  # Start timing
         logger.info(
-            f"VideoPhase started. clip_workers={self.clip_workers}, hw_kind={self.hw_kind}"
+            "VideoPhase started. clip_workers=%s, scene_workers=%s, hw_kind=%s",
+            self.clip_workers,
+            self.scene_workers,
+            self.hw_kind,
         )
+        self._apply_initial_worker_backoff(scenes)
 
         all_clips: List[Path] = []
         bg_default = self.config.get("background", {}).get("default")
         total_scenes = len(scenes)
+        self.parallel_scene_rendering = self.scene_workers > 1
+        if self.parallel_scene_rendering and self.auto_tune_enabled:
+            logger.info(
+                "VideoPhase: disabling auto_tune during parallel scene rendering."
+            )
 
         with tqdm(
             total=total_scenes,
@@ -313,22 +407,49 @@ class VideoPhase:
             leave=False,
             disable=(os.getenv("TQDM_DISABLE") == "1" or not sys.stderr.isatty()),
         ) as pbar_scenes:
-            for scene_idx, scene in enumerate(scenes):
-                scene_id = scene["id"]
-                scene_hash_data = self._generate_scene_hash(scene)
+            if self.parallel_scene_rendering:
+                sem = asyncio.Semaphore(self.scene_workers)
+                scene_results: List[List[Path]] = [[] for _ in scenes]
 
-                scene_renderer = SceneRenderer(
-                    phase=self,
-                    scene=scene,
-                    scene_hash_data=scene_hash_data,
-                    scene_idx=scene_idx,
-                    total_scenes=total_scenes,
-                    line_data_map=line_data_map,
-                    timeline=timeline,
-                    pbar_scenes=pbar_scenes,
+                async def _render_one(scene_idx: int, scene: Dict[str, Any]) -> None:
+                    async with sem:
+                        scene_id = scene["id"]
+                        scene_hash_data = self._generate_scene_hash(scene)
+
+                        scene_renderer = SceneRenderer(
+                            phase=self,
+                            scene=scene,
+                            scene_hash_data=scene_hash_data,
+                            scene_idx=scene_idx,
+                            total_scenes=total_scenes,
+                            line_data_map=line_data_map,
+                            timeline=timeline,
+                            pbar_scenes=pbar_scenes,
+                        )
+                        scene_results[scene_idx] = await scene_renderer.render_scene()
+
+                await asyncio.gather(
+                    *(_render_one(scene_idx, scene) for scene_idx, scene in enumerate(scenes))
                 )
-                scene_clips = await scene_renderer.render_scene()
-                all_clips.extend(scene_clips)
+                for scene_clips in scene_results:
+                    all_clips.extend(scene_clips)
+            else:
+                for scene_idx, scene in enumerate(scenes):
+                    scene_id = scene["id"]
+                    scene_hash_data = self._generate_scene_hash(scene)
+
+                    scene_renderer = SceneRenderer(
+                        phase=self,
+                        scene=scene,
+                        scene_hash_data=scene_hash_data,
+                        scene_idx=scene_idx,
+                        total_scenes=total_scenes,
+                        line_data_map=line_data_map,
+                        timeline=timeline,
+                        pbar_scenes=pbar_scenes,
+                    )
+                    scene_clips = await scene_renderer.render_scene()
+                    all_clips.extend(scene_clips)
 
         # Ensure a clean newline after closing the progress bar
         try:

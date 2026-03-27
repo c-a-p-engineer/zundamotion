@@ -640,6 +640,7 @@ async def render_clip(
             filter_complex_parts=filter_complex_parts,
             overlay_streams=overlay_streams,
             overlay_filters=overlay_filters,
+            audio_delay=audio_delay,
         )
 
     # オーバーレイを連結

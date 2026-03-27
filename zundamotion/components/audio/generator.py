@@ -32,6 +32,11 @@ class AudioGenerator:
         self.cache_manager = cache_manager  # インスタンス変数として保持
         self._speaker_info_cache: Optional[Dict[int, Dict[str, Any]]] = None
         self._speaker_validation_unavailable = False
+        self.voice_request_timeout = float(self.voice_config.get("request_timeout", 6.0) or 6.0)
+        self.voice_retry_attempts = int(self.voice_config.get("retry_attempts", 3) or 3)
+        self.voice_retry_wait_min = float(self.voice_config.get("retry_wait_min", 1.0) or 1.0)
+        self.voice_retry_wait_max = float(self.voice_config.get("retry_wait_max", 3.0) or 3.0)
+        self.speaker_retry_attempts = int(self.voice_config.get("speaker_retry_attempts", 2) or 2)
 
     async def _get_speaker_info(self) -> Optional[Dict[int, Dict[str, Any]]]:
         if self._speaker_info_cache is not None:
@@ -40,7 +45,13 @@ class AudioGenerator:
             return None
 
         try:
-            self._speaker_info_cache = await get_speakers_info(self.voicevox_url)
+            self._speaker_info_cache = await get_speakers_info(
+                self.voicevox_url,
+                timeout=self.voice_request_timeout,
+                retry_attempts=self.speaker_retry_attempts,
+                retry_wait_min=self.voice_retry_wait_min,
+                retry_wait_max=self.voice_retry_wait_max,
+            )
         except Exception as exc:
             logger.warning(
                 "Skipping VOICEVOX speaker validation because speaker info could not be fetched from %s: %s",
@@ -242,6 +253,10 @@ class AudioGenerator:
                     speed=speed,
                     pitch=pitch,
                     voicevox_url=self.voicevox_url,
+                    timeout=self.voice_request_timeout,
+                    retry_attempts=self.voice_retry_attempts,
+                    retry_wait_min=self.voice_retry_wait_min,
+                    retry_wait_max=self.voice_retry_wait_max,
                 )
                 return output_path
 

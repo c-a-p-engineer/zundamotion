@@ -7,7 +7,17 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from zundamotion.components.subtitles.png import _estimate_auto_max_chars, _load_font_with_fallback, _render_subtitle_png
+from zundamotion.components.subtitles.png import (
+    SubtitlePNGRenderer,
+    _estimate_auto_max_chars,
+    _load_font_with_fallback,
+    _render_subtitle_png,
+)
+
+
+class StubCacheManager:
+    def __init__(self, cache_dir: Path):
+        self.cache_dir = cache_dir
 
 
 def test_estimate_auto_max_chars_returns_positive_value_for_cjk_text():
@@ -45,3 +55,13 @@ def test_render_subtitle_png_accepts_auto_max_chars(tmp_path):
     with Image.open(out_path) as image:
         assert image.width == width
         assert image.height == height
+
+
+def test_subtitle_png_renderer_reuses_shared_executor(tmp_path):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    renderer1 = SubtitlePNGRenderer(StubCacheManager(cache_dir))
+    renderer2 = SubtitlePNGRenderer(StubCacheManager(cache_dir))
+
+    assert renderer1._executor is renderer2._executor

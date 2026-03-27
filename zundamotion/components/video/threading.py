@@ -18,10 +18,11 @@ def build_ffmpeg_thread_flags(
     """`VideoRenderer`から独立したスレッド設定を構築して返す。"""
 
     nproc = multiprocessing.cpu_count() or 1
+    cpu_bound = hw_kind is None
 
     def _auto_threads_for_mode() -> str:
         global_mode = get_hw_filter_mode()
-        if global_mode == "cpu":
+        if global_mode == "cpu" or cpu_bound:
             per_proc = max(1, nproc // max(1, clip_workers))
             return str(per_proc)
         return "0"
@@ -68,11 +69,12 @@ def build_ffmpeg_thread_flags(
     fct_override = os.environ.get("FFMPEG_FILTER_COMPLEX_THREADS")
 
     global_filter_mode = get_hw_filter_mode()
+    cpu_filter_bound = global_filter_mode == "cpu" or cpu_bound
 
     if ft_override and ft_override.isdigit():
         ft = ft_override
     else:
-        if global_filter_mode == "cpu":
+        if cpu_filter_bound:
             per_filter_threads = max(1, nproc // max(1, clip_workers))
             cap_token = os.environ.get("FFMPEG_FILTER_THREADS_CAP")
             try:
@@ -86,7 +88,7 @@ def build_ffmpeg_thread_flags(
     if fct_override and fct_override.isdigit():
         fct = fct_override
     else:
-        if global_filter_mode == "cpu":
+        if cpu_filter_bound:
             per_filter_threads = max(1, nproc // max(1, clip_workers))
             cap_token = os.environ.get("FFMPEG_FILTER_COMPLEX_THREADS_CAP")
             try:
@@ -118,4 +120,3 @@ def build_ffmpeg_thread_flags(
         "-filter_complex_threads",
         fct,
     ]
-

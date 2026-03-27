@@ -57,11 +57,14 @@ class StubCacheManager:
 
 
 class StubTimeline:
+    def __init__(self) -> None:
+        self.events: List[Tuple[str, float, Any]] = []
+
     def add_scene_change(self, *_args, **_kwargs) -> None:
         return None
 
-    def add_event(self, *_args, **_kwargs) -> None:
-        return None
+    def add_event(self, description, duration, text=None) -> None:
+        self.events.append((description, duration, text))
 
 
 def test_voice_layers_generate_per_character_face_anim(monkeypatch, tmp_path):
@@ -173,5 +176,59 @@ def test_voice_layers_generate_per_character_face_anim(monkeypatch, tmp_path):
         assert copetan_anim["mouth"][1]["start"] == pytest.approx(0.25, abs=1e-3)
         assert engy_anim["mouth"][0]["start"] == pytest.approx(0.17, abs=1e-3)
         assert engy_anim["mouth"][1]["start"] == pytest.approx(0.32, abs=1e-3)
+
+    asyncio.run(_run())
+
+
+def test_audio_phase_prefetches_audio_generation_concurrently(tmp_path):
+    async def _run() -> None:
+        config = {
+            "video": {"fps": 30, "face_anim": {}},
+            "voice": {"parallel_workers": 2},
+            "system": {"video_extensions": [".mp4"]},
+        }
+
+        audio_phase = AudioPhase(config, tmp_path, StubCacheManager(tmp_path), AudioParams())
+        timeline = StubTimeline()
+
+        current = 0
+        max_in_flight = 0
+        lock = asyncio.Lock()
+
+        async def fake_generate_audio(
+            text: str, line_config: Dict[str, Any], output_filename: str
+        ) -> Tuple[Path, List[Tuple[int, str]], List[Dict[str, Any]]]:
+            nonlocal current, max_in_flight
+            async with lock:
+                current += 1
+                max_in_flight = max(max_in_flight, current)
+            await asyncio.sleep(0.05)
+            out_path = tmp_path / f"{output_filename}.wav"
+            out_path.write_bytes(b"wav")
+            async with lock:
+                current -= 1
+            return out_path, [(3, text)], []
+
+        audio_phase.audio_gen.generate_audio = fake_generate_audio  # type: ignore[assignment]
+
+        scenes = [
+            {
+                "id": "parallel_audio",
+                "lines": [
+                    {"text": "一行目", "speaker_name": "copetan"},
+                    {"text": "二行目", "speaker_name": "copetan"},
+                ],
+            }
+        ]
+
+        line_data_map, voice_usage = await audio_phase.run(scenes, timeline)
+
+        assert max_in_flight >= 2
+        assert list(line_data_map.keys()) == ["parallel_audio_1", "parallel_audio_2"]
+        assert voice_usage == [(3, "一行目"), (3, "二行目")]
+        assert [event[0] for event in timeline.events] == [
+            'copetan: "一行目"',
+            'copetan: "二行目"',
+        ]
 
     asyncio.run(_run())

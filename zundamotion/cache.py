@@ -39,6 +39,9 @@ class CacheManager:
         # In-process de-duplication for no-cache creation
         self._inflight_lock = asyncio.Lock()
         self._inflight_tasks: Dict[str, asyncio.Task] = {}
+        # When cache_refresh=True, invalidate each key at most once per process.
+        self._refresh_lock = asyncio.Lock()
+        self._refreshed_keys: set[str] = set()
 
         try:
             self.cache_dir.mkdir(exist_ok=True)
@@ -55,6 +58,51 @@ class CacheManager:
             # Directory may already exist or be a TemporaryDirectory
             pass
         self.ephemeral_dir = temp_dir
+
+    async def _refresh_cached_path_once(
+        self,
+        refresh_token: str,
+        cached_path: Path,
+        *,
+        log_label: str,
+    ) -> None:
+        """`cache_refresh` 時に同一キーの無効化を1回だけ行う。"""
+        if not self.cache_refresh:
+            return
+
+        async with self._refresh_lock:
+            if refresh_token in self._refreshed_keys:
+                return
+            self._refreshed_keys.add(refresh_token)
+
+        if cached_path.exists():
+            logger.info(
+                "Cache refresh requested. Removing existing %s: %s",
+                log_label,
+                cached_path.name,
+            )
+            cached_path.unlink()
+
+    def _refresh_cached_path_once_sync(
+        self,
+        refresh_token: str,
+        cached_path: Path,
+        *,
+        log_label: str,
+    ) -> None:
+        """同期コンテキスト向けの cache_refresh ヘルパー。"""
+        if not self.cache_refresh:
+            return
+        if refresh_token in self._refreshed_keys:
+            return
+        self._refreshed_keys.add(refresh_token)
+        if cached_path.exists():
+            logger.info(
+                "Cache refresh requested. Removing existing %s: %s",
+                log_label,
+                cached_path.name,
+            )
+            cached_path.unlink()
 
     def _generate_hash(self, data: Dict[str, Any]) -> str:
         """辞書データから SHA256 ハッシュを生成する。"""
@@ -86,11 +134,11 @@ class CacheManager:
             duration = await get_media_duration(str(file_path))
             return duration
 
-        if self.cache_refresh and cached_meta_path.exists():
-            logger.info(
-                f"Cache refresh requested. Removing existing duration cache: {cached_meta_path.name}"
-            )
-            cached_meta_path.unlink()
+        await self._refresh_cached_path_once(
+            f"media_info:{cache_key}",
+            cached_meta_path,
+            log_label="duration cache",
+        )
 
         if cached_meta_path.exists():
             try:
@@ -139,11 +187,11 @@ class CacheManager:
             duration = await get_media_duration(str(file_path))
             return duration
 
-        if self.cache_refresh and cached_meta_path.exists():
-            logger.info(
-                f"Cache refresh requested. Removing existing duration cache: {cached_meta_path.name}"
-            )
-            cached_meta_path.unlink()
+        await self._refresh_cached_path_once(
+            f"media_duration:{cache_key}",
+            cached_meta_path,
+            log_label="duration cache",
+        )
 
         if cached_meta_path.exists():
             try:
@@ -243,6 +291,11 @@ class CacheManager:
             return None
         cache_key = self._generate_hash(key_data)
         cached_path = self.cache_dir / f"{file_name}_{cache_key}.{extension}"
+        self._refresh_cached_path_once_sync(
+            f"get:{file_name}:{cache_key}",
+            cached_path,
+            log_label="cache",
+        )
         if cached_path.exists():
             logger.info(
                 f"Cache HIT for {file_name}.{extension} (key: {cache_key[:8]}) -> {cached_path.name}"
@@ -339,11 +392,11 @@ class CacheManager:
             # ロック外で待機
             return await task
 
-        if self.cache_refresh and cached_path.exists():
-            logger.info(
-                f"Cache refresh requested. Removing existing cache: {cached_path.name}"
-            )
-            cached_path.unlink()  # 既存のキャッシュを削除
+        await self._refresh_cached_path_once(
+            f"file:{cache_key}",
+            cached_path,
+            log_label="cache",
+        )
 
         if cached_path.exists():
             logger.info(
@@ -351,23 +404,40 @@ class CacheManager:
             )
             return cached_path
 
-        logger.info(
-            f"Cache MISS. Calling creator_func to generate file for {file_name}.{extension} (key: {cache_key[:8]}) to cache: {cached_path.name}"
-        )
-        try:
-            # creator_func にキャッシュパスを直接渡し、そこにファイルを生成させる
-            generated_path = await creator_func(cached_path)
-            if generated_path != cached_path:
-                # creator_func が別のパスに生成した場合、キャッシュパスにコピー
-                shutil.copy(generated_path, cached_path)
-                generated_path.unlink()  # 元の一時ファイルを削除
-            logger.debug(f"Generated and cached file -> {cached_path.name}")
-            self._clean_cache()  # ファイル生成後にクリーンアップを実行
-            return cached_path
-        except Exception as e:
-            raise CacheError(
-                f"Failed to generate or cache file {file_name}.{extension}: {e}"
-            )
+        task_key = f"cache:{cache_key}"
+        async with self._inflight_lock:
+            existing = self._inflight_tasks.get(task_key)
+            if existing is None:
+                logger.info(
+                    f"Cache MISS. Calling creator_func to generate file for {file_name}.{extension} (key: {cache_key[:8]}) to cache: {cached_path.name}"
+                )
+
+                async def _create_cached() -> Path:
+                    try:
+                        if cached_path.exists():
+                            return cached_path
+                        # creator_func にキャッシュパスを直接渡し、そこにファイルを生成させる
+                        generated_path = await creator_func(cached_path)
+                        if generated_path != cached_path:
+                            # creator_func が別のパスに生成した場合、キャッシュパスにコピー
+                            shutil.copy(generated_path, cached_path)
+                            generated_path.unlink()  # 元の一時ファイルを削除
+                        logger.debug(f"Generated and cached file -> {cached_path.name}")
+                        self._clean_cache()  # ファイル生成後にクリーンアップを実行
+                        return cached_path
+                    except Exception as e:
+                        raise CacheError(
+                            f"Failed to generate or cache file {file_name}.{extension}: {e}"
+                        )
+                    finally:
+                        async with self._inflight_lock:
+                            self._inflight_tasks.pop(task_key, None)
+
+                task = asyncio.create_task(_create_cached())
+                self._inflight_tasks[task_key] = task
+            else:
+                task = existing
+        return await task
 
     def _hash_for_normalized(self, input_path: Path, target_spec: Dict) -> str:
         """正規化対象のハッシュキーを計算する。"""

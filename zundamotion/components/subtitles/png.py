@@ -1,3 +1,4 @@
+import atexit
 import json
 import logging
 import os
@@ -14,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 # Module-level font cache to reduce load/latency jitter inside worker processes
 _FONT_CACHE: dict[tuple[str, int], ImageFont.FreeTypeFont] = {}
+_SUBTITLE_EXECUTOR: ProcessPoolExecutor | None = None
+_SUBTITLE_EXECUTOR_WORKERS: int | None = None
 
 try:
     RESAMPLE_LANCZOS = Image.Resampling.LANCZOS  # type: ignore[attr-defined]
@@ -320,19 +323,7 @@ class SubtitlePNGRenderer:
             cache_manager.cache_dir / "subtitles"
         )  # Pathオブジェクトを使用
         self.subtitle_cache_dir.mkdir(exist_ok=True)  # ディレクトリ作成
-        # 画像生成はCPU負荷が高く、イベントループをブロックするため
-        # プロセスプールで並列化してオフロードする
-        # デフォルト: 物理コアの半分（最低1）
-        try:
-            import os
-            env_workers = os.getenv("SUB_PNG_WORKERS")
-            if env_workers and env_workers.isdigit():
-                workers = max(1, int(env_workers))
-            else:
-                workers = max(1, (os.cpu_count() or 2) // 2)
-        except Exception:
-            workers = 1
-        self._executor = ProcessPoolExecutor(max_workers=workers)
+        self._executor, workers = _get_shared_subtitle_executor()
         try:
             logger.info("SubtitlePNGRenderer workers=%d", workers)
         except Exception:
@@ -650,6 +641,40 @@ def _render_subtitle_png(
 
     img.save(out_path_str)
     return img_w, img_h
+
+
+def _resolve_subtitle_png_workers() -> int:
+    try:
+        env_workers = os.getenv("SUB_PNG_WORKERS")
+        if env_workers and env_workers.isdigit():
+            return max(1, int(env_workers))
+        return max(1, (os.cpu_count() or 2) // 2)
+    except Exception:
+        return 1
+
+
+def _shutdown_subtitle_executor() -> None:
+    global _SUBTITLE_EXECUTOR, _SUBTITLE_EXECUTOR_WORKERS
+    if _SUBTITLE_EXECUTOR is None:
+        return
+    try:
+        _SUBTITLE_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+    except Exception:
+        pass
+    _SUBTITLE_EXECUTOR = None
+    _SUBTITLE_EXECUTOR_WORKERS = None
+
+
+def _get_shared_subtitle_executor() -> tuple[ProcessPoolExecutor, int]:
+    global _SUBTITLE_EXECUTOR, _SUBTITLE_EXECUTOR_WORKERS
+    workers = _resolve_subtitle_png_workers()
+    if _SUBTITLE_EXECUTOR is None or _SUBTITLE_EXECUTOR_WORKERS != workers:
+        if _SUBTITLE_EXECUTOR is not None:
+            _shutdown_subtitle_executor()
+        _SUBTITLE_EXECUTOR = ProcessPoolExecutor(max_workers=workers)
+        _SUBTITLE_EXECUTOR_WORKERS = workers
+        atexit.register(_shutdown_subtitle_executor)
+    return _SUBTITLE_EXECUTOR, workers
 
 
 def _load_font_with_fallback(font_path: str, font_size: int) -> ImageFont.FreeTypeFont:

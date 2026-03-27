@@ -3,38 +3,48 @@ import json
 from typing import Any, Dict, List
 
 import httpx
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
-# VOICEVOX APIとの通信エラー時にリトライする例外を指定
+
 RETRY_EXCEPTIONS = (httpx.RequestError, asyncio.TimeoutError)
 
 
-@retry(
-    stop=stop_after_attempt(5),  # 最大5回リトライ
-    wait=wait_exponential(multiplier=1, min=4, max=10),  # 指数バックオフ (4秒から10秒)
-    retry=retry_if_exception_type(RETRY_EXCEPTIONS),
-    reraise=True,  # リトライ回数を超えたら例外を再発生
-)
+async def _with_retry(
+    coro_factory,
+    *,
+    attempts: int,
+    wait_min: float,
+    wait_max: float,
+):
+    last_exc: Exception | None = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            return await coro_factory()
+        except RETRY_EXCEPTIONS as exc:
+            last_exc = exc
+            if attempt >= attempts:
+                raise
+            wait_sec = min(wait_max, max(wait_min, wait_min * (2 ** (attempt - 1))))
+            await asyncio.sleep(wait_sec)
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("VOICEVOX retry loop exited unexpectedly.")
+
+
 async def get_speakers_info(
     voicevox_url: str = "http://127.0.0.1:50021",
+    *,
+    timeout: float = 6.0,
+    retry_attempts: int = 2,
+    retry_wait_min: float = 1.0,
+    retry_wait_max: float = 2.0,
 ) -> Dict[int, Dict[str, Any]]:
     """
-    Fetches speaker information from the VOICEVOX API asynchronously with retry mechanism.
-
-    Args:
-        voicevox_url (str): The base URL of the VOICEVOX engine.
-
-    Returns:
-        Dict[int, Dict[str, Any]]: A dictionary mapping speaker ID to speaker information.
+    Fetch speaker information from the VOICEVOX API with a short retry budget.
     """
-    try:
+
+    async def _fetch() -> Dict[int, Dict[str, Any]]:
         async with httpx.AsyncClient() as client:
-            res = await client.get(f"{voicevox_url}/speakers", timeout=10)
+            res = await client.get(f"{voicevox_url}/speakers", timeout=timeout)
             res.raise_for_status()
             speakers_data: List[Dict[str, Any]] = res.json()
 
@@ -46,6 +56,14 @@ async def get_speakers_info(
                         "speaker_name": speaker_group["name"],
                     }
             return speaker_info
+
+    try:
+        return await _with_retry(
+            _fetch,
+            attempts=retry_attempts,
+            wait_min=retry_wait_min,
+            wait_max=retry_wait_max,
+        )
     except httpx.RequestError as e:
         print(f"Failed to connect to VOICEVOX to get speaker info: {e}")
         print("Please ensure the VOICEVOX engine is running.")
@@ -61,12 +79,6 @@ async def get_speakers_info(
         raise
 
 
-@retry(
-    stop=stop_after_attempt(5),  # 最大5回リトライ
-    wait=wait_exponential(multiplier=1, min=4, max=10),  # 指数バックオフ (4秒から10秒)
-    retry=retry_if_exception_type(RETRY_EXCEPTIONS),
-    reraise=True,  # リトライ回数を超えたら例外を再発生
-)
 async def generate_voice(
     text: str,
     speaker: int,
@@ -74,29 +86,25 @@ async def generate_voice(
     speed: float = 1.0,
     pitch: float = 0.0,
     voicevox_url: str = "http://127.0.0.1:50021",
+    *,
+    timeout: float = 6.0,
+    retry_attempts: int = 3,
+    retry_wait_min: float = 1.0,
+    retry_wait_max: float = 3.0,
 ):
     """
-    Generates a voice file using the VOICEVOX API asynchronously with retry mechanism.
-
-    Args:
-        text (str): The text to be synthesized.
-        speaker (int): The speaker ID.
-        filepath (str): The path to save the .wav file.
-        speed (float): The speech speed.
-        pitch (float): The speech pitch.
-        voicevox_url (str): The base URL of the VOICEVOX engine.
+    Generate a voice file using the VOICEVOX API with a bounded retry budget.
     """
-    async with httpx.AsyncClient() as client:
-        # 1. audio_query
-        query_params = {"text": text, "speaker": speaker}
-        try:
+
+    async def _generate() -> None:
+        async with httpx.AsyncClient() as client:
+            query_params = {"text": text, "speaker": speaker}
             res_query = await client.post(
-                f"{voicevox_url}/audio_query", params=query_params, timeout=10
+                f"{voicevox_url}/audio_query", params=query_params, timeout=timeout
             )
             res_query.raise_for_status()
             query_data = res_query.json()
 
-            # 2. synthesis
             query_data["speedScale"] = speed
             query_data["pitchScale"] = pitch
             synth_params = {"speaker": speaker}
@@ -105,29 +113,35 @@ async def generate_voice(
                 params=synth_params,
                 content=json.dumps(query_data),
                 headers={"Content-Type": "application/json"},
-                timeout=10,
+                timeout=timeout,
             )
             res_synth.raise_for_status()
 
-            # 3. save to file
             with open(filepath, "wb") as f:
                 f.write(res_synth.content)
 
-        except httpx.RequestError as e:
-            print(f"Failed to connect to VOICEVOX: {e}")
-            print("Please ensure the VOICEVOX engine is running.")
-            raise
-        except httpx.HTTPStatusError as e:
-            body = ""
-            if e.response is not None:
-                body_text = e.response.text.strip()
-                if body_text:
-                    body = f" Response body: {body_text[:500]}"
-            print(f"HTTP error occurred during voice generation: {e}.{body}")
-            raise
-        except asyncio.TimeoutError as e:
-            print(f"Timeout occurred during voice generation: {e}")
-            raise
-        except Exception as e:
-            print(f"An unexpected error occurred during voice generation: {e}")
-            raise
+    try:
+        await _with_retry(
+            _generate,
+            attempts=retry_attempts,
+            wait_min=retry_wait_min,
+            wait_max=retry_wait_max,
+        )
+    except httpx.RequestError as e:
+        print(f"Failed to connect to VOICEVOX: {e}")
+        print("Please ensure the VOICEVOX engine is running.")
+        raise
+    except httpx.HTTPStatusError as e:
+        body = ""
+        if e.response is not None:
+            body_text = e.response.text.strip()
+            if body_text:
+                body = f" Response body: {body_text[:500]}"
+        print(f"HTTP error occurred during voice generation: {e}.{body}")
+        raise
+    except asyncio.TimeoutError as e:
+        print(f"Timeout occurred during voice generation: {e}")
+        raise
+    except Exception as e:
+        print(f"An unexpected error occurred during voice generation: {e}")
+        raise
