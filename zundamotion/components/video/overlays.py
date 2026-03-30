@@ -55,10 +55,12 @@ class OverlayMixin:
     def _subtitle_render_mode(self, subtitles: List[Dict[str, Any]]) -> str:
         if not subtitles:
             return "none"
-        mode = self.subtitle_gen.subtitle_render_mode()
-        if mode == "png":
-            return "png"
-        return "ass"
+        resolver = getattr(self.subtitle_gen, "resolve_render_mode_for_subtitles", None)
+        if callable(resolver):
+            mode = resolver(subtitles)
+        else:
+            mode = self.subtitle_gen.subtitle_render_mode()
+        return "png" if mode == "png" else "ass"
 
     @staticmethod
     def _escape_filter_path(path: Path) -> str:

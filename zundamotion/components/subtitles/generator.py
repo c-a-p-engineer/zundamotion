@@ -17,8 +17,12 @@ from .effects import resolve_subtitle_effects
 from .png import (
     SubtitlePNGRenderer,
     _estimate_auto_max_chars,
+    _background_is_visible,
+    _extract_background_config,
     _fits_within_width,
     _load_font_with_fallback,
+    _normalize_padding,
+    _resolve_rgba,
 )
 
 
@@ -101,10 +105,64 @@ class SubtitleGenerator:
         return style
 
     def subtitle_render_mode(self) -> str:
-        mode = str(self.subtitle_config.get("render_mode", "ass") or "ass").lower()
-        if mode not in {"png", "ass", "auto"}:
-            return "ass"
-        return mode
+        # Rendering mode is selected internally from subtitle styling.
+        return "auto"
+
+    @staticmethod
+    def _has_subtitle_effects(style: Dict[str, Any]) -> bool:
+        effects = style.get("effects")
+        if effects is None:
+            return False
+        if isinstance(effects, (list, tuple, set, dict)):
+            return bool(effects)
+        return bool(str(effects).strip())
+
+    @staticmethod
+    def _background_metric(value: Any, default: int = 0) -> int:
+        try:
+            return max(0, int(value))
+        except Exception:
+            return max(0, int(default))
+
+    def style_requires_png(self, style: Dict[str, Any]) -> bool:
+        normalized = self._normalize_style_aliases(style)
+        if self._has_subtitle_effects(normalized):
+            return True
+
+        background_cfg = _extract_background_config(normalized)
+        if not _background_is_visible(background_cfg):
+            return False
+
+        if background_cfg.get("image") or background_cfg.get("image_path"):
+            return True
+        if self._background_metric(
+            background_cfg.get("radius", background_cfg.get("corner_radius", 0))
+        ) > 0:
+            return True
+        if self._background_metric(background_cfg.get("border_width", 0)) > 0:
+            return True
+        padding_value = background_cfg.get("padding", normalized.get("box_padding"))
+        if any(_normalize_padding(padding_value, 0)):
+            return True
+        return False
+
+    def resolve_render_mode_for_line_configs(
+        self,
+        line_configs: Iterable[Dict[str, Any] | None],
+    ) -> str:
+        for line_config in line_configs:
+            style = self.resolve_subtitle_style(line_config or {})
+            if self.style_requires_png(style):
+                return "png"
+        return "ass"
+
+    def resolve_render_mode_for_subtitles(
+        self,
+        subtitles: Iterable[Dict[str, Any]],
+    ) -> str:
+        return self.resolve_render_mode_for_line_configs(
+            (subtitle.get("line_config", {}) for subtitle in subtitles)
+        )
 
     @staticmethod
     def _ass_font_name(style: Dict[str, Any]) -> str:
@@ -123,6 +181,12 @@ class SubtitleGenerator:
             return pysubs2.Color(rgb[0], rgb[1], rgb[2], max(0, min(255, int(alpha))))
         except Exception:
             return pysubs2.Color(255, 255, 255, max(0, min(255, int(alpha))))
+
+    @staticmethod
+    def _parse_ass_rgba(rgba: tuple[int, int, int, int]) -> pysubs2.Color:
+        r, g, b, alpha = rgba
+        ass_alpha = max(0, min(255, 255 - int(alpha)))
+        return pysubs2.Color(r, g, b, ass_alpha)
 
     @staticmethod
     def _alignment_for_text_align(value: Any) -> pysubs2.Alignment:
@@ -196,6 +260,11 @@ class SubtitleGenerator:
         payload = repr(sorted(style.items())).encode("utf-8")
         return f"Style_{hashlib.sha1(payload).hexdigest()[:10]}"
 
+    def subtitle_background_visible(self, style: Dict[str, Any]) -> bool:
+        normalized = self._normalize_style_aliases(style)
+        background_cfg = _extract_background_config(normalized)
+        return _background_is_visible(background_cfg)
+
     def _build_ass_style(self, style: Dict[str, Any]) -> pysubs2.SSAStyle:
         normalized = self._normalize_style_aliases(style)
         try:
@@ -227,6 +296,19 @@ class SubtitleGenerator:
         style_obj.outline = max(0.0, stroke_width)
         style_obj.shadow = max(0.0, shadow)
         style_obj.encoding = 1
+        background_cfg = _extract_background_config(normalized)
+        if _background_is_visible(background_cfg):
+            background_rgba = _resolve_rgba(
+                background_cfg.get("color") or background_cfg.get("fill"),
+                background_cfg.get("opacity"),
+            )
+            if background_rgba is not None:
+                style_obj.borderstyle = 3
+                # libass opaque box rendering is more reliable when both
+                # OutlineColour and BackColour are aligned to the same RGBA.
+                ass_box_color = self._parse_ass_rgba(background_rgba)
+                style_obj.outlinecolor = ass_box_color
+                style_obj.backcolor = ass_box_color
         return style_obj
 
     def _video_resolution(self) -> tuple[int, int]:

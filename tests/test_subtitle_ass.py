@@ -31,7 +31,6 @@ class DummyOverlayRenderer(OverlayMixin):
         self.subtitle_gen = SubtitleGenerator(
             {
                 "subtitle": {
-                    "render_mode": "ass",
                     "font_path": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
                     "font_size": 32,
                     "font_color": "white",
@@ -56,7 +55,6 @@ def test_build_ass_subtitle_file_writes_events_and_styles(tmp_path):
                 "height": 1080,
             },
             "subtitle": {
-                "render_mode": "ass",
                 "font_path": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
                 "font_size": 64,
                 "size": 42,
@@ -115,6 +113,66 @@ def test_build_ass_subtitle_file_writes_events_and_styles(tmp_path):
     assert subs.styles[subs[1].style].fontsize == 48.0
     assert (subs.styles[subs[1].style].primarycolor.r, subs.styles[subs[1].style].primarycolor.g, subs.styles[subs[1].style].primarycolor.b) == (144, 238, 144)
     assert (subs.styles[subs[1].style].outlinecolor.r, subs.styles[subs[1].style].outlinecolor.g, subs.styles[subs[1].style].outlinecolor.b) == (20, 61, 20)
+
+
+def test_build_ass_subtitle_file_maps_background_visibility_and_opacity(tmp_path):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    gen = SubtitleGenerator(
+        {
+            "subtitle": {
+                "font_path": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+                "font_size": 40,
+                "font_color": "white",
+                "stroke_color": "black",
+                "stroke_width": 2,
+                "background": {
+                    "show": True,
+                    "color": "#224466",
+                    "opacity": 0.4,
+                },
+            }
+        },
+        StubCacheManager(cache_dir),
+    )
+
+    out_path = tmp_path / "background.ass"
+    gen.build_ass_subtitle_file(
+        [
+            {
+                "text": "背景あり",
+                "start": 0.0,
+                "duration": 1.0,
+                "line_config": {},
+            },
+            {
+                "text": "背景なし",
+                "start": 1.2,
+                "duration": 1.0,
+                "line_config": {"subtitle": {"background": {"show": False}}},
+            },
+        ],
+        out_path,
+    )
+
+    subs = pysubs2.load(str(out_path))
+    style_with_bg = subs.styles[subs[0].style]
+    style_without_bg = subs.styles[subs[1].style]
+
+    assert style_with_bg.borderstyle == 3
+    assert (style_with_bg.backcolor.r, style_with_bg.backcolor.g, style_with_bg.backcolor.b) == (
+        34,
+        68,
+        102,
+    )
+    assert style_with_bg.backcolor.a == 153
+    assert (style_with_bg.outlinecolor.r, style_with_bg.outlinecolor.g, style_with_bg.outlinecolor.b) == (
+        34,
+        68,
+        102,
+    )
+    assert style_with_bg.outlinecolor.a == 153
+    assert style_without_bg.borderstyle == 1
 
 
 def test_apply_subtitle_overlays_ass_renders_output(tmp_path):

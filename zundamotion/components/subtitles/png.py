@@ -28,6 +28,21 @@ def _clamp_float(value: float, minimum: float = 0.0, maximum: float = 1.0) -> fl
     return max(minimum, min(maximum, value))
 
 
+def _coerce_optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
 def _normalize_padding(padding: Any, default: int) -> tuple[int, int, int, int]:
     """Normalize padding values to (left, top, right, bottom)."""
 
@@ -81,6 +96,9 @@ def _extract_background_config(style: Dict[str, Any]) -> Dict[str, Any]:
     mapping = {
         "background_color": "color",
         "box_color": "color",
+        "background_show": "show",
+        "background_visible": "show",
+        "background_enabled": "show",
         "background_opacity": "opacity",
         "background_radius": "radius",
         "background_corner_radius": "radius",
@@ -170,11 +188,39 @@ def _resolve_rgba(color_value: Any, explicit_opacity: Any = None) -> tuple[int, 
     return int(r), int(g), int(b), final_alpha
 
 
+def _background_is_visible(config: Dict[str, Any]) -> bool:
+    explicit_flag = _coerce_optional_bool(
+        config.get("show", config.get("visible", config.get("enabled")))
+    )
+    if explicit_flag is False:
+        return False
+
+    fill_rgba = _resolve_rgba(config.get("color") or config.get("fill"), config.get("opacity"))
+    image_path = config.get("image") or config.get("image_path")
+    outline_rgba = _resolve_rgba(
+        config.get("border_color") or config.get("outline_color"),
+        config.get("border_opacity"),
+    )
+    try:
+        border_width = max(0, int(config.get("border_width", 0)))
+    except (TypeError, ValueError):
+        border_width = 0
+
+    has_drawable = any(
+        [fill_rgba, outline_rgba and border_width > 0, bool(image_path)]
+    )
+    if explicit_flag is True:
+        return has_drawable
+    return has_drawable
+
+
 def _build_background_layer(
     size: tuple[int, int], config: Dict[str, Any]
 ) -> Image.Image | None:
     width, height = size
     if width <= 0 or height <= 0:
+        return None
+    if not _background_is_visible(config):
         return None
 
     fill_rgba = _resolve_rgba(config.get("color") or config.get("fill"), config.get("opacity"))
@@ -192,12 +238,6 @@ def _build_background_layer(
         radius = max(0, int(config.get("radius", config.get("corner_radius", 0))))
     except (TypeError, ValueError):
         radius = 0
-
-    has_drawable = any(
-        [fill_rgba, outline_rgba and border_width > 0, bool(image_path)]
-    )
-    if not has_drawable:
-        return None
 
     layer = Image.new("RGBA", size, (0, 0, 0, 0))
     shape_mask = Image.new("L", size, 0)
@@ -506,7 +546,8 @@ def _render_subtitle_png(
     default_box_color = style_.get("box_color", "black@0.5")
     if "color" not in background_cfg and default_box_color:
         background_cfg["color"] = default_box_color
-    padding_value = background_cfg.get("padding", base_padding)
+    background_visible = _background_is_visible(background_cfg)
+    padding_value = background_cfg.get("padding", base_padding) if background_visible else 0
     pad_left, pad_top, pad_right, pad_bottom = _normalize_padding(padding_value, base_padding)
 
     try:

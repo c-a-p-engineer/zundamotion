@@ -528,6 +528,22 @@ class SceneRenderer:
         generate_no_sub_video: bool,
         start_time_by_idx: Dict[int, float],
     ) -> tuple[bool, str]:
+        subtitle_gen = self.video_renderer.subtitle_gen
+        subtitle_mode_resolver = getattr(
+            subtitle_gen, "resolve_render_mode_for_line_configs", None
+        )
+        if callable(subtitle_mode_resolver):
+            scene_subtitle_mode = subtitle_mode_resolver(
+                [
+                    (self.line_data_map.get(f"{self.scene['id']}_{idx}") or {}).get(
+                        "line_config", {}
+                    )
+                    for idx, _line in enumerate(self.scene.get("lines", []) or [], start=1)
+                ]
+            )
+        else:
+            scene_subtitle_mode = subtitle_gen.subtitle_render_mode()
+
         if not self.hw_kind:
             return False, "cpu_encoder"
         if generate_no_sub_video:
@@ -538,7 +554,7 @@ class SceneRenderer:
             return False, "foreground_overlays_present"
         if scene_duration <= 0:
             return False, "empty_scene"
-        if self.video_renderer.subtitle_gen.subtitle_render_mode() == "png":
+        if scene_subtitle_mode == "png":
             return False, "subtitle_render_mode_png"
 
         lines = self.scene.get("lines", []) or []
@@ -1101,7 +1117,20 @@ class SceneRenderer:
         # Optional: Pre-cache subtitle PNGs to reduce jitter during rendering
         try:
             vcfg = self.config.get("video", {}) or {}
-            if self.video_renderer.subtitle_gen.subtitle_render_mode() == "ass":
+            subtitle_gen = self.video_renderer.subtitle_gen
+            subtitle_mode_resolver = getattr(
+                subtitle_gen, "resolve_render_mode_for_line_configs", None
+            )
+            if callable(subtitle_mode_resolver):
+                scene_subtitle_mode = subtitle_mode_resolver(
+                    [
+                        (line_data_map.get(f"{scene_id}_{idx}") or {}).get("line_config", {})
+                        for idx, _line in enumerate(scene.get("lines", []), start=1)
+                    ]
+                )
+            else:
+                scene_subtitle_mode = subtitle_gen.subtitle_render_mode()
+            if scene_subtitle_mode == "ass":
                 raise RuntimeError("subtitle_precache_not_needed_for_ass")
             # Heuristic: enable precache when either explicitly enabled
             # or talk lines exceed configured threshold.
@@ -1739,6 +1768,7 @@ class SceneRenderer:
                 line_image_layers = image_layers_by_line.get(idx, [])
                 video_cache_data = {
                     "type": "talk",
+                    "clip_render_version": "20260330_face_overlay_args_v2",
                     "audio_cache_key": self.cache_manager._generate_hash(
                         audio_cache_key_data
                     ),
@@ -1779,6 +1809,11 @@ class SceneRenderer:
                         background_config=background_config,
                         characters_config=effective_characters,
                         output_filename=output_path.stem,
+                        # Scene-level subtitle burn-in remains the source of truth.
+                        # Only pass line_config so face overlay fallback can recover
+                        # character placement when the base scene already contains it.
+                        subtitle_text=None,
+                        subtitle_line_config=line_config,
                         insert_config=effective_insert,
                         image_layer_overlays=line_image_layers,
                         background_effects=line_config.get("background_effects"),

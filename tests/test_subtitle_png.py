@@ -65,3 +65,37 @@ def test_subtitle_png_renderer_reuses_shared_executor(tmp_path):
     renderer2 = SubtitlePNGRenderer(StubCacheManager(cache_dir))
 
     assert renderer1._executor is renderer2._executor
+
+
+def test_render_subtitle_png_hides_background_and_padding_when_show_is_false(tmp_path):
+    visible_path = tmp_path / "visible.png"
+    hidden_path = tmp_path / "hidden.png"
+    style = {
+        "font_path": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        "font_size": 40,
+        "font_color": "white",
+        "background": {
+            "show": True,
+            "color": "#000000",
+            "opacity": 0.6,
+            "padding": {"x": 32, "y": 20},
+        },
+    }
+
+    visible_width, visible_height = _render_subtitle_png("字幕", style, str(visible_path))
+    hidden_width, hidden_height = _render_subtitle_png(
+        "字幕",
+        {
+            **style,
+            "background": {
+                "show": False,
+                "color": "#000000",
+                "opacity": 0.6,
+                "padding": {"x": 32, "y": 20},
+            },
+        },
+        str(hidden_path),
+    )
+
+    assert visible_width > hidden_width
+    assert visible_height > hidden_height

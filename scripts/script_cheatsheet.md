@@ -163,12 +163,19 @@ subtitle:
   wrap_mode: chars
   max_chars_per_line: auto  # max_pixel_width から自動推定も可
   max_pixel_width: 960
+  background:
+    show: true
+    color: "#000000"
+    opacity: 0.65
   reading_display: paren      # none / paren
 ```
 
 - ルート `subtitle` でフォントパスや文字数制御など全体の既定値をまとめます。例: [`sample.yaml`](./sample.yaml)。
 - `max_chars_per_line: auto` を使うと、実際のフォント幅と `max_pixel_width` から字幕ごとに折り返し文字数を推定します。空白のない日本語字幕向けです。
-- 行ごとの `subtitle` ブロックで色や余白などを一時的に上書き可能。スタイルバリエーション: [`sample_subtitle_styles.yaml`](./sample_subtitle_styles.yaml)。
+- `subtitle.background.show: false` で字幕ボックスを非表示にできます。`color` と `opacity` で色と透過率を調整します。
+- 字幕の描画方式は内部で自動選択されます。背景色・透過率だけの軽いボックスは `ASS/libass`、角丸・枠線・背景画像・字幕エフェクトを使う装飾付き字幕は `PNG` で描画されます。
+- `ASS` の背景ボックスは仕様上、独立した枠線色を持てません。枠線や角丸を確実に反映したい場合は、該当の装飾を指定すると自動で `PNG` 側が使われます。サンプル: [`sample_subtitle_styles.yaml`](./sample_subtitle_styles.yaml)。
+- 行ごとの `subtitle` ブロックで色や余白などを一時的に上書き可能です。
 - `defaults.characters.<name>.subtitle` で話者ごとの字幕色や縁色を既定化できます。例: [`sample_markdown.md`](./sample_markdown.md)。
 - 字幕PNGだけ改行したい場合は `subtitle_text` に `"行1\n行2"` を設定します。読み仮名は `reading` で別途管理できます。
 

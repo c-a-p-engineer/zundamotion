@@ -1,5 +1,5 @@
 meta:
-  title: "字幕スタイル検証ミニスクリプト"
+  title: "字幕スタイル検証サンプル"
   version: 1
 
 defaults:
@@ -9,16 +9,46 @@ defaults:
       speaker_id: 3
 
 scenes:
-  - id: subtitle_styles
+  - id: subtitle_styles_basic
     bg: "assets/bg/room.png"
     lines:
-      - text: "基本の字幕。標準の半透明黒背景を確認します。"
+      - text: "背景色と不透明度だけを変えた例です。"
         speaker_name: "copetan"
+        subtitle:
+          background:
+            show: true
+            color: "#0041FF"
+            opacity: 0.75
+            radius: 0
+            padding: 0
+            border_width: 0
 
+      - text: "背景を薄くして、文字色をライムへ変えた例です。"
+        speaker_name: "copetan"
+        subtitle:
+          color: "#7CFF4F"
+          background:
+            show: true
+            color: "#111111"
+            opacity: 0.35
+            radius: 0
+            padding: 0
+            border_width: 0
+
+      - text: "背景を完全にオフにしてテキストのみ表示する例です。"
+        speaker_name: "copetan"
+        subtitle:
+          background:
+            show: false
+
+  - id: subtitle_styles_decorated
+    bg: "assets/bg/room.png"
+    lines:
       - text: "角丸と太めの枠線、広めの余白を指定した例です。"
         speaker_name: "copetan"
         subtitle:
           background:
+            show: true
             color: "#0041FF"
             opacity: 0.75
             radius: 48
@@ -31,6 +61,7 @@ scenes:
         speaker_name: "copetan"
         subtitle:
           background:
+            show: true
             color: "#111111"
             opacity: 0.35
             radius: 24
@@ -45,18 +76,10 @@ scenes:
         speaker_name: "copetan"
         subtitle:
           background:
+            show: true
             image: "assets/bg/room.png"
             opacity: 0.6
             radius: 40
             border_color: "#FFFFFF"
             border_width: 4
             padding: {x: 56, y: 24}
-
-      - text: "背景を完全にオフにしてテキストのみ表示する例です。"
-        speaker_name: "copetan"
-        subtitle:
-          box_color: null
-          background:
-            color: null
-            border_width: 0
-            padding: 0

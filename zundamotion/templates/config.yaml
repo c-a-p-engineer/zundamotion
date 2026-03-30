@@ -51,13 +51,13 @@ transitions:
 
 # Subtitle settings
 subtitle:
-  render_mode: "ass"               # ass | png | auto. ass is much faster for final burn-in.
   font_path: "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf" # IPAexGothic font path
   font_color: "white"
   font_size: 64
   max_chars_per_line: 28 # Number or "auto" (estimate from max_pixel_width and font)
   wrap_mode: chars       # Prefer character-based wrapping for CJK text
   max_pixel_width: 1800  # Used by pixel wrap and auto char estimation
+  # 描画方式は内部で自動選択されます。
   stroke_color: "black"
   stroke_width: 2
   background:

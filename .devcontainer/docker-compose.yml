@@ -5,6 +5,7 @@ services:
     build:
       context: ..
       dockerfile: .devcontainer/${ZUNDA_DOCKER:-Dockerfile.cpu}
+    working_dir: /workspace
     volumes:
       - ..:/workspace:cached
     command: sleep infinity
@@ -16,6 +17,37 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
       - USE_RAMDISK=1
       - NVENC_FAST=1
+    runtime: nvidia
+    shm_size: "2gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    gpus: all
+
+  render:
+    profiles: ["runner"]
+    build:
+      context: ..
+      dockerfile: .devcontainer/${ZUNDA_DOCKER:-Dockerfile.cpu}
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace:cached
+    command:
+      - /bin/bash
+      - -lc
+      - ${ZUNDAMOTION_COMMAND:-python -m zundamotion.main scripts/sample.yaml -o output/sample.mp4 --no-cache --hw-encoder cpu --log-kv}
+    depends_on:
+      - voicevox
+    environment:
+      - VOICEVOX_URL=http://voicevox:50021
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+      - USE_RAMDISK=1
+      - NVENC_FAST=1
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
     runtime: nvidia
     shm_size: "2gb"
     deploy:

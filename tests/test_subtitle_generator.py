@@ -59,3 +59,55 @@ def test_build_subtitle_overlay_accepts_numeric_subtitle_xy(tmp_path):
     )
 
     assert "overlay=x='48':y='96'" in snippet
+
+
+def test_resolve_render_mode_for_line_configs_uses_ass_for_simple_auto(tmp_path):
+    generator = SubtitleGenerator(
+        {"subtitle": {"background": {"show": True, "color": "#000000"}}},
+        CacheManager(tmp_path / "cache"),
+    )
+
+    mode = generator.resolve_render_mode_for_line_configs(
+        [
+            {"subtitle": {"background": {"show": True, "color": "#0041FF", "opacity": 0.7}}},
+            {"subtitle": {"color": "#7CFF4F"}},
+        ]
+    )
+
+    assert mode == "ass"
+
+
+def test_resolve_render_mode_for_line_configs_uses_png_when_background_is_decorated(tmp_path):
+    generator = SubtitleGenerator(
+        {"subtitle": {}},
+        CacheManager(tmp_path / "cache"),
+    )
+
+    mode = generator.resolve_render_mode_for_line_configs(
+        [
+            {
+                "subtitle": {
+                    "background": {
+                        "show": True,
+                        "color": "#0041FF",
+                        "radius": 24,
+                    }
+                }
+            }
+        ]
+    )
+
+    assert mode == "png"
+
+
+def test_resolve_render_mode_for_line_configs_uses_png_when_subtitle_effects_are_present(tmp_path):
+    generator = SubtitleGenerator(
+        {"subtitle": {}},
+        CacheManager(tmp_path / "cache"),
+    )
+
+    mode = generator.resolve_render_mode_for_line_configs(
+        [{"subtitle": {"effects": [{"type": "text:bounce_text", "amplitude": 24}]}}]
+    )
+
+    assert mode == "png"
