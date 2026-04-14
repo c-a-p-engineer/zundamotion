@@ -236,6 +236,8 @@ lines:
         anchor: bottom_center
         position: {x: -480, y: -32}
         scale: 0.9
+        flip_x: true             # true でキャラクター画像を左右反転
+        flip_y: false            # true でキャラクター画像を上下反転
         expression: "smile"
         effects:
           - type: "char:shake_char"
@@ -249,7 +251,9 @@ lines:
 - `characters_persist: true` を `defaults` に設定すると、同シーン内で立ち絵状態が自動的に引き継がれ、差分のみ記述すればよくなります。
 - `enter_duration` / `leave_duration` と `enter` / `leave` を組み合わせると立ち絵のスライドイン・アウトが可能。
 - `expression` は `assets/characters/<name>/<expression>/` の差分素材に対応。
-- サンプル台本: [`sample_character_enter.yaml`](./sample_character_enter.yaml)。
+- `flip_x: true` で立ち絵、口パク、目パチ差分をまとめて左右反転できます。右向き素材を左向きにしたい時に使います。
+- `flip_y: true` で同じ対象を上下反転できます。上下反転の確認や特殊演出に使えます。
+- サンプル台本: [`sample_character_enter.yaml`](./sample_character_enter.yaml), [`sample_character_flip.yaml`](./sample_character_flip.yaml)。
 
 ### 立ち絵アニメーション
 

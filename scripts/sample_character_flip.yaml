@@ -1,0 +1,56 @@
+meta:
+  title: "キャラクター画像反転サンプル（左右・上下）"
+  version: 1
+
+video:
+  fps: 30
+
+defaults:
+  characters_persist: true
+  characters:
+    copetan:
+      speaker_id: 3
+      scale: 0.86
+      anchor: bottom_center
+      position: {x: 0, y: -36}
+      subtitle:
+        font_color: "#90EE90"
+        stroke_color: "#003300"
+
+scenes:
+  - id: character_flip_showcase
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "まずは通常向きの立ち絵なのだ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            visible: true
+            expression: "default"
+            flip_x: false
+            flip_y: false
+      - text: "flip_x を true にすると、同じ画像を左右反転できるのだ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "smile"
+            flip_x: true
+            flip_y: false
+      - text: "flip_y を true にすると、上下反転もできるのだ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "default"
+            flip_x: false
+            flip_y: true
+            effects:
+              - type: "char:sway_char"
+                amplitude: {x: 16}
+                freq: 0.9
+      - text: "最後は両方 false に戻して、元の向きに戻るのだ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            expression: "smile"
+            flip_x: false
+            flip_y: false

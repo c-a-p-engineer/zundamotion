@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from ...utils.ffmpeg_ops import calculate_overlay_position
 from ...utils.logger import logger
+from .characters import is_horizontal_flip_enabled, is_vertical_flip_enabled
 
 
 def _enable_expr(
@@ -122,6 +123,8 @@ async def apply_face_overlays(
                     "enter_effect": enter_effect,
                     "enter_duration": f"{enter_duration:.3f}",
                     "expression": str(character.get("expression", "default")),
+                    "flip_x": is_horizontal_flip_enabled(character),
+                    "flip_y": is_vertical_flip_enabled(character),
                     "dynamic_position": False,
                 }
                 break
@@ -154,6 +157,16 @@ async def apply_face_overlays(
 
     base_dir = Path(f"assets/characters/{target_name}")
     expression = str(placement.get("expression") or "default")
+    flip_x_value = placement.get("flip_x", False)
+    if isinstance(flip_x_value, str):
+        flip_x = flip_x_value.lower() in {"1", "true", "yes", "on"}
+    else:
+        flip_x = bool(flip_x_value)
+    flip_y_value = placement.get("flip_y", False)
+    if isinstance(flip_y_value, str):
+        flip_y = flip_y_value.lower() in {"1", "true", "yes", "on"}
+    else:
+        flip_y = bool(flip_y_value)
     mouth_close = _resolve_face_asset(base_dir, expression, "mouth", "close.png")
     mouth_half = _resolve_face_asset(base_dir, expression, "mouth", "half.png")
     mouth_open = _resolve_face_asset(base_dir, expression, "mouth", "open.png")
@@ -194,7 +207,13 @@ async def apply_face_overlays(
                 return _add_image_input(path)
             thr_env = os.environ.get("FACE_ALPHA_THRESHOLD")
             thr = int(thr_env) if (thr_env and thr_env.isdigit()) else 128
-            cached = await renderer.face_cache.get_scaled_overlay(path, float(scale_value), thr)
+            cached = await renderer.face_cache.get_scaled_overlay(
+                path,
+                float(scale_value),
+                thr,
+                horizontal_flip=flip_x,
+                vertical_flip=flip_y,
+            )
             idx = _add_image_input(cached)
             if idx is not None:
                 preprocessed_inputs.add(idx)
@@ -213,8 +232,14 @@ async def apply_face_overlays(
                 f"[{input_index}:v]format=rgba{fade_add}[{out_label}]"
             )
         else:
+            flip_filters: List[str] = []
+            if flip_x:
+                flip_filters.append("hflip")
+            if flip_y:
+                flip_filters.append("vflip")
+            flip_filter = "".join(f",{item}" for item in flip_filters)
             filter_complex_parts.append(
-                f"[{input_index}:v]format=rgba{fade_add},scale=iw*{scale_value}:ih*{scale_value}[{out_label}]"
+                f"[{input_index}:v]format=rgba{fade_add},scale=iw*{scale_value}:ih*{scale_value}{flip_filter}[{out_label}]"
             )
 
     eyes_segments = face_anim.get("eyes") or []

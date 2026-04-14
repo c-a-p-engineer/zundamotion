@@ -9,6 +9,67 @@ from ...utils.logger import logger
 from .effects import resolve_character_effects
 
 
+def is_horizontal_flip_enabled(char_config: Dict[str, Any]) -> bool:
+    """Return True when a character config requests horizontal mirroring."""
+
+    for key in ("flip_x", "mirror"):
+        value = char_config.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            return True
+
+    value = char_config.get("flip")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return normalized in {
+            "1",
+            "true",
+            "yes",
+            "on",
+            "x",
+            "horizontal",
+            "h",
+            "left_right",
+        }
+    return False
+
+
+def is_vertical_flip_enabled(char_config: Dict[str, Any]) -> bool:
+    """Return True when a character config requests vertical mirroring."""
+
+    value = char_config.get("flip_y")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return True
+
+    value = char_config.get("flip")
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return normalized in {
+            "y",
+            "vertical",
+            "v",
+            "up_down",
+        }
+    return False
+
+
 @dataclass
 class CharacterInputs:
     """Result of preparing character overlays."""
@@ -74,20 +135,32 @@ async def collect_character_inputs(
         except Exception:
             scale_cfg = 1.0
 
+        flip_x = is_horizontal_flip_enabled(char_config)
+        flip_y = is_vertical_flip_enabled(char_config)
+
         use_char_cache = os.environ.get("CHAR_CACHE_DISABLE", "0") != "1"
-        if use_char_cache and abs(scale_cfg - 1.0) > 1e-6:
+        preprocessed_flip_x = False
+        preprocessed_flip_y = False
+        if use_char_cache and (abs(scale_cfg - 1.0) > 1e-6 or flip_x or flip_y):
             try:
                 thr_env = os.environ.get("CHAR_ALPHA_THRESHOLD")
-                thr = int(thr_env) if (thr_env and thr_env.isdigit()) else 128
+                if thr_env and thr_env.isdigit():
+                    thr = int(thr_env)
+                else:
+                    thr = 128 if abs(scale_cfg - 1.0) > 1e-6 else None
                 scaled_path = await renderer.face_cache.get_scaled_overlay(
                     char_image_path,
                     float(scale_cfg),
                     thr,
+                    horizontal_flip=flip_x,
+                    vertical_flip=flip_y,
                 )
                 character_indices[i] = len(input_layers)
                 cmd.extend(["-loop", "1", "-i", str(scaled_path.resolve())])
                 input_layers.append({"type": "video", "index": len(input_layers)})
                 effective_scale = 1.0
+                preprocessed_flip_x = flip_x
+                preprocessed_flip_y = flip_y
             except Exception:
                 character_indices[i] = len(input_layers)
                 cmd.extend(["-loop", "1", "-i", str(char_image_path.resolve())])
@@ -104,6 +177,8 @@ async def collect_character_inputs(
             "name": str(char_name),
             "expression": str(char_expression),
             "image_path": char_image_path,
+            "preprocessed_flip_x": preprocessed_flip_x,
+            "preprocessed_flip_y": preprocessed_flip_y,
         }
 
     return CharacterInputs(
@@ -248,10 +323,20 @@ def build_character_overlays(
         y_expr = _escape_commas(y_expr)
 
         overlay_label: Optional[str] = None
+        flip_filters: List[str] = []
+        if is_horizontal_flip_enabled(char_config) and not metadata.get(i, {}).get(
+            "preprocessed_flip_x"
+        ):
+            flip_filters.append("hflip")
+        if is_vertical_flip_enabled(char_config) and not metadata.get(i, {}).get(
+            "preprocessed_flip_y"
+        ):
+            flip_filters.append("vflip")
+        flip_filter = "".join(f",{item}" for item in flip_filters)
 
         if use_cuda_filters:
             filter_complex_parts.append(
-                f"[{ffmpeg_index}:v]format=rgba{fade},hwupload_cuda,{renderer.scale_filter}=iw*{scale}:ih*{scale}[char_scaled_{i}]"
+                f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},hwupload_cuda,{renderer.scale_filter}=iw*{scale}:ih*{scale}[char_scaled_{i}]"
             )
             overlay_label = f"[char_scaled_{i}]"
             overlay_streams.append(overlay_label)
@@ -261,7 +346,7 @@ def build_character_overlays(
             if os.environ.get("CHAR_CACHE_DISABLE", "0") != "1":
                 try:
                     filter_complex_parts.append(
-                        f"[{ffmpeg_index}:v]format=rgba{fade},hwupload[char_gpu_{i}]"
+                        f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},hwupload[char_gpu_{i}]"
                     )
                     overlay_label = f"[char_gpu_{i}]"
                     overlay_streams.append(overlay_label)
@@ -274,7 +359,7 @@ def build_character_overlays(
                     overlay_label = None
             if not opencl_success:
                 filter_complex_parts.append(
-                    f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale},format=rgba{fade},hwupload[char_gpu_{i}]"
+                    f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale},format=rgba{fade}{flip_filter},hwupload[char_gpu_{i}]"
                 )
                 overlay_label = f"[char_gpu_{i}]"
                 overlay_streams.append(overlay_label)
@@ -283,11 +368,11 @@ def build_character_overlays(
         else:
             if os.environ.get("CHAR_CACHE_DISABLE", "0") != "1" and abs(scale - 1.0) < 1e-6:
                 filter_complex_parts.append(
-                    f"[{ffmpeg_index}:v]format=rgba{fade}[char_scaled_{i}]"
+                    f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter}[char_scaled_{i}]"
                 )
             else:
                 filter_complex_parts.append(
-                    f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}:flags={renderer.scale_flags},format=rgba{fade}[char_scaled_{i}]"
+                    f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}:flags={renderer.scale_flags},format=rgba{fade}{flip_filter}[char_scaled_{i}]"
                 )
             overlay_label = f"[char_scaled_{i}]"
             overlay_streams.append(overlay_label)
@@ -411,6 +496,8 @@ def _build_face_placement(
             "x_num": str(int(round(x_num))),
             "y_num": str(int(round(y_num))),
             "expression": str(char_config.get("expression", char_data.get("expression", "default"))),
+            "flip_x": is_horizontal_flip_enabled(char_config),
+            "flip_y": is_vertical_flip_enabled(char_config),
             "dynamic_position": dynamic_position,
         }
 

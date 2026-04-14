@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from zundamotion.cache import CacheManager
 
@@ -18,11 +18,16 @@ class FaceOverlayCache:
         self.cache = cache_manager
 
     async def get_scaled_overlay(
-        self, src_path: Path, scale: float, alpha_threshold: Optional[int] = 128
+        self,
+        src_path: Path,
+        scale: float,
+        alpha_threshold: Optional[int] = 128,
+        horizontal_flip: bool = False,
+        vertical_flip: bool = False,
     ) -> Path:
         """
-        Return path to a cached, pre-scaled (and optionally alpha-hard-thresholded)
-        PNG derived from src_path.
+        Return path to a cached, pre-scaled/flipped (and optionally
+        alpha-hard-thresholded) PNG derived from src_path.
         """
         p = Path(src_path)
         st = p.stat()
@@ -32,11 +37,17 @@ class FaceOverlayCache:
             "size": st.st_size,
             "scale": float(scale),
             "alpha_thr": int(alpha_threshold) if alpha_threshold is not None else None,
+            "horizontal_flip": bool(horizontal_flip),
+            "vertical_flip": bool(vertical_flip),
             "op": "face_overlay_scaled",
         }
 
         async def _creator(out_path: Path) -> Path:
             img = Image.open(p).convert("RGBA")
+            if horizontal_flip:
+                img = ImageOps.mirror(img)
+            if vertical_flip:
+                img = ImageOps.flip(img)
             if scale != 1.0:
                 w, h = img.size
                 sw = max(1, int(round(w * float(scale))))
@@ -56,4 +67,3 @@ class FaceOverlayCache:
             extension="png",
             creator_func=_creator,
         )
-
