@@ -425,7 +425,7 @@ async def apply_transition(
         filter_parts.append(
             f"[1:a]aresample=async=1:first_pts=0,"
             f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts={channel_layout},"
-            f"adelay={delay_values},apad=pad_dur={wait_padding:.3f}[a1pad]"
+            f"adelay={delay_values}[a1pad]"
         )
         filter_parts.append(
             f"[a0pad][a1pad]acrossfade=d={duration}:c1=tri:c2=tri[a]"

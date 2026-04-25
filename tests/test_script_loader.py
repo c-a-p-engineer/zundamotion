@@ -107,6 +107,43 @@ def test_character_subtitle_defaults_are_merged_into_speaker_lines(tmp_path):
     assert line["subtitle"]["stroke_color"] == "#102A43"
 
 
+def test_top_level_transitions_override_default_config(tmp_path):
+    root = Path.cwd()
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump(
+            {
+                "script": {"scenes": []},
+                "transitions": {"wait_padding_seconds": 2.0},
+                "defaults": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "transition override", "version": 3},
+                "transitions": {"wait_padding_seconds": 0.0},
+                "scenes": [
+                    {
+                        "id": "scene",
+                        "bg": str((root / "assets" / "bg" / "room.png").resolve()),
+                        "lines": [{"text": "トランジション設定を反映します"}],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_script_and_config(str(script_path), str(default_config_path))
+
+    assert config["transitions"]["wait_padding_seconds"] == 0.0
+
+
 def test_auto_sound_effect_injected_from_overlay_preset(tmp_path):
     root = Path.cwd()
     default_config_path = tmp_path / "default.yaml"
