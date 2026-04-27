@@ -829,6 +829,11 @@ async def normalize_media(
                 or "h264_nvenc" in msg
                 or "nvenc" in msg.lower()
                 or "No NVENC capable devices found" in msg
+                or "h264_qsv" in msg
+                or "_qsv" in msg.lower()
+                or "MFX session" in msg
+                or "Could not open encoder" in msg
+                or "Error while opening encoder" in msg
             )
             if not should_fallback:
                 logger.error(f"Error normalizing media {input_path}: {e}")
@@ -837,7 +842,7 @@ async def normalize_media(
                 raise
 
             logger.warning(
-                "NVENC failed during normalization. Falling back to libx264 and retrying once."
+                "Hardware encoder failed during normalization. Falling back to libx264 and retrying once."
             )
             prev = os.environ.get("DISABLE_HWENC")
             os.environ["DISABLE_HWENC"] = "1"

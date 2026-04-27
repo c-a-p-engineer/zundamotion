@@ -124,6 +124,9 @@ class Timeline:
         for event in self.events:
             if event.get("start_time", 0.0) >= adjusted_start:
                 event["start_time"] = float(event.get("start_time", 0.0)) + duration
+        for topic in self.topics:
+            if topic.get("time", 0.0) >= adjusted_start:
+                topic["time"] = float(topic.get("time", 0.0)) + duration
 
         new_event: Optional[Dict[str, Any]] = None
         if description or metadata:
@@ -151,6 +154,37 @@ class Timeline:
             self.events.insert(insert_idx, new_event)
 
         self.current_time += duration
+
+    def shift_from(
+        self,
+        start_time: float,
+        delta: float,
+        *,
+        include_at_start: bool = True,
+    ) -> None:
+        """指定時刻以降のイベントとチャプターをまとめてずらす。"""
+
+        if abs(delta) <= 1e-9:
+            return
+
+        threshold = max(0.0, start_time)
+
+        def should_shift(value: float) -> bool:
+            if include_at_start:
+                return value >= threshold
+            return value > threshold
+
+        for event in self.events:
+            current = float(event.get("start_time", 0.0))
+            if should_shift(current):
+                event["start_time"] = max(0.0, current + delta)
+
+        for topic in self.topics:
+            current = float(topic.get("time", 0.0))
+            if should_shift(current):
+                topic["time"] = max(0.0, current + delta)
+
+        self.current_time = max(0.0, self.current_time + delta)
 
     def save_as_md(self, output_path: Path):
         """タイムラインを Markdown 形式で保存する。"""

@@ -116,14 +116,14 @@ class FinalizePhase:
                     offset = max(0.0, current_duration - t_dur)
 
                     out_path = self.temp_dir / f"transition_{i:03d}_{i+1:03d}.mp4"
-                    effective_gap = max(0.0, (self.transition_wait_padding * 2.0) - t_dur)
+                    timeline_shift = self.transition_wait_padding
                     logger.info(
-                        "FinalizePhase: Applying transition '%s' (d=%.2fs, offset=%.2fs, wait=%.2fs, effective_gap=%.2fs) between %s -> %s",
+                        "FinalizePhase: Applying transition '%s' (d=%.2fs, offset=%.2fs, wait=%.2fs, timeline_shift=%.2fs) between %s -> %s",
                         t_type,
                         t_dur,
                         offset,
                         self.transition_wait_padding,
-                        effective_gap,
+                        timeline_shift,
                         current.name,
                         Path(next_path).name,
                     )
@@ -139,34 +139,18 @@ class FinalizePhase:
                         wait_padding=self.transition_wait_padding,
                         hw_encoder=self.hw_encoder,
                     )
-                    if (
-                        effective_gap > 0
-                        and timeline is not None
-                        and i + 1 < len(scenes)
-                    ):
+                    if timeline_shift > 0 and timeline is not None and i + 1 < len(scenes):
                         next_scene = scenes[i + 1]
                         next_scene_id = str(next_scene.get("id", f"scene_{i+1}"))
                         gap_start = timeline.get_scene_start_time(next_scene_id)
                         if gap_start is not None:
-                            from_scene_id = str(scene.get("id", f"scene_{i}"))
-                            timeline.insert_gap(
+                            timeline.shift_from(
                                 gap_start,
-                                effective_gap,
-                                description=(
-                                    f"Transition Gap ({from_scene_id} -> {next_scene_id})"
-                                ),
-                                metadata={
-                                    "type": "transition_gap",
-                                    "from_scene": from_scene_id,
-                                    "to_scene": next_scene_id,
-                                    "configured_wait_seconds": self.transition_wait_padding,
-                                    "transition_duration": t_dur,
-                                    "gap_seconds": effective_gap,
-                                },
+                                timeline_shift,
                             )
                         else:
                             logger.debug(
-                                "FinalizePhase: Could not locate start time for scene '%s' when inserting transition wait.",
+                                "FinalizePhase: Could not locate start time for scene '%s' when shifting transition wait.",
                                 next_scene_id,
                             )
                     current = out_path

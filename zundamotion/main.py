@@ -235,7 +235,18 @@ async def main() -> None:
 
     try:
         logger.kv_info(
-            "Video generation started.", kv_pairs={"Event": "GenerationStart"}
+            (
+                "Video generation started. "
+                f"script={args.script_path} output={args.output} "
+                f"hw_encoder={args.hw_encoder} quality={args.quality}"
+            ),
+            kv_pairs={
+                "Event": "GenerationStart",
+                "ScriptPath": str(args.script_path),
+                "OutputPath": str(args.output),
+                "HwEncoder": str(args.hw_encoder),
+                "Quality": str(args.quality),
+            },
         )
         await run_generation(
             args.script_path,

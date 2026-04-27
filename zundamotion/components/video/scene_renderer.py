@@ -203,7 +203,7 @@ async def render_scene_base_composited(
     if bg_type != "video" and cpu_chain:
         last = cpu_chain[-1]
         prefix, _, _ = last.rpartition("[bg]")
-        cpu_chain[-1] = f"{prefix}trim=duration={duration}[bg]"
+        cpu_chain[-1] = f"{prefix},trim=duration={duration}[bg]"
     filter_parts.extend(cpu_chain)
 
     chain = "[bg]"

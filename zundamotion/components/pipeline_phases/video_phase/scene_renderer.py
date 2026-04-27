@@ -17,6 +17,7 @@ from ....utils.ffmpeg_ops import (
     build_background_filter_complex,
     build_background_fit_steps,
     calculate_overlay_position,
+    normalize_media,
 )
 from ....utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from ....utils.logger import logger

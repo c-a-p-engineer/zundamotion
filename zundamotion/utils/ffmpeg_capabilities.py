@@ -57,6 +57,7 @@ async def _list_encoders(ffmpeg_path: str = "ffmpeg") -> str:
 # ハードウェア検出（FFmpeg 7 向け）
 # =========================================================
 _nvenc_availability_cache: Dict[str, bool] = {}
+_qsv_availability_cache: Dict[str, bool] = {}
 # 同一プロセス内での重複スモークテスト実行を防ぐためのタスクキャッシュとロック
 _nvenc_availability_tasks: Dict[str, asyncio.Task] = {}
 _nvenc_lock = asyncio.Lock()
@@ -177,6 +178,49 @@ async def is_nvenc_available(ffmpeg_path: str = "ffmpeg") -> bool:
         # 完了後はタスクキャッシュを掃除
         async with _nvenc_lock:
             _nvenc_availability_tasks.pop(ffmpeg_path, None)
+
+
+async def is_qsv_available(ffmpeg_path: str = "ffmpeg") -> bool:
+    """h264_qsv が実際に使えるかを軽量スモークテストで確認する。"""
+
+    if ffmpeg_path in _qsv_availability_cache:
+        return _qsv_availability_cache[ffmpeg_path]
+
+    encoders = await _list_encoders(ffmpeg_path)
+    if " h264_qsv " not in f" {encoders} ":
+        _qsv_availability_cache[ffmpeg_path] = False
+        return False
+
+    logger.info("Performing a quick smoke test for h264_qsv...")
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=128x128:d=0.1",
+        "-vcodec",
+        "h264_qsv",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        await _run_ffmpeg_async(cmd, error_log_level=logging.WARNING)
+        logger.info("h264_qsv smoke test successful. QSV is available.")
+        _qsv_availability_cache[ffmpeg_path] = True
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.warning(
+            "h264_qsv smoke test failed. QSV is not available or not configured correctly. Falling back to CPU."
+        )
+        logger.debug(f"FFmpeg stderr for QSV smoke test:\n{e.stderr}")
+        _qsv_availability_cache[ffmpeg_path] = False
+        return False
+    except Exception as e:
+        logger.warning("h264_qsv smoke test failed unexpectedly: %s", e)
+        _qsv_availability_cache[ffmpeg_path] = False
+        return False
 
 
 async def has_cuda_filters(ffmpeg_path: str = "ffmpeg") -> bool:
@@ -689,19 +733,29 @@ async def get_hardware_encoder_kind(ffmpeg_path: str = "ffmpeg") -> Optional[str
     encs = await _list_encoders(ffmpeg_path)
 
     # 次にQSV
-    if " h264_qsv " in f" {encs} " or " hevc_qsv " in f" {encs} ":
+    if (
+        (" h264_qsv " in f" {encs} " or " hevc_qsv " in f" {encs} ")
+        and await is_qsv_available(ffmpeg_path)
+    ):
         return "qsv"
 
     # VAAPI
-    if " h264_vaapi " in f" {encs} " or " hevc_vaapi " in f" {encs} ":
+    if (
+        (" h264_vaapi " in f" {encs} " or " hevc_vaapi " in f" {encs} ")
+        and os.path.exists("/dev/dri")
+    ):
         return "vaapi"
 
     # Apple
     if " h264_videotoolbox " in f" {encs} " or " hevc_videotoolbox " in f" {encs} ":
         return "videotoolbox"
 
-    # AMD AMF（主にWindows）
-    if " h264_amf " in f" {encs} " or " hevc_amf " in f" {encs} ":
+    # AMD AMF is mainly usable on Windows. Some Linux FFmpeg builds list the
+    # encoder even when the AMF runtime library is unavailable, so do not
+    # auto-select it there.
+    if os.name == "nt" and (
+        " h264_amf " in f" {encs} " or " hevc_amf " in f" {encs} "
+    ):
         return "amf"
 
     return None
