@@ -156,6 +156,7 @@ background:
 
 ```yaml
 subtitle:
+  render_mode: png          # png / auto / ass
   font_path: /path/to/font.ttf
   size: 48
   color: "white"
@@ -173,8 +174,11 @@ subtitle:
 - ルート `subtitle` でフォントパスや文字数制御など全体の既定値をまとめます。例: [`sample.yaml`](./sample.yaml)。
 - `max_chars_per_line: auto` を使うと、実際のフォント幅と `max_pixel_width` から字幕ごとに折り返し文字数を推定します。空白のない日本語字幕向けです。
 - `subtitle.background.show: false` で字幕ボックスを非表示にできます。`color` と `opacity` で色と透過率を調整します。
-- 字幕の描画方式は内部で自動選択されます。背景色・透過率だけの軽いボックスは `ASS/libass`、角丸・枠線・背景画像・字幕エフェクトを使う装飾付き字幕は `PNG` で描画されます。
-- `ASS` の背景ボックスは仕様上、独立した枠線色を持てません。枠線や角丸を確実に反映したい場合は、該当の装飾を指定すると自動で `PNG` 側が使われます。サンプル: [`sample_subtitle_styles.yaml`](./sample_subtitle_styles.yaml)。
+- `subtitle.render_mode` で動画への字幕焼き込み方式を指定できます。既定は `png` です。
+- `render_mode: png` は全字幕をPNGで焼き込みます。角丸・枠線・背景画像・字幕エフェクトなどの見た目を優先する通常モードです。
+- `render_mode: auto` は、背景色・透過率だけの軽いボックスを `ASS/libass`、背景画像・字幕エフェクトなどPNG必須の字幕を `PNG` で描画します。
+- `render_mode: ass` は可能な限り `ASS/libass` を使います。ただし背景画像や字幕エフェクトなどASSで表現できない装飾がある場合は、安全側で `PNG` にフォールバックします。
+- `ASS` の背景ボックスは仕様上、独立した枠線色や角丸をPNGと同じ見た目で再現できません。見た目を優先する場合は `png`、速度検証や軽量字幕では `auto` / `ass` を使います。サンプル: [`sample_subtitle_styles.yaml`](./sample_subtitle_styles.yaml), [`sample_subtitle_render_modes.yaml`](./sample_subtitle_render_modes.yaml)。
 - 行ごとの `subtitle` ブロックで色や余白などを一時的に上書き可能です。
 - `defaults.characters.<name>.subtitle` で話者ごとの字幕色や縁色を既定化できます。例: [`sample_markdown.md`](./sample_markdown.md)。
 - 字幕PNGだけ改行したい場合は `subtitle_text` に `"行1\n行2"` を設定します。読み仮名は `reading` で別途管理できます。

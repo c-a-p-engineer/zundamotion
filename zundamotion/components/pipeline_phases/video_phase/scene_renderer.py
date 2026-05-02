@@ -980,7 +980,7 @@ class SceneRenderer:
         pbar_scenes = self.pbar_scenes
         scene_hash_data = {
             **self.scene_hash_data,
-            "scene_render_version": "20260327_ass_fast_v1",
+            "scene_render_version": "20260502_subtitle_render_mode_v1",
         }
 
         scene_cp = bool(
@@ -1306,8 +1306,28 @@ class SceneRenderer:
                     )
                     # ベースに取り込んだ静的オーバーレイの種類は per-line で個別に除外処理
                 else:
-                    scene_base_path = await self.video_renderer.render_scene_base(
-                        bg_config_for_base, scene_duration, scene_base_filename
+                    shared_base_key_data = {
+                        "type": "shared_scene_base",
+                        "version": "20260502_v1",
+                        "background_config": bg_config_for_base,
+                        "duration": round(float(scene_duration), 3),
+                        "video_params": self.video_params.__dict__,
+                        "audio_params": self.audio_params.__dict__,
+                        "hw_kind": self.hw_kind,
+                    }
+
+                    async def shared_base_creator(output_path: Path) -> Path:
+                        return await self.video_renderer.render_scene_base(
+                            bg_config_for_base,
+                            scene_duration,
+                            output_path.stem,
+                        )
+
+                    scene_base_path = await self.cache_manager.get_or_create(
+                        key_data=shared_base_key_data,
+                        file_name="scene_base_shared",
+                        extension="mp4",
+                        creator_func=shared_base_creator,
                     )
                 if scene_base_path:
                     logger.info(
@@ -2067,7 +2087,11 @@ class SceneRenderer:
                     )
             scene_results.append(scene_output_path)
 
-        if scene_base_path and scene_base_path.exists():
+        if (
+            scene_base_path
+            and scene_base_path.exists()
+            and self.cache_manager.cache_dir.resolve() not in scene_base_path.resolve().parents
+        ):
             try:
                 scene_base_path.unlink()
                 logger.debug(

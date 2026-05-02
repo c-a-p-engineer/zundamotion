@@ -1,0 +1,99 @@
+meta:
+  title: "字幕レンダリング方式サンプル"
+  version: 1
+
+video:
+  width: 1280
+  height: 720
+  fps: 30
+
+defaults:
+  characters_persist: true
+  characters:
+    copetan:
+      speaker_id: 3
+      position: {x: -430, y: 480}
+      scale: 0.7
+      anchor: bottom_center
+      mouth_sync: true
+
+subtitle:
+  render_mode: png
+  font_size: 42
+  max_chars_per_line: 22
+  y: h-86-text_h/2
+  font_color: "#FFFFFF"
+  stroke_color: "#202020"
+  background:
+    show: true
+    color: "#111111"
+    opacity: 0.72
+    radius: 24
+    border_color: "#FFFFFF"
+    border_width: 3
+    border_opacity: 0.65
+    padding: {left: 48, right: 48, top: 18, bottom: 18}
+
+scenes:
+  - id: png_default
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "既定はPNG字幕です。角丸や枠線を含めて、見た目を優先します。"
+        speaker_name: "copetan"
+        subtitle:
+          render_mode: png
+
+      - text: "通常動画では、このPNG字幕を基準の見え方にします。"
+        speaker_name: "copetan"
+
+  - id: auto_simple_ass
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "autoでは、軽い字幕ボックスならASSで高速に焼き込みます。"
+        speaker_name: "copetan"
+        subtitle:
+          render_mode: auto
+          background:
+            show: true
+            color: "#0041FF"
+            opacity: 0.75
+            radius: 0
+            padding: 0
+            border_width: 0
+
+      - text: "ASSは高速ですが、表現できる装飾には制限があります。"
+        speaker_name: "copetan"
+        subtitle:
+          render_mode: auto
+          background:
+            show: true
+            color: "#111111"
+            opacity: 0.35
+            radius: 0
+            padding: 0
+            border_width: 0
+
+  - id: auto_decorated_png
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "autoでも、背景画像や字幕エフェクトが必要な場合はPNGへ戻します。"
+        speaker_name: "copetan"
+        subtitle:
+          render_mode: auto
+          background:
+            show: true
+            image: "assets/bg/room.png"
+            opacity: 0.6
+            radius: 40
+            border_color: "#FFFFFF"
+            border_width: 4
+            padding: {x: 56, y: 24}
+
+      - text: "assを指定しても、PNG必須の装飾は安全側でPNGになります。"
+        speaker_name: "copetan"
+        subtitle:
+          render_mode: ass
+          effects:
+            - type: text:bounce_text
+              amplitude: 8
+              frequency: 1.6

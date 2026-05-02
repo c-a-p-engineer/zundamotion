@@ -31,6 +31,7 @@ class DummyOverlayRenderer(OverlayMixin):
         self.subtitle_gen = SubtitleGenerator(
             {
                 "subtitle": {
+                    "render_mode": "ass",
                     "font_path": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
                     "font_size": 32,
                     "font_color": "white",

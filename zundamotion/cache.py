@@ -116,23 +116,31 @@ class CacheManager:
         sorted_data = json.dumps(data, sort_keys=True, cls=PathEncoder).encode("utf-8")
         return hashlib.sha256(sorted_data).hexdigest()
 
+    def _media_probe_cache_key_data(self, file_path: Path, operation: str) -> Dict[str, Any]:
+        """Build a stable cache key for media probing.
+
+        Temporary directories change between runs, so duration/media-info keys should
+        not depend on absolute paths or mtimes for generated intermediates.  Use the
+        file name and size as the stable identity; generated cache files already carry
+        content hashes in their names.
+        """
+        stat = file_path.stat()
+        return {
+            "file_name": file_path.name,
+            "file_size": stat.st_size,
+            "operation": operation,
+            "version": "20260502_stable_probe_key_v1",
+        }
+
+    def _probe_meta_path(self, prefix: str, cache_key: str) -> Path:
+        base_dir = self.ephemeral_dir if self.no_cache and self.ephemeral_dir else self.cache_dir
+        return base_dir / f"{prefix}_{cache_key}.json"
+
     async def get_or_create_media_info(self, file_path: Path) -> MediaInfo:
         """メディアのメタ情報を取得しキャッシュする。"""
-        key_data = {
-            "file_path": str(file_path.resolve()),
-            "file_size": file_path.stat().st_size,
-            "file_mtime": file_path.stat().st_mtime,
-            "operation": "media_info",
-        }
+        key_data = self._media_probe_cache_key_data(file_path, "media_info")
         cache_key = self._generate_hash(key_data)
-        cached_meta_path = self.cache_dir / f"info_{cache_key}.json"
-
-        if self.no_cache:
-            logger.debug(
-                f"Cache disabled. Getting duration for {file_path.name} directly."
-            )
-            duration = await get_media_duration(str(file_path))
-            return duration
+        cached_meta_path = self._probe_meta_path("info", cache_key)
 
         await self._refresh_cached_path_once(
             f"media_info:{cache_key}",
@@ -144,48 +152,37 @@ class CacheManager:
             try:
                 with open(cached_meta_path, "r", encoding="utf-8") as f:
                     meta = json.load(f)
-                duration = meta["duration"]
+                info = meta["media_info"]
                 logger.info(
-                    f"Cache HIT for duration of {file_path.name} (key: {cache_key[:8]}) -> {duration:.2f}s"
+                    f"Cache HIT for media info of {file_path.name} (key: {cache_key[:8]})"
                 )
-                return duration
+                return info
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning(
-                    f"Corrupted duration cache for {file_path.name}: {e}. Regenerating."
+                    f"Corrupted media info cache for {file_path.name}: {e}. Regenerating."
                 )
                 cached_meta_path.unlink(missing_ok=True)
 
         logger.info(
-            f"Cache MISS for duration of {file_path.name} (key: {cache_key[:8]}). Generating..."
+            f"Cache MISS for media info of {file_path.name} (key: {cache_key[:8]}). Generating..."
         )
         try:
-            duration = await get_media_duration(str(file_path))
+            info = await get_media_info(str(file_path))
             with open(cached_meta_path, "w", encoding="utf-8") as f:
-                json.dump({"duration": duration, "created_at": time.time()}, f)
-            logger.debug(f"Cached duration for {file_path.name} -> {duration:.2f}s")
-            self._clean_cache()
-            return duration
+                json.dump({"media_info": info, "created_at": time.time()}, f)
+            logger.debug(f"Cached media info for {file_path.name}")
+            if not self.no_cache:
+                self._clean_cache()
+            return info
         except Exception as e:
             raise CacheError(
-                f"Failed to get or cache media duration for {file_path.name}: {e}"
+                f"Failed to get or cache media info for {file_path.name}: {e}"
             )
     async def get_or_create_media_duration(self, file_path: Path) -> float:
         """メディアの再生時間を取得しキャッシュする。"""
-        key_data = {
-            "file_path": str(file_path.resolve()),
-            "file_size": file_path.stat().st_size,
-            "file_mtime": file_path.stat().st_mtime,
-            "operation": "media_duration",
-        }
+        key_data = self._media_probe_cache_key_data(file_path, "media_duration")
         cache_key = self._generate_hash(key_data)
-        cached_meta_path = self.cache_dir / f"duration_{cache_key}.json"
-
-        if self.no_cache:
-            logger.debug(
-                f"Cache disabled. Getting duration for {file_path.name} directly."
-            )
-            duration = await get_media_duration(str(file_path))
-            return duration
+        cached_meta_path = self._probe_meta_path("duration", cache_key)
 
         await self._refresh_cached_path_once(
             f"media_duration:{cache_key}",
@@ -216,7 +213,8 @@ class CacheManager:
             with open(cached_meta_path, "w", encoding="utf-8") as f:
                 json.dump({"duration": duration, "created_at": time.time()}, f)
             logger.debug(f"Cached duration for {file_path.name} -> {duration:.2f}s")
-            self._clean_cache()
+            if not self.no_cache:
+                self._clean_cache()
             return duration
         except Exception as e:
             raise CacheError(

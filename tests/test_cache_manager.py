@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 
+import zundamotion.cache as cache_module
 from zundamotion.cache import CacheManager
 
 
@@ -80,3 +81,29 @@ def test_get_cached_path_respects_cache_refresh(tmp_path: Path) -> None:
 
     assert resolved is None
     assert not cached_path.exists()
+
+
+def test_no_cache_reuses_duration_within_ephemeral_dir(tmp_path: Path, monkeypatch) -> None:
+    async def _run() -> None:
+        media = tmp_path / "clip.mp4"
+        media.write_bytes(b"fake-media")
+        cache = CacheManager(tmp_path / "cache", no_cache=True)
+        cache.set_ephemeral_dir(tmp_path / "ephemeral")
+        calls = 0
+
+        async def fake_get_media_duration(_path: str) -> float:
+            nonlocal calls
+            calls += 1
+            return 12.34
+
+        monkeypatch.setattr(cache_module, "get_media_duration", fake_get_media_duration)
+
+        first = await cache.get_or_create_media_duration(media)
+        second = await cache.get_or_create_media_duration(media)
+
+        assert first == second == 12.34
+        assert calls == 1
+        assert list((tmp_path / "ephemeral").glob("duration_*.json"))
+        assert not list((tmp_path / "cache").glob("duration_*.json"))
+
+    asyncio.run(_run())

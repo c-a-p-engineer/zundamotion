@@ -126,33 +126,42 @@ class VideoRenderer(OverlayMixin):
     ):
         ffmpeg_path = config.get("ffmpeg_path", "ffmpeg")
         vcfg = config.get("video", {}) if isinstance(config, dict) else {}
+        cpu_filter_mode = get_hw_filter_mode() == "cpu"
         # フィルタ存在チェックに加えて実行スモークテストで確度を上げる
-        has_cuda_filters_listed = await has_cuda_filters(ffmpeg_path)
-        has_cuda_filters_val = (
-            has_cuda_filters_listed and (await smoke_test_cuda_filters(ffmpeg_path))
-        )
-        # Scale-only capability (allows hybrid GPU scale in CPU overlay mode)
-        has_gpu_scale_val = await has_gpu_scale_filters(ffmpeg_path)
-        # GPU scale-only smoke (for conditional allow under CPU mode)
-        try:
-            scale_only_ok = await smoke_test_cuda_scale_only(ffmpeg_path)
-        except Exception:
+        if cpu_filter_mode:
+            has_cuda_filters_listed = False
+            has_cuda_filters_val = False
+            has_gpu_scale_val = False
             scale_only_ok = False
+        else:
+            has_cuda_filters_listed = await has_cuda_filters(ffmpeg_path)
+            has_cuda_filters_val = (
+                has_cuda_filters_listed and (await smoke_test_cuda_filters(ffmpeg_path))
+            )
+            # Scale-only capability (allows hybrid GPU scale in CPU overlay mode)
+            has_gpu_scale_val = await has_gpu_scale_filters(ffmpeg_path)
+            # GPU scale-only smoke (for conditional allow under CPU mode)
+            try:
+                scale_only_ok = await smoke_test_cuda_scale_only(ffmpeg_path)
+            except Exception:
+                scale_only_ok = False
         # Try OpenCL as alternative backend when CUDA is not available/disabled
         from ..utils.ffmpeg_capabilities import (
             has_opencl_filters,
             smoke_test_opencl_filters,
         )
         opencl_ok = False
-        allow_opencl_cpu = bool(config.get("video", {}).get("allow_opencl_overlay_in_cpu_mode", False))
-        if not has_cuda_filters_val and (get_hw_filter_mode() != "cpu" or allow_opencl_cpu):
+        allow_opencl_cpu = False if cpu_filter_mode else bool(
+            config.get("video", {}).get("allow_opencl_overlay_in_cpu_mode", False)
+        )
+        if not has_cuda_filters_val and (not cpu_filter_mode or allow_opencl_cpu):
             try:
                 if await has_opencl_filters(ffmpeg_path):
                     opencl_ok = await smoke_test_opencl_filters(ffmpeg_path)
             except Exception:
                 opencl_ok = False
         # GPUスケールフィルタの優先名を決定
-        scale_filter = await get_preferred_cuda_scale_filter(ffmpeg_path)
+        scale_filter = "scale_cuda" if cpu_filter_mode else await get_preferred_cuda_scale_filter(ffmpeg_path)
         # Respect global HW filter mode (process-wide backoff)
         # Keep detection result even if global mode is 'cpu' so that
         # hybrid 'GPU scale only' path can still leverage CUDA when allowed
@@ -188,17 +197,18 @@ class VideoRenderer(OverlayMixin):
         except Exception:
             pass
         # Decide overlay backend
-        if (get_hw_filter_mode() != "cpu") or allow_opencl_cpu:
+        if (not cpu_filter_mode) or allow_opencl_cpu:
             if has_cuda_filters_val and hw_kind == "nvenc":
                 inst.gpu_overlay_backend = "cuda"
             elif opencl_ok:
                 inst.gpu_overlay_backend = "opencl"
         # Decide scale-only backend (allowed also in CPU mode when smoke passed)
         opencl_scale_only_ok = False
-        try:
-            opencl_scale_only_ok = await smoke_test_opencl_scale_only(ffmpeg_path)
-        except Exception:
-            opencl_scale_only_ok = False
+        if (not cpu_filter_mode) or allow_opencl_cpu:
+            try:
+                opencl_scale_only_ok = await smoke_test_opencl_scale_only(ffmpeg_path)
+            except Exception:
+                opencl_scale_only_ok = False
         if inst.cuda_scale_only_ok:
             inst.scale_only_backend = "cuda"
         elif opencl_scale_only_ok:
@@ -248,7 +258,10 @@ class VideoRenderer(OverlayMixin):
         )
         # Emit a one-shot diagnostics table for filters/smokes
         try:
-            diag = await get_filter_diagnostics(ffmpeg_path)
+            diag = await get_filter_diagnostics(
+                ffmpeg_path,
+                include_opencl_smokes=(not cpu_filter_mode) or allow_opencl_cpu,
+            )
             pres = diag.get("present", {})
             smo = diag.get("smokes", {})
             logger.info(

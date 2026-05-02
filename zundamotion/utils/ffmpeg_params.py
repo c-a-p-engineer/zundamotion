@@ -7,6 +7,61 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 
+def normalize_preset_for_encoder(preset: str, hw_kind: Optional[str] = None) -> str:
+    """Map common x264/NVENC presets to values accepted by the selected encoder."""
+    value = str(preset or "").strip().lower()
+    if not value:
+        return "p4" if hw_kind == "nvenc" else "medium"
+
+    if hw_kind == "nvenc":
+        if value in {
+            "default",
+            "slow",
+            "medium",
+            "fast",
+            "hp",
+            "hq",
+            "bd",
+            "ll",
+            "llhq",
+            "llhp",
+            "lossless",
+            "losslesshp",
+            "p1",
+            "p2",
+            "p3",
+            "p4",
+            "p5",
+            "p6",
+            "p7",
+        }:
+            return value
+        mapping = {
+            "ultrafast": "p1",
+            "superfast": "p1",
+            "veryfast": "p2",
+            "faster": "p2",
+            "medium": "p4",
+            "slow": "p5",
+            "slower": "p6",
+            "veryslow": "p7",
+        }
+        return mapping.get(value, "p4")
+
+    if value.startswith("p"):
+        mapping = {
+            "p1": "ultrafast",
+            "p2": "veryfast",
+            "p3": "faster",
+            "p4": "medium",
+            "p5": "slow",
+            "p6": "slower",
+            "p7": "veryslow",
+        }
+        return mapping.get(value, "medium")
+    return value
+
+
 @dataclass
 class VideoParams:
     """映像エンコードの設定値を保持する。"""
@@ -36,7 +91,7 @@ class VideoParams:
 
         if hw_kind == "nvenc":
             opts.extend(["-c:v", "h264_nvenc"])
-            opts.extend(["-preset", self.preset])
+            opts.extend(["-preset", normalize_preset_for_encoder(self.preset, hw_kind)])
             if self.cq is not None:
                 opts.extend(["-cq", str(self.cq)])
             elif self.bitrate_kbps is not None:
@@ -80,19 +135,7 @@ class VideoParams:
                 opts.extend(["-b:v", "5M"])
         else:  # CPU
             opts.extend(["-c:v", "libx264"])
-            preset = self.preset
-            if isinstance(preset, str) and preset.startswith("p"):
-                mapping = {
-                    "p7": "ultrafast",
-                    "p6": "veryfast",
-                    "p5": "medium",
-                    "p4": "slow",
-                    "p3": "slower",
-                    "p2": "veryslow",
-                    "p1": "veryslow",
-                }
-                preset = mapping.get(preset, "medium")
-            opts.extend(["-preset", preset])
+            opts.extend(["-preset", normalize_preset_for_encoder(self.preset, hw_kind)])
             if self.crf is not None:
                 opts.extend(["-crf", str(self.crf)])
             elif self.bitrate_kbps is not None:

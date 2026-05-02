@@ -1,3 +1,7 @@
+1. **NVENC preset正規化と静的字幕ASS既定化** (完了日: 2026-05-01)  
+   - 完了内容: `h264_nvenc` に `veryfast` などの x264 系 preset を渡さないよう、エンコーダ別 preset 正規化を追加。`quality=speed` の NVENC preset を `p7` から `p1` に修正し、`hw_encoder=cpu` では不要な NVENC probe を避けるようにした。静的な字幕背景は基本 `ASS/libass` にし、PNG は字幕エフェクトや背景画像が必要な場合に限定。  
+   - メモ: `agile/002_agile-manifesto` では CPU 固定・キャッシュ有効再生成が `1045s -> 416s`。一方で `--hw-encoder auto` は Hybrid path の `main_52` で停止したため、GPU auto の安定化は未完了タスクとして残す。
+
 1. **字幕の自動折り返し推定とキャラクター別字幕スタイル例の追加** (完了日: 2026-03-10)  
    - 完了内容: `subtitle.max_chars_per_line: auto` で `max_pixel_width` とフォント実測幅から字幕ごとの折り返し文字数を推定するようにした。`sample_markdown.md` では左右下寄せの立ち位置と、キャラクター別 `subtitle` 色設定も追加。  
    - メモ: 既存の `wrap_mode: chars` / 数値指定も後方互換のまま維持。

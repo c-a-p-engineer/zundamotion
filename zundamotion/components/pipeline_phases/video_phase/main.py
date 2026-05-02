@@ -137,6 +137,17 @@ class VideoPhase:
         except Exception:
             return 1
 
+    @staticmethod
+    def _resolve_effective_hw_kind(
+        hw_encoder: str,
+        hw_kind: Optional[str],
+        filter_mode: str,
+    ) -> Optional[str]:
+        """AutoTune が CPU フィルタ固定なら auto の NVENC も CPU へ寄せる。"""
+        if hw_encoder == "auto" and hw_kind == "nvenc" and filter_mode == "cpu":
+            return None
+        return hw_kind
+
     @classmethod
     async def create(
         cls,
@@ -148,25 +159,6 @@ class VideoPhase:
     ):
         hw_kind = await get_hw_encoder_kind_for_video_params(
             hw_encoder=hw_encoder
-        )
-        video_params = VideoParams(
-            width=config.get("video", {}).get("width", 1920),
-            height=config.get("video", {}).get("height", 1080),
-            fps=config.get("video", {}).get("fps", 30),
-            pix_fmt=config.get("video", {}).get("pix_fmt", "yuv420p"),
-            profile=config.get("video", {}).get("profile", "high"),
-            level=config.get("video", {}).get("level", "4.2"),
-            preset=config.get("video", {}).get(
-                "preset", "p5" if hw_kind == "nvenc" else "veryfast"
-            ),
-            cq=config.get("video", {}).get("cq", 23),
-            crf=config.get("video", {}).get("crf", 23),
-        )
-        audio_params = AudioParams(
-            sample_rate=config.get("video", {}).get("audio_sample_rate", 48000),
-            channels=config.get("video", {}).get("audio_channels", 2),
-            codec=config.get("video", {}).get("audio_codec", "libmp3lame"),
-            bitrate_kbps=config.get("video", {}).get("audio_bitrate_kbps", 192),
         )
         # AutoTune hint: early backoff（clip_workers 決定前に適用）
         hint_path = cache_manager.cache_dir / "autotune_hint.json"
@@ -207,6 +199,36 @@ class VideoPhase:
                             pass
         except Exception:
             pass
+
+        effective_hw_kind = cls._resolve_effective_hw_kind(
+            hw_encoder, hw_kind, get_hw_filter_mode()
+        )
+        if effective_hw_kind != hw_kind:
+            logger.info(
+                "[AutoTune] CPU filter mode active with --hw-encoder auto; "
+                "using CPU encoder to avoid slow mixed CPU-filter/NVENC path."
+            )
+            hw_kind = effective_hw_kind
+
+        video_params = VideoParams(
+            width=config.get("video", {}).get("width", 1920),
+            height=config.get("video", {}).get("height", 1080),
+            fps=config.get("video", {}).get("fps", 30),
+            pix_fmt=config.get("video", {}).get("pix_fmt", "yuv420p"),
+            profile=config.get("video", {}).get("profile", "high"),
+            level=config.get("video", {}).get("level", "4.2"),
+            preset=config.get("video", {}).get(
+                "preset", "p5" if hw_kind == "nvenc" else "veryfast"
+            ),
+            cq=config.get("video", {}).get("cq", 23),
+            crf=config.get("video", {}).get("crf", 23),
+        )
+        audio_params = AudioParams(
+            sample_rate=config.get("video", {}).get("audio_sample_rate", 48000),
+            channels=config.get("video", {}).get("audio_channels", 2),
+            codec=config.get("video", {}).get("audio_codec", "libmp3lame"),
+            bitrate_kbps=config.get("video", {}).get("audio_bitrate_kbps", 192),
+        )
 
         # jobs/hw_kind から clip_workers を算出して VideoRenderer に伝搬
         pre_clip_workers = cls._determine_clip_workers(jobs, hw_kind)

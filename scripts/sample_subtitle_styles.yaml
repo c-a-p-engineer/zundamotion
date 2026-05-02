@@ -8,6 +8,9 @@ defaults:
     copetan:
       speaker_id: 3
 
+subtitle:
+  render_mode: auto
+
 scenes:
   - id: subtitle_styles_basic
     bg: "assets/bg/room.png"

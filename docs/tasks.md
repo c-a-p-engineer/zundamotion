@@ -8,6 +8,16 @@
 
 ## タスク一覧
 
+1. **FinalizePhaseのトランジション部分再エンコード化** (優先度: P0)
+   - 詳細: 現状の dissolve transition は長い動画全体を再エンコードし、`agile/002_agile-manifesto` で `FinalizePhase: 300.64s` まで膨らんだ。
+   - 実装イメージ: トランジション前後の短い区間だけを再エンコードし、前半・トランジション区間・後半を `-c copy` で連結する。音声も transition 区間だけ acrossfade し、残りは copy できる構成にする。
+   - 補足: まず dissolve だけ対応し、同じ台本で `FinalizePhase` と最終動画尺を比較する。境界の音ズレと黒フレームを重点確認。
+
+2. **NVENC autoのHybrid path停止対策** (優先度: P0)
+   - 詳細: `--hw-encoder auto` で `GPU scale + CPU overlay` の Hybrid path になり、`agile/002_agile-manifesto` の `main_52` で ffmpeg が `size:1.0MB` のまま 3 分以上進まなかった。
+   - 実装イメージ: GPU overlay まで完全に使えない場合は CPU に倒す、または実クリップの進捗監視で一定時間サイズ/フレームが進まなければ CPU fallback する。
+   - 補足: NVENC preset 正規化は実装済み。残課題は preset エラーではなく Hybrid path の安定性と実効速度。
+
 1. **zoompan単体実装** (優先度: P0)
    - 詳細: `clips[].kenburns`に依存しないzoompanフィルタ適用を整備し、ズーム/パンを単体で検証できるようにする。
    - 実装イメージ: IRにzoompan設定を追加し、filter_complexに単独のzoompanフィルタを組み立てる。挙動確認用に短尺クリップのサンプルをscriptsへ追加。

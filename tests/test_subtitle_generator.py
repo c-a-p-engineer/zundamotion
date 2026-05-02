@@ -61,7 +61,7 @@ def test_build_subtitle_overlay_accepts_numeric_subtitle_xy(tmp_path):
     assert "overlay=x='48':y='96'" in snippet
 
 
-def test_resolve_render_mode_for_line_configs_uses_ass_for_simple_auto(tmp_path):
+def test_resolve_render_mode_for_line_configs_defaults_to_png_for_simple_style(tmp_path):
     generator = SubtitleGenerator(
         {"subtitle": {"background": {"show": True, "color": "#000000"}}},
         CacheManager(tmp_path / "cache"),
@@ -71,6 +71,42 @@ def test_resolve_render_mode_for_line_configs_uses_ass_for_simple_auto(tmp_path)
         [
             {"subtitle": {"background": {"show": True, "color": "#0041FF", "opacity": 0.7}}},
             {"subtitle": {"color": "#7CFF4F"}},
+        ]
+    )
+
+    assert mode == "png"
+
+
+def test_resolve_render_mode_for_line_configs_auto_uses_ass_for_simple_style(tmp_path):
+    generator = SubtitleGenerator(
+        {"subtitle": {"render_mode": "auto", "background": {"show": True, "color": "#000000"}}},
+        CacheManager(tmp_path / "cache"),
+    )
+
+    mode = generator.resolve_render_mode_for_line_configs(
+        [
+            {"subtitle": {"background": {"show": True, "color": "#0041FF", "opacity": 0.7}}},
+            {"subtitle": {"color": "#7CFF4F"}},
+        ]
+    )
+
+    assert mode == "ass"
+
+
+def test_resolve_render_mode_for_line_configs_line_auto_overrides_root_png(tmp_path):
+    generator = SubtitleGenerator(
+        {"subtitle": {"render_mode": "png", "background": {"show": True, "color": "#000000"}}},
+        CacheManager(tmp_path / "cache"),
+    )
+
+    mode = generator.resolve_render_mode_for_line_configs(
+        [
+            {
+                "subtitle": {
+                    "render_mode": "auto",
+                    "background": {"show": True, "color": "#0041FF", "opacity": 0.7},
+                }
+            }
         ]
     )
 
@@ -95,6 +131,71 @@ def test_resolve_render_mode_for_line_configs_uses_png_when_background_is_decora
                 }
             }
         ]
+    )
+
+    assert mode == "png"
+
+
+def test_resolve_render_mode_for_line_configs_auto_uses_png_when_background_is_decorated(tmp_path):
+    generator = SubtitleGenerator(
+        {"subtitle": {"render_mode": "auto"}},
+        CacheManager(tmp_path / "cache"),
+    )
+
+    mode = generator.resolve_render_mode_for_line_configs(
+        [
+            {
+                "subtitle": {
+                    "background": {
+                        "show": True,
+                        "color": "#0041FF",
+                        "radius": 24,
+                    }
+                }
+            }
+        ]
+    )
+
+    assert mode == "png"
+
+
+def test_resolve_render_mode_for_line_configs_ignores_legacy_prefer_ass_option(tmp_path):
+    generator = SubtitleGenerator(
+        {
+            "subtitle": {
+                "prefer_ass_for_static_background": True,
+                "background": {"show": True, "color": "#000000", "radius": 24},
+            }
+        },
+        CacheManager(tmp_path / "cache"),
+    )
+
+    mode = generator.resolve_render_mode_for_line_configs([{"subtitle": {}}])
+
+    assert mode == "png"
+
+
+def test_resolve_render_mode_for_line_configs_ass_falls_back_to_png_for_image_background(tmp_path):
+    generator = SubtitleGenerator(
+        {"subtitle": {"render_mode": "ass"}},
+        CacheManager(tmp_path / "cache"),
+    )
+
+    mode = generator.resolve_render_mode_for_line_configs(
+        [{"subtitle": {"background": {"show": True, "image_path": "subtitle-bg.png"}}}]
+    )
+
+    assert mode == "png"
+
+
+def test_resolve_render_mode_for_line_configs_uses_png_when_background_image_is_present(tmp_path):
+    generator = SubtitleGenerator(
+        {"subtitle": {}},
+        CacheManager(tmp_path / "cache"),
+    )
+
+    mode = generator.resolve_render_mode_for_line_configs(
+        [{"subtitle": {"background": {"show": True, "image_path": "subtitle-bg.png"}}}]
     )
 
     assert mode == "png"

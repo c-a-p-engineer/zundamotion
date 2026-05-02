@@ -32,14 +32,36 @@ def _guess_ffmpeg_output_path(args: List[str]) -> Optional[Path]:
 
 def _format_progress_size(path: Optional[Path]) -> str:
     if path is None:
-        return "output=unknown"
+        return "size:unknown"
     try:
         if not path.exists():
-            return f"output={path.name} pending"
+            return "size:pending"
         size = path.stat().st_size
-        return f"output={path.name} size={size / (1024 * 1024):.1f}MB"
+        return f"size:{size / (1024 * 1024):.1f}MB"
     except Exception:
-        return f"output={path.name} status=unavailable"
+        return "size:unavailable"
+
+
+def _format_seconds(value: Optional[float]) -> str:
+    if value is None:
+        return "--"
+    seconds = max(0, int(round(value)))
+    minutes, sec = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{sec:02d}"
+    if minutes:
+        return f"{minutes:d}:{sec:02d}"
+    return f"{sec:d}s"
+
+
+def _progress_percent(elapsed: float, eta: Optional[float]) -> Optional[float]:
+    if eta is None:
+        return None
+    total = elapsed + eta
+    if total <= 0:
+        return None
+    return max(0.0, min(99.9, elapsed / total * 100.0))
 
 
 def _estimate_eta_seconds(
@@ -87,15 +109,17 @@ async def _log_ffmpeg_heartbeat(
             break
         elapsed = time.monotonic() - started_at
         eta, last_size, last_at = _estimate_eta_seconds(output_path, last_size, last_at)
-        eta_str = ""
-        if eta is not None:
-            eta_str = f" eta~{eta:.0f}s"
+        now_str = time.strftime("%H:%M:%S")
+        eta_str = f"ETA:{_format_seconds(eta)}"
+        pct = _progress_percent(elapsed, eta)
+        pct_str = f"{pct:5.1f}%" if pct is not None else "  --.-%"
         logger.info(
-            "[FFmpeg Progress] pid=%s exe=%s elapsed=%.1fs%s %s",
+            "%s | pid:%-5s | +%-5s | %s | %s | %s",
+            now_str,
             process.pid,
-            base,
-            elapsed,
+            _format_seconds(elapsed),
             eta_str,
+            f"pct:{pct_str}",
             _format_progress_size(output_path),
         )
 

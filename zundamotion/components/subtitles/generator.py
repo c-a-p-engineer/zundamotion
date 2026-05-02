@@ -105,8 +105,26 @@ class SubtitleGenerator:
         return style
 
     def subtitle_render_mode(self) -> str:
-        # Rendering mode is selected internally from subtitle styling.
-        return "auto"
+        mode = str(self.subtitle_config.get("render_mode", "png") or "png").strip().lower()
+        if mode in {"png", "ass", "auto"}:
+            return mode
+        logger.warning(
+            "Unknown subtitle.render_mode=%r. Falling back to PNG rendering.",
+            mode,
+        )
+        return "png"
+
+    @staticmethod
+    def _normalize_render_mode(value: Any, default: str = "png") -> str:
+        mode = str(value or default).strip().lower()
+        if mode in {"png", "ass", "auto"}:
+            return mode
+        logger.warning(
+            "Unknown subtitle.render_mode=%r. Falling back to %s rendering.",
+            mode,
+            default,
+        )
+        return default
 
     @staticmethod
     def _has_subtitle_effects(style: Dict[str, Any]) -> bool:
@@ -135,14 +153,11 @@ class SubtitleGenerator:
 
         if background_cfg.get("image") or background_cfg.get("image_path"):
             return True
-        if self._background_metric(
-            background_cfg.get("radius", background_cfg.get("corner_radius", 0))
-        ) > 0:
+        if self._background_metric(background_cfg.get("radius")) > 0:
             return True
-        if self._background_metric(background_cfg.get("border_width", 0)) > 0:
+        if self._background_metric(background_cfg.get("border_width")) > 0:
             return True
-        padding_value = background_cfg.get("padding", normalized.get("box_padding"))
-        if any(_normalize_padding(padding_value, 0)):
+        if any(_normalize_padding(background_cfg.get("padding"), 0)):
             return True
         return False
 
@@ -150,11 +165,25 @@ class SubtitleGenerator:
         self,
         line_configs: Iterable[Dict[str, Any] | None],
     ) -> str:
+        default_mode = self.subtitle_render_mode()
+        saw_ass_capable = False
         for line_config in line_configs:
             style = self.resolve_subtitle_style(line_config or {})
-            if self.style_requires_png(style):
+            mode = self._normalize_render_mode(style.get("render_mode"), default_mode)
+            if mode == "png":
                 return "png"
-        return "ass"
+            if self.style_requires_png(style):
+                if mode == "ass":
+                    logger.info(
+                        "subtitle.render_mode=ass requested, but this subtitle style requires PNG. Falling back to PNG."
+                    )
+                return "png"
+            if mode in {"ass", "auto"}:
+                saw_ass_capable = True
+
+        if saw_ass_capable:
+            return "ass"
+        return default_mode
 
     def resolve_render_mode_for_subtitles(
         self,

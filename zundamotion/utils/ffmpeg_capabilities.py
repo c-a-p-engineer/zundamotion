@@ -692,7 +692,12 @@ async def smoke_test_opencl_scale_only(ffmpeg_path: str = "ffmpeg") -> bool:
 # ---------------------------------------------------------
 # GPU Filter diagnostics (presence + smokes)
 # ---------------------------------------------------------
-async def get_filter_diagnostics(ffmpeg_path: str = "ffmpeg") -> Dict[str, Any]:
+async def get_filter_diagnostics(
+    ffmpeg_path: str = "ffmpeg",
+    *,
+    run_smokes: bool = True,
+    include_opencl_smokes: bool = True,
+) -> Dict[str, Any]:
     """
     Return a dictionary summarizing GPU filter presence and smoke test results.
     Keys:
@@ -710,13 +715,18 @@ async def get_filter_diagnostics(ffmpeg_path: str = "ffmpeg") -> Dict[str, Any]:
         "scale_opencl": "scale_opencl" in filters,
         "hwupload": "hwupload" in filters,
     }
-    # Run smokes (they cache results internally)
-    smokes = {
-        "cuda_filters": await smoke_test_cuda_filters(ffmpeg_path),
-        "cuda_scale_only": await smoke_test_cuda_scale_only(ffmpeg_path),
-        "opencl_filters": await smoke_test_opencl_filters(ffmpeg_path),
-        "opencl_scale_only": await smoke_test_opencl_scale_only(ffmpeg_path),
+    smokes: Dict[str, Optional[bool]] = {
+        "cuda_filters": None,
+        "cuda_scale_only": None,
+        "opencl_filters": None,
+        "opencl_scale_only": None,
     }
+    if run_smokes:
+        smokes["cuda_filters"] = await smoke_test_cuda_filters(ffmpeg_path)
+        smokes["cuda_scale_only"] = await smoke_test_cuda_scale_only(ffmpeg_path)
+        if include_opencl_smokes:
+            smokes["opencl_filters"] = await smoke_test_opencl_filters(ffmpeg_path)
+            smokes["opencl_scale_only"] = await smoke_test_opencl_scale_only(ffmpeg_path)
     return {"present": present, "smokes": smokes}
 
 
@@ -773,7 +783,7 @@ async def get_encoder_options(
     :return: (エンコーダ名, ffmpegオプションのリスト)
     """
     use_nvenc = False
-    nvenc_available = await is_nvenc_available(ffmpeg_path)
+    nvenc_available = False if hw_encoder == "cpu" else await is_nvenc_available(ffmpeg_path)
 
     if hw_encoder == "auto":
         use_nvenc = nvenc_available
@@ -786,13 +796,13 @@ async def get_encoder_options(
     if use_nvenc:
         encoder = "h264_nvenc"
         if quality == "speed":
-            preset = "p7"
+            preset = "p1"
             opts = ["-preset", preset, "-cq", "30"]
         elif quality == "balanced":
-            preset = "p5"
+            preset = "p4"
             opts = ["-preset", preset, "-cq", "23"]
         else:  # quality
-            preset = "p4"
+            preset = "p6"
             opts = ["-preset", preset, "-cq", "20"]
         logger.info(
             f"Using Encoder: '{encoder}', Preset: '{preset}', Quality setting: '{quality}'"
