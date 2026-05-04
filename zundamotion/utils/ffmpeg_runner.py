@@ -64,6 +64,58 @@ def _progress_percent(elapsed: float, eta: Optional[float]) -> Optional[float]:
     return max(0.0, min(99.9, elapsed / total * 100.0))
 
 
+class _ProgressState:
+    def __init__(self, total_seconds: Optional[float]):
+        self.total_seconds = total_seconds if total_seconds and total_seconds > 0 else None
+        self.out_time_seconds: Optional[float] = None
+        self.last_percent: float = 0.0
+
+    def update(self, key: str, value: str) -> None:
+        if key == "out_time_ms":
+            try:
+                seconds = max(0.0, float(value) / 1_000_000.0)
+            except Exception:
+                return
+            if self.out_time_seconds is None or seconds > self.out_time_seconds:
+                self.out_time_seconds = seconds
+
+    def percent(self) -> Optional[float]:
+        if self.total_seconds is None or self.out_time_seconds is None:
+            return None
+        pct = max(0.0, min(99.9, self.out_time_seconds / self.total_seconds * 100.0))
+        if pct < self.last_percent:
+            pct = self.last_percent
+        self.last_percent = pct
+        return pct
+
+    def eta(self, elapsed: float) -> Optional[float]:
+        pct = self.percent()
+        if pct is None or pct <= 0:
+            return None
+        total_est = elapsed / (pct / 100.0)
+        return max(0.0, total_est - elapsed)
+
+
+def _parse_ffmpeg_target_duration(args: List[str]) -> Optional[float]:
+    for i, token in enumerate(args[:-1]):
+        if str(token) == "-t":
+            try:
+                return float(args[i + 1])
+            except Exception:
+                return None
+    return None
+
+
+def _inject_progress_args(args: List[str]) -> List[str]:
+    if not args or not os.path.basename(str(args[0])).startswith("ffmpeg"):
+        return args
+    if any(str(token) == "-progress" for token in args):
+        return args
+    injected = [str(args[0]), "-progress", "pipe:1", "-nostats"]
+    injected.extend(str(token) for token in args[1:])
+    return injected
+
+
 def _estimate_eta_seconds(
     output_path: Optional[Path],
     last_size: Optional[int],
@@ -97,6 +149,7 @@ async def _log_ffmpeg_heartbeat(
     output_path: Optional[Path],
     started_at: float,
     interval_sec: float,
+    progress: Optional[_ProgressState] = None,
 ) -> None:
     if interval_sec <= 0:
         return
@@ -108,10 +161,14 @@ async def _log_ffmpeg_heartbeat(
         if process.returncode is not None:
             break
         elapsed = time.monotonic() - started_at
-        eta, last_size, last_at = _estimate_eta_seconds(output_path, last_size, last_at)
+        eta = progress.eta(elapsed) if progress is not None else None
+        pct = progress.percent() if progress is not None else None
+        if eta is None:
+            eta, last_size, last_at = _estimate_eta_seconds(output_path, last_size, last_at)
+        if pct is None:
+            pct = _progress_percent(elapsed, eta)
         now_str = time.strftime("%H:%M:%S")
         eta_str = f"ETA:{_format_seconds(eta)}"
-        pct = _progress_percent(elapsed, eta)
         pct_str = f"{pct:5.1f}%" if pct is not None else "  --.-%"
         logger.info(
             "%s | pid:%-5s | +%-5s | %s | %s | %s",
@@ -143,6 +200,7 @@ async def run_ffmpeg_async(
             except Exception:
                 timeout = None
 
+        args = _inject_progress_args(args)
         cmd_str = " ".join(map(str, args))
         if os.getenv("FFMPEG_LOG_CMD", "0") == "1":
             logger.info(f"Running command: {cmd_str}")
@@ -155,6 +213,7 @@ async def run_ffmpeg_async(
             heartbeat_interval = float(os.getenv("FFMPEG_PROGRESS_LOG_INTERVAL_SEC", "15") or 15)
         except Exception:
             heartbeat_interval = 15.0
+        progress = _ProgressState(_parse_ffmpeg_target_duration(args))
         process = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
@@ -162,14 +221,43 @@ async def run_ffmpeg_async(
         )
         logger.debug(f"Spawned PID={process.pid} for {base}")
         heartbeat_task = asyncio.create_task(
-            _log_ffmpeg_heartbeat(process, base, output_path, t0, heartbeat_interval)
+            _log_ffmpeg_heartbeat(process, base, output_path, t0, heartbeat_interval, progress)
         )
+
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+
+        async def _read_stdout() -> None:
+            assert process.stdout is not None
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                stdout_chunks.append(line)
+                text = line.decode(errors="ignore").strip()
+                if "=" in text:
+                    key, value = text.split("=", 1)
+                    progress.update(key.strip(), value.strip())
+
+        async def _read_stderr() -> None:
+            assert process.stderr is not None
+            while True:
+                chunk = await process.stderr.read(4096)
+                if not chunk:
+                    break
+                stderr_chunks.append(chunk)
+
+        stdout_task = asyncio.create_task(_read_stdout())
+        stderr_task = asyncio.create_task(_read_stderr())
 
         try:
             if timeout is not None and timeout > 0:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+                await asyncio.wait_for(
+                    asyncio.gather(process.wait(), stdout_task, stderr_task),
+                    timeout=timeout,
+                )
             else:
-                stdout, stderr = await process.communicate()
+                await asyncio.gather(process.wait(), stdout_task, stderr_task)
         except asyncio.TimeoutError:
             grace = 5.0
             try:
@@ -202,9 +290,13 @@ async def run_ffmpeg_async(
             heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await heartbeat_task
+            for task in (stdout_task, stderr_task):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
 
-        stdout_str = stdout.decode(errors="ignore")
-        stderr_str = stderr.decode(errors="ignore")
+        stdout_str = b"".join(stdout_chunks).decode(errors="ignore")
+        stderr_str = b"".join(stderr_chunks).decode(errors="ignore")
 
         rc = process.returncode if process.returncode is not None else 0
         dt = time.monotonic() - t0

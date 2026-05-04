@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from importlib import import_module
 
 from ...utils.ffmpeg_probe import get_media_duration
+from ...utils.ffmpeg_ops import concat_videos_copy
 from ...utils.filter_presets import get_video_filter_chain
 from ...utils.logger import logger
 from .overlay_effects import resolve_overlay_effects
@@ -116,6 +117,62 @@ class OverlayMixin:
             )
             return burn_params.to_ffmpeg_opts(self.hw_kind)
         return params.to_ffmpeg_opts(self.hw_kind)
+
+    @staticmethod
+    def _merge_subtitle_ranges(
+        subtitles: List[Dict[str, Any]],
+        *,
+        base_duration: Optional[float],
+        gap_threshold: float = 0.20,
+    ) -> List[Dict[str, Any]]:
+        ranges: List[Dict[str, Any]] = []
+        for sub in subtitles:
+            try:
+                start = max(0.0, float(sub.get("start", 0.0)))
+                duration = max(0.0, float(sub.get("duration", 0.0)))
+            except Exception:
+                continue
+            end = start + duration
+            if base_duration is not None:
+                end = min(float(base_duration), end)
+            if end <= start:
+                continue
+            if ranges and start <= ranges[-1]["end"] + gap_threshold:
+                ranges[-1]["end"] = max(ranges[-1]["end"], end)
+                ranges[-1]["subtitles"].append(sub)
+            else:
+                ranges.append({"start": start, "end": end, "subtitles": [sub]})
+        return ranges
+
+    async def _copy_video_segment(
+        self,
+        base_video: Path,
+        output_path: Path,
+        start: float,
+        duration: float,
+    ) -> Optional[Path]:
+        if duration <= 0.02:
+            return None
+        cmd = [
+            self.ffmpeg_path,
+            "-y",
+            "-nostdin",
+            "-ss",
+            f"{start:.3f}",
+            "-i",
+            str(base_video),
+            "-t",
+            f"{duration:.3f}",
+            "-map",
+            "0",
+            "-c",
+            "copy",
+            "-avoid_negative_ts",
+            "make_zero",
+            str(output_path),
+        ]
+        await _run_ffmpeg(cmd)
+        return output_path
 
     def _build_effect_filters(self, effects: Optional[List[Any]]) -> List[str]:
         """fg_overlays[*].effects を FFmpeg フィルタ列に変換する。"""
@@ -418,6 +475,94 @@ class OverlayMixin:
             return base_video
 
         output_path = self.temp_dir / f"{base_video.stem}_sub.mp4"
+        subtitle_mode = self._subtitle_render_mode(subtitles)
+        try:
+            base_dur = await get_media_duration(str(base_video))
+        except Exception:
+            base_dur = None
+
+        if subtitle_mode == "png" and base_dur and len(subtitles) >= 2:
+            ranges = self._merge_subtitle_ranges(
+                subtitles,
+                base_duration=float(base_dur),
+                gap_threshold=float(
+                    (self.subtitle_gen.subtitle_config or {}).get(
+                        "copy_gap_threshold", 0.20
+                    )
+                ),
+            )
+            if ranges and (
+                ranges[0]["start"] > 0.05
+                or ranges[-1]["end"] < float(base_dur) - 0.05
+                or len(ranges) > 1
+            ):
+                logger.info(
+                    "[SubtitleOverlay] Segment mode: re-encoding %d subtitle range(s), copying gaps (base=%.2fs, subtitles=%d)",
+                    len(ranges),
+                    float(base_dur),
+                    len(subtitles),
+                )
+                segment_paths: List[Path] = []
+                cursor = 0.0
+                for seg_idx, item in enumerate(ranges):
+                    start = float(item["start"])
+                    end = float(item["end"])
+                    if start > cursor + 0.02:
+                        copied = await self._copy_video_segment(
+                            base_video,
+                            self.temp_dir / f"{base_video.stem}_sub_gap_{seg_idx:03d}.mp4",
+                            cursor,
+                            start - cursor,
+                        )
+                        if copied:
+                            segment_paths.append(copied)
+
+                    adjusted: List[Dict[str, Any]] = []
+                    for sub in item["subtitles"]:
+                        copied_sub = dict(sub)
+                        copied_sub["start"] = max(0.0, float(sub["start"]) - start)
+                        adjusted.append(copied_sub)
+                    seg_base = self.temp_dir / f"{base_video.stem}_sub_base_{seg_idx:03d}.mp4"
+                    await self._copy_video_segment(base_video, seg_base, start, end - start)
+                    burned = await self._apply_subtitle_overlays_full(
+                        seg_base,
+                        adjusted,
+                        self.temp_dir / f"{base_video.stem}_sub_burn_{seg_idx:03d}.mp4",
+                    )
+                    segment_paths.append(burned)
+                    cursor = end
+
+                if float(base_dur) > cursor + 0.02:
+                    copied = await self._copy_video_segment(
+                        base_video,
+                        self.temp_dir / f"{base_video.stem}_sub_gap_tail.mp4",
+                        cursor,
+                        float(base_dur) - cursor,
+                    )
+                    if copied:
+                        segment_paths.append(copied)
+
+                try:
+                    await concat_videos_copy(
+                        [str(path.resolve()) for path in segment_paths],
+                        str(output_path),
+                        self.ffmpeg_path,
+                    )
+                    return output_path
+                except Exception as err:
+                    logger.warning(
+                        "[SubtitleOverlay] Segment concat failed (%s). Falling back to full subtitle burn.",
+                        err,
+                    )
+
+        return await self._apply_subtitle_overlays_full(base_video, subtitles, output_path)
+
+    async def _apply_subtitle_overlays_full(
+        self,
+        base_video: Path,
+        subtitles: List[Dict[str, Any]],
+        output_path: Path,
+    ) -> Path:
         subtitle_mode = self._subtitle_render_mode(subtitles)
         try:
             base_dur = await get_media_duration(str(base_video))

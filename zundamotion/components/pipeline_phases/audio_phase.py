@@ -482,6 +482,7 @@ class AudioPhase:
                     return segments
 
                 face_anim: Optional[Any] = None
+                line_mouth_sync = bool(line.get("mouth_sync", True))
 
                 if voice_layers_cfg and voice_layer_segments:
                     layer_face_anims: List[Dict[str, Any]] = []
@@ -497,37 +498,36 @@ class AudioPhase:
                         if not matching_segments:
                             continue
                         mouth_segments: List[Dict[str, Any]] = []
-                        for seg_info in matching_segments:
-                            audio_seg = seg_info.get("audio_path")
-                            if not audio_seg:
-                                continue
-                            try:
-                                audio_seg_path = (
-                                    audio_seg
-                                    if isinstance(audio_seg, Path)
-                                    else Path(str(audio_seg))
-                                )
-                            except Exception:
-                                continue
-                            segments = await _load_mouth_segments(audio_seg_path)
-                            if not segments:
-                                continue
-                            offset = float(seg_info.get("start_time", 0.0))
-                            for seg in segments:
-                                start_val = float(seg.get("start", 0.0)) + offset
-                                end_val = float(seg.get("end", 0.0)) + offset
-                                if end_val <= start_val:
+                        if bool(layer_cfg.get("mouth_sync", line_mouth_sync)):
+                            for seg_info in matching_segments:
+                                audio_seg = seg_info.get("audio_path")
+                                if not audio_seg:
                                     continue
-                                mouth_segments.append(
-                                    {
-                                        "start": start_val,
-                                        "end": end_val,
-                                        "state": seg.get("state"),
-                                    }
-                                )
-                        if not mouth_segments:
-                            continue
-                        mouth_segments.sort(key=lambda item: item["start"])
+                                try:
+                                    audio_seg_path = (
+                                        audio_seg
+                                        if isinstance(audio_seg, Path)
+                                        else Path(str(audio_seg))
+                                    )
+                                except Exception:
+                                    continue
+                                segments = await _load_mouth_segments(audio_seg_path)
+                                if not segments:
+                                    continue
+                                offset = float(seg_info.get("start_time", 0.0))
+                                for seg in segments:
+                                    start_val = float(seg.get("start", 0.0)) + offset
+                                    end_val = float(seg.get("end", 0.0)) + offset
+                                    if end_val <= start_val:
+                                        continue
+                                    mouth_segments.append(
+                                        {
+                                            "start": start_val,
+                                            "end": end_val,
+                                            "state": seg.get("state"),
+                                        }
+                                    )
+                            mouth_segments.sort(key=lambda item: item["start"])
                         seed = deterministic_seed_from_text(f"{line_id}:{target_name}")
                         blink_segments = generate_blink_timeline(
                             duration=float(duration),
@@ -573,7 +573,11 @@ class AudioPhase:
 
                     if target_name:
                         try:
-                            mouth_segments = await _load_mouth_segments(audio_path)
+                            mouth_segments = (
+                                await _load_mouth_segments(audio_path)
+                                if line_mouth_sync
+                                else []
+                            )
                             seed = deterministic_seed_from_text(line_id)
                             blink_segments = generate_blink_timeline(
                                 duration=float(duration),

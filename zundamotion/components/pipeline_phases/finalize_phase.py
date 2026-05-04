@@ -17,6 +17,7 @@ from zundamotion.utils.ffmpeg_capabilities import (
     get_nproc_value,
 )
 from zundamotion.utils.ffmpeg_ops import (
+    apply_transition_local,
     apply_transition,
     compare_media_params,
     concat_videos_copy,
@@ -114,6 +115,7 @@ class FinalizePhase:
 
                     # offset = 現在クリップの末尾から duration 秒前
                     offset = max(0.0, current_duration - t_dur)
+                    consume_next_head = self.transition_wait_padding > 0
 
                     out_path = self.temp_dir / f"transition_{i:03d}_{i+1:03d}.mp4"
                     timeline_shift = self.transition_wait_padding
@@ -127,7 +129,7 @@ class FinalizePhase:
                         current.name,
                         Path(next_path).name,
                     )
-                    await apply_transition(
+                    await apply_transition_local(
                         str(current),
                         str(next_path),
                         str(out_path),
@@ -138,6 +140,7 @@ class FinalizePhase:
                         self.audio_params,
                         wait_padding=self.transition_wait_padding,
                         hw_encoder=self.hw_encoder,
+                        consume_next_head=consume_next_head,
                     )
                     if timeline_shift > 0 and timeline is not None and i + 1 < len(scenes):
                         next_scene = scenes[i + 1]
@@ -154,12 +157,14 @@ class FinalizePhase:
                                 next_scene_id,
                             )
                     current = out_path
-                    merged_duration = (
-                        current_duration
-                        + next_duration
-                        + (self.transition_wait_padding * 2.0)
-                        - t_dur
-                    )
+                    if self.transition_wait_padding > 0:
+                        merged_duration = (
+                            current_duration
+                            + next_duration
+                            + self.transition_wait_padding
+                        )
+                    else:
+                        merged_duration = current_duration + next_duration - t_dur
                     current_duration = max(0.0, merged_duration)
                 else:
                     # トランジション未指定なら、これまでの current を確定し次へ

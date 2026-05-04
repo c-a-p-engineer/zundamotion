@@ -143,9 +143,12 @@ class VideoPhase:
         hw_kind: Optional[str],
         filter_mode: str,
     ) -> Optional[str]:
-        """AutoTune が CPU フィルタ固定なら auto の NVENC も CPU へ寄せる。"""
-        if hw_encoder == "auto" and hw_kind == "nvenc" and filter_mode == "cpu":
-            return None
+        """Return encoder kind independently from the selected filter backend.
+
+        CPU filter mode means "do not use GPU filters".  It must not disable
+        NVENC itself because CPU overlays + NVENC encoding is the stable fast
+        path for PNG subtitles and character mouth overlays.
+        """
         return hw_kind
 
     @classmethod
@@ -205,8 +208,9 @@ class VideoPhase:
         )
         if effective_hw_kind != hw_kind:
             logger.info(
-                "[AutoTune] CPU filter mode active with --hw-encoder auto; "
-                "using CPU encoder to avoid slow mixed CPU-filter/NVENC path."
+                "[AutoTune] Adjusting hardware encoder kind: %s -> %s",
+                hw_kind,
+                effective_hw_kind,
             )
             hw_kind = effective_hw_kind
 

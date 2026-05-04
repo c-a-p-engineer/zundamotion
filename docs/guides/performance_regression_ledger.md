@@ -253,11 +253,12 @@ python -m zundamotion.main ... --cache-refresh
 音声なし:
 
 ```bash
+HW_FILTER_MODE=cpu \
 python -m zundamotion.main scripts/diiva_company_intro.yaml \
   -o output/diiva_company_intro.mp4 \
   --quality speed \
   --jobs auto \
-  --hw-encoder cpu \
+  --hw-encoder auto \
   --no-voice \
   --log-kv
 ```
@@ -265,13 +266,16 @@ python -m zundamotion.main scripts/diiva_company_intro.yaml \
 音声あり:
 
 ```bash
+HW_FILTER_MODE=cpu \
 python -m zundamotion.main scripts/diiva_company_intro.yaml \
   -o output/diiva_company_intro.mp4 \
   --quality speed \
   --jobs auto \
-  --hw-encoder cpu \
+  --hw-encoder auto \
   --log-kv
 ```
+
+GPU が利用できる環境の標準比較は `HW_FILTER_MODE=cpu --hw-encoder auto` とし、CPU 合成 + NVENC エンコードを測る。GPU がない環境や切り分けでは `--hw-encoder cpu` に戻して比較する。
 
 ### 比較時に見るべき値
 

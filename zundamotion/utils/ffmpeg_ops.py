@@ -20,7 +20,7 @@ from .ffmpeg_capabilities import (
 )
 from .ffmpeg_hw import get_profile_flags
 from .ffmpeg_params import AudioParams, VideoParams
-from .ffmpeg_probe import MediaInfo, get_media_info
+from .ffmpeg_probe import MediaInfo, get_media_duration, get_media_info
 from .ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from .logger import logger
 
@@ -360,6 +360,324 @@ async def concat_videos_copy(
     finally:
         if os.path.exists(list_file_path):
             os.remove(list_file_path)
+
+
+async def _copy_segment(
+    input_path: str,
+    output_path: str,
+    *,
+    start: float,
+    duration: float,
+    ffmpeg_path: str = "ffmpeg",
+) -> Optional[str]:
+    if duration <= 0.02:
+        return None
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        *get_profile_flags(),
+        "-ss",
+        f"{max(0.0, start):.3f}",
+        "-i",
+        input_path,
+        "-t",
+        f"{max(0.0, duration):.3f}",
+        "-map",
+        "0",
+        "-c",
+        "copy",
+        "-avoid_negative_ts",
+        "make_zero",
+        output_path,
+    ]
+    await _run_ffmpeg_async(cmd)
+    return output_path
+
+
+async def _encode_segment(
+    input_path: str,
+    output_path: str,
+    *,
+    start: float,
+    duration: float,
+    video_params: VideoParams,
+    audio_params: AudioParams,
+    ffmpeg_path: str = "ffmpeg",
+    hw_encoder: str = "auto",
+) -> Optional[str]:
+    if duration <= 0.02:
+        return None
+    has_audio = await has_audio_stream(input_path)
+    hw_kind = await get_hw_encoder_kind_for_video_params(ffmpeg_path, hw_encoder)
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        *get_profile_flags(),
+        *_threading_flags(ffmpeg_path),
+        "-i",
+        input_path,
+        "-ss",
+        f"{max(0.0, start):.3f}",
+        "-t",
+        f"{max(0.0, duration):.3f}",
+        "-map",
+        "0:v:0",
+    ]
+    if has_audio:
+        cmd.extend(["-map", "0:a:0"])
+    cmd.extend(
+        [
+            "-vf",
+            (
+                f"fps={int(video_params.fps)},"
+                f"scale={int(video_params.width)}:{int(video_params.height)},"
+                f"format={video_params.pix_fmt},"
+                "setpts=PTS-STARTPTS"
+            ),
+        ]
+    )
+    if has_audio:
+        cmd.extend(
+            [
+                "-af",
+                f"aresample={int(audio_params.sample_rate)},asetpts=PTS-STARTPTS",
+            ]
+        )
+    else:
+        cmd.append("-an")
+    cmd.extend(video_params.to_ffmpeg_opts(hw_kind))
+    if has_audio:
+        cmd.extend(audio_params.to_ffmpeg_opts())
+    cmd.append(output_path)
+    await _run_ffmpeg_async(cmd)
+    return output_path
+
+
+async def _create_freeze_tail(
+    input_path: str,
+    output_path: str,
+    *,
+    source_duration: float,
+    freeze_duration: float,
+    video_params: VideoParams,
+    audio_params: AudioParams,
+    ffmpeg_path: str = "ffmpeg",
+    hw_encoder: str = "auto",
+    source_time: Optional[float] = None,
+) -> str:
+    """Create a silent still-video clip from a frame of input_path."""
+    freeze_duration = max(0.02, float(freeze_duration))
+    if source_time is None:
+        start = max(0.0, float(source_duration) - 0.08)
+    else:
+        start = max(0.0, float(source_time))
+    hw_kind = await get_hw_encoder_kind_for_video_params(ffmpeg_path, hw_encoder)
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        *get_profile_flags(),
+        *_threading_flags(ffmpeg_path),
+        "-ss",
+        f"{start:.3f}",
+        "-i",
+        input_path,
+        "-f",
+        "lavfi",
+        "-t",
+        f"{freeze_duration:.3f}",
+        "-i",
+        f"anullsrc=channel_layout=stereo:sample_rate={int(audio_params.sample_rate)}",
+        "-filter_complex",
+        (
+            "[0:v]trim=start=0,setpts=PTS-STARTPTS,"
+            f"fps={int(video_params.fps)},"
+            f"scale={int(video_params.width)}:{int(video_params.height)},"
+            f"format={video_params.pix_fmt},"
+            f"tpad=stop_mode=clone:stop_duration={freeze_duration:.3f}[v]"
+        ),
+        "-map",
+        "[v]",
+        "-map",
+        "1:a",
+        "-t",
+        f"{freeze_duration:.3f}",
+    ]
+    cmd.extend(video_params.to_ffmpeg_opts(hw_kind))
+    cmd.extend(audio_params.to_ffmpeg_opts())
+    cmd.extend([output_path])
+    await _run_ffmpeg_async(cmd)
+    return output_path
+
+
+async def apply_transition_local(
+    input_video1_path: str,
+    input_video2_path: str,
+    output_path: str,
+    transition_type: str,
+    duration: float,
+    offset: float,
+    video_params: VideoParams,
+    audio_params: AudioParams,
+    ffmpeg_path: str = "ffmpeg",
+    wait_padding: float = 0.0,
+    hw_encoder: str = "auto",
+    consume_next_head: bool = False,
+) -> None:
+    """Apply a scene transition by re-encoding only the boundary window.
+
+    Long prefix/suffix sections are copied or encoded as needed, then
+    concatenated with the short xfade/acrossfade boundary clip.  When
+    wait_padding is configured, the previous clip is allowed to finish, then a
+    still clone of its final frame transitions into the real head of the next
+    scene.  consume_next_head skips the next-scene head already used in that
+    boundary to avoid visually or audibly repeating it.
+    """
+    dur1 = float(await get_media_duration(input_video1_path))
+    dur2 = float(await get_media_duration(input_video2_path))
+    offset = max(0.0, min(float(offset), dur1))
+    duration = max(0.001, float(duration))
+    wait_padding = max(0.0, float(wait_padding))
+    second_head = min(dur2, duration)
+
+    out_dir = os.path.dirname(os.path.abspath(output_path)) or "."
+    stem = Path(output_path).stem
+    prefix = os.path.join(out_dir, f"{stem}_prefix.mp4")
+    tail1 = os.path.join(out_dir, f"{stem}_tail1.mp4")
+    head2 = os.path.join(out_dir, f"{stem}_head2.mp4")
+    boundary = os.path.join(out_dir, f"{stem}_boundary.mp4")
+    suffix = os.path.join(out_dir, f"{stem}_suffix.mp4")
+
+    parts: List[str] = []
+    if wait_padding > 0:
+        prefix_path = await _copy_segment(
+            input_video1_path,
+            prefix,
+            start=0.0,
+            duration=dur1,
+            ffmpeg_path=ffmpeg_path,
+        )
+        if prefix_path:
+            parts.append(prefix_path)
+        await _create_freeze_tail(
+            input_video1_path,
+            tail1,
+            source_duration=dur1,
+            freeze_duration=duration,
+            video_params=video_params,
+            audio_params=audio_params,
+            ffmpeg_path=ffmpeg_path,
+            hw_encoder=hw_encoder,
+        )
+        await _encode_segment(
+            input_video2_path,
+            head2,
+            start=0.0,
+            duration=max(0.02, second_head),
+            video_params=video_params,
+            audio_params=audio_params,
+            ffmpeg_path=ffmpeg_path,
+            hw_encoder=hw_encoder,
+        )
+        suffix_start = second_head if consume_next_head else 0.0
+        boundary_offset = 0.0
+    else:
+        prefix_path = await _copy_segment(
+            input_video1_path,
+            prefix,
+            start=0.0,
+            duration=offset,
+            ffmpeg_path=ffmpeg_path,
+        )
+        if prefix_path:
+            parts.append(prefix_path)
+        await _copy_segment(
+            input_video1_path,
+            tail1,
+            start=offset,
+            duration=max(0.02, dur1 - offset),
+            ffmpeg_path=ffmpeg_path,
+        )
+        await _copy_segment(
+            input_video2_path,
+            head2,
+            start=0.0,
+            duration=max(0.02, second_head),
+            ffmpeg_path=ffmpeg_path,
+        )
+        suffix_start = second_head
+        boundary_offset = 0.0
+
+    await apply_transition(
+        tail1,
+        head2,
+        boundary,
+        transition_type,
+        min(duration, second_head),
+        boundary_offset,
+        video_params,
+        audio_params,
+        ffmpeg_path=ffmpeg_path,
+        wait_padding=wait_padding,
+        hw_encoder=hw_encoder,
+    )
+    parts.append(boundary)
+
+    if consume_next_head and suffix_start > 0:
+        suffix_path = await _encode_segment(
+            input_video2_path,
+            suffix,
+            start=suffix_start,
+            duration=max(0.0, dur2 - suffix_start),
+            video_params=video_params,
+            audio_params=audio_params,
+            ffmpeg_path=ffmpeg_path,
+            hw_encoder=hw_encoder,
+        )
+    else:
+        suffix_path = await _copy_segment(
+            input_video2_path,
+            suffix,
+            start=suffix_start,
+            duration=max(0.0, dur2 - suffix_start),
+            ffmpeg_path=ffmpeg_path,
+        )
+    if suffix_path:
+        parts.append(suffix_path)
+
+    try:
+        await concat_videos_copy(parts, output_path, ffmpeg_path)
+        logger.info(
+            "Applied local '%s' transition: copied %d part(s), re-encoded boundary %.2fs%s -> %s",
+            transition_type,
+            max(0, len(parts) - 1),
+            duration + wait_padding * 2.0,
+            (
+                " (freeze-before-transition, consume-next-head)"
+                if wait_padding > 0 and consume_next_head
+                else " (freeze-before-transition)"
+                if wait_padding > 0
+                else ""
+            ),
+            output_path,
+        )
+    except Exception as err:
+        logger.warning(
+            "Local transition concat failed (%s). Falling back to full transition encode.",
+            err,
+        )
+        await apply_transition(
+            input_video1_path,
+            input_video2_path,
+            output_path,
+            transition_type,
+            duration,
+            offset,
+            video_params,
+            audio_params,
+            ffmpeg_path=ffmpeg_path,
+            wait_padding=wait_padding,
+            hw_encoder=hw_encoder,
+        )
 async def apply_transition(
     input_video1_path: str,
     input_video2_path: str,
