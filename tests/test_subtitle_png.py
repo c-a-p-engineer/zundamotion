@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 import sys
 
@@ -10,6 +11,7 @@ if str(ROOT) not in sys.path:
 from zundamotion.components.subtitles.png import (
     SubtitlePNGRenderer,
     _estimate_auto_max_chars,
+    _read_subtitle_dimensions_meta,
     _load_font_with_fallback,
     _render_subtitle_png,
 )
@@ -18,6 +20,12 @@ from zundamotion.components.subtitles.png import (
 class StubCacheManager:
     def __init__(self, cache_dir: Path):
         self.cache_dir = cache_dir
+
+    async def get_or_create(self, *, key_data, file_name, extension, creator_func):
+        output_path = self.cache_dir / f"{file_name}.png"
+        if output_path.exists():
+            return output_path
+        return await creator_func(output_path)
 
 
 def test_estimate_auto_max_chars_returns_positive_value_for_cjk_text():
@@ -55,6 +63,36 @@ def test_render_subtitle_png_accepts_auto_max_chars(tmp_path):
     with Image.open(out_path) as image:
         assert image.width == width
         assert image.height == height
+
+
+def test_subtitle_png_renderer_reads_dimensions_from_sidecar_on_cache_hit(
+    tmp_path, monkeypatch
+):
+    async def _run() -> None:
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        renderer = SubtitlePNGRenderer(StubCacheManager(cache_dir))
+        style = {
+            "font_path": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+            "font_size": 40,
+            "font_color": "white",
+        }
+
+        png_path, dims = await renderer.render("字幕", style)
+
+        assert _read_subtitle_dimensions_meta(png_path) == dims
+
+        def _raise_if_reopened(*_args, **_kwargs):
+            raise AssertionError("subtitle PNG should not be reopened when sidecar exists")
+
+        monkeypatch.setattr("zundamotion.components.subtitles.png.Image.open", _raise_if_reopened)
+
+        cached_path, cached_dims = await renderer.render("字幕", style)
+
+        assert cached_path == png_path
+        assert cached_dims == dims
+
+    asyncio.run(_run())
 
 
 def test_subtitle_png_renderer_reuses_shared_executor(tmp_path):

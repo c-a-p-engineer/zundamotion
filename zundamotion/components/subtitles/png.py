@@ -4,6 +4,7 @@ import logging
 import os
 import statistics
 from concurrent.futures import ProcessPoolExecutor
+from functools import lru_cache
 from pathlib import Path  # Pathをインポート
 from typing import Any, Dict, Tuple
 
@@ -305,6 +306,111 @@ def _build_background_layer(
     return layer
 
 
+def _background_layer_cache_key(
+    size: tuple[int, int], config: Dict[str, Any]
+) -> tuple[Any, ...] | None:
+    width, height = size
+    if width <= 0 or height <= 0:
+        return None
+    if not _background_is_visible(config):
+        return None
+
+    image_path_raw = config.get("image") or config.get("image_path")
+    image_signature: tuple[str, int | None, int | None] | None = None
+    if image_path_raw:
+        try:
+            image_path = Path(str(image_path_raw)).resolve()
+            stat = image_path.stat()
+            image_signature = (str(image_path), int(stat.st_mtime), int(stat.st_size))
+        except Exception:
+            return None
+
+    try:
+        border_width = max(0, int(config.get("border_width", 0)))
+    except (TypeError, ValueError):
+        border_width = 0
+    try:
+        radius = max(0, int(config.get("radius", config.get("corner_radius", 0))))
+    except (TypeError, ValueError):
+        radius = 0
+
+    return (
+        int(width),
+        int(height),
+        _resolve_rgba(config.get("color") or config.get("fill"), config.get("opacity")),
+        image_signature,
+        str(config.get("image_opacity", "")),
+        _resolve_rgba(
+            config.get("border_color") or config.get("outline_color"),
+            config.get("border_opacity"),
+        ),
+        border_width,
+        radius,
+    )
+
+
+@lru_cache(maxsize=128)
+def _build_background_layer_cached_from_key(cache_key: tuple[Any, ...]) -> Image.Image | None:
+    (
+        width,
+        height,
+        fill_rgba,
+        image_signature,
+        image_opacity,
+        outline_rgba,
+        border_width,
+        radius,
+    ) = cache_key
+
+    config: Dict[str, Any] = {
+        "color": fill_rgba,
+        "image_opacity": None if image_opacity == "" else image_opacity,
+        "border_color": outline_rgba,
+        "border_width": border_width,
+        "radius": radius,
+    }
+    if image_signature:
+        config["image"] = image_signature[0]
+    return _build_background_layer((int(width), int(height)), config)
+
+
+def _build_background_layer_cached(
+    size: tuple[int, int], config: Dict[str, Any]
+) -> Image.Image | None:
+    cache_key = _background_layer_cache_key(size, config)
+    if cache_key is None:
+        return _build_background_layer(size, config)
+    return _build_background_layer_cached_from_key(cache_key)
+
+
+def _subtitle_meta_path(png_path: Path) -> Path:
+    return png_path.with_suffix(".json")
+
+
+def _read_subtitle_dimensions_meta(png_path: Path) -> Dict[str, int] | None:
+    meta_path = _subtitle_meta_path(png_path)
+    if not meta_path.exists():
+        return None
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        width = int(meta.get("w", 0))
+        height = int(meta.get("h", 0))
+        if width > 0 and height > 0:
+            return {"w": width, "h": height}
+    except Exception:
+        return None
+    return None
+
+
+def _write_subtitle_dimensions_meta(png_path: Path, width: int, height: int) -> None:
+    try:
+        with open(_subtitle_meta_path(png_path), "w", encoding="utf-8") as f:
+            json.dump({"w": int(width), "h": int(height)}, f, ensure_ascii=False)
+    except Exception:
+        logger.debug("Failed to write subtitle PNG metadata: %s", png_path, exc_info=True)
+
+
 def _measure_text_width(font: ImageFont.FreeTypeFont, text: str) -> int:
     if hasattr(font, "getbbox"):
         try:
@@ -403,11 +509,12 @@ class SubtitlePNGRenderer:
                 pass
 
             if loop:
-                await loop.run_in_executor(
+                width, height = await loop.run_in_executor(
                     self._executor, _render_subtitle_png, text, style, str(output_path)
                 )
             else:
-                _render_subtitle_png(text, style, str(output_path))
+                width, height = _render_subtitle_png(text, style, str(output_path))
+            _write_subtitle_dimensions_meta(output_path, width, height)
             logger.info(f"Saved subtitle PNG to {output_path}")
             return output_path
 
@@ -419,8 +526,13 @@ class SubtitlePNGRenderer:
             creator_func=creator_func,
         )
 
+        dims = _read_subtitle_dimensions_meta(png_path)
+        if dims is not None:
+            return png_path, dims
+
         with Image.open(png_path) as img:
             width, height = img.width, img.height
+        _write_subtitle_dimensions_meta(png_path, width, height)
         return png_path, {"w": width, "h": height}
 
     def _wrap_text_by_pixel(
@@ -647,7 +759,7 @@ def _render_subtitle_png(
     img_h = max(1, int(text_h + pad_top + pad_bottom))
     img = Image.new("RGBA", (img_w, img_h), (0, 0, 0, 0))
 
-    background_layer = _build_background_layer((img_w, img_h), background_cfg)
+    background_layer = _build_background_layer_cached((img_w, img_h), background_cfg)
     if background_layer is not None:
         img = Image.alpha_composite(img, background_layer)
 

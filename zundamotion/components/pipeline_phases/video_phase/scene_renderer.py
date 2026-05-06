@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -1143,7 +1144,7 @@ class SceneRenderer:
             will_precache = precache_default or (len(scene.get("lines", [])) >= precache_min_lines)
             if will_precache:
                 renderer = self.video_renderer.subtitle_gen.png_renderer
-                precache_tasks = []
+                unique_subtitles: Dict[str, tuple[str, Dict[str, Any]]] = {}
                 for idx, line in enumerate(scene.get("lines", []), start=1):
                     line_id = f"{scene_id}_{idx}"
                     data = line_data_map.get(line_id)
@@ -1152,17 +1153,31 @@ class SceneRenderer:
                     text = (data.get("text") or "").strip()
                     if not text:
                         continue
-                    style = (self.config.get("subtitle", {}) or {}).copy()
                     lc = data.get("line_config") or {}
-                    if "subtitle" in lc and isinstance(lc["subtitle"], dict):
-                        style.update(lc["subtitle"])  # line overrides
-                    precache_tasks.append(renderer.render(text, style))
-                if precache_tasks:
+                    style_resolver = getattr(subtitle_gen, "resolve_subtitle_style", None)
+                    if callable(style_resolver):
+                        style = style_resolver(lc)
+                    else:
+                        style = (self.config.get("subtitle", {}) or {}).copy()
+                        if "subtitle" in lc and isinstance(lc["subtitle"], dict):
+                            style.update(lc["subtitle"])  # line overrides
+                    dedupe_key = json.dumps(
+                        {"text": text, "style": style},
+                        sort_keys=True,
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                    unique_subtitles.setdefault(dedupe_key, (text, style))
+                if unique_subtitles:
                     import asyncio as _asyncio
+                    precache_tasks = [
+                        renderer.render(text, style)
+                        for text, style in unique_subtitles.values()
+                    ]
                     await _asyncio.gather(*precache_tasks, return_exceptions=True)
                     logger.info(
-                        "Precached %d subtitle PNG(s) for scene '%s'",
-                        len(precache_tasks),
+                        "Precached %d unique subtitle PNG(s) for scene '%s'",
+                        len(unique_subtitles),
                         scene_id,
                     )
         except Exception as e:
