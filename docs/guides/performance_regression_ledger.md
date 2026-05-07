@@ -361,6 +361,77 @@ GPU が利用できる環境の標準比較は `HW_FILTER_MODE=cpu --hw-encoder 
   - `FinalizePhase: 0.50s`
   - `GenerationPipeline.run: 3.86s`
 
+2026-05-07 `copipetan-dev-room/003_php_what-is-php` 字幕レイヤー動画方式検証:
+
+- 比較対象:
+  - 従来方式: `logs/20260506_131348_889.log`
+  - 字幕レイヤー方式: `logs/20260507_025745_059.log`
+  - 条件はいずれも `--no-cache`、CPU filter mode、PNG字幕主体
+- 結果:
+  - 従来方式 `GenerationPipeline.run: 1783.44s`
+    - `AudioPhase: 53.56s`
+    - `VideoPhase: 1726.97s`
+  - 字幕レイヤー方式 `GenerationPipeline.run: 1808.28s`
+    - `AudioPhase: 56.94s`
+    - `VideoPhase: 1691.50s`
+    - `FinalizePhase: 49.04s`
+  - 総時間は `+24.84s` 悪化
+  - VideoPhase 単体は `-35.47s` 短縮
+- 字幕レイヤー方式の内訳:
+  - `scene_output_main.mp4` 生成完了: `03:05:33.020`
+  - qtrle 字幕レイヤー生成開始: `03:05:33.171`
+  - qtrle 字幕レイヤー生成完了: `03:25:33.388`
+  - qtrle 字幕レイヤー生成時間: `1200.22s`
+  - 字幕レイヤー1回 overlay 完了: `03:26:58.432`
+  - 本編への1回 overlay は約 `85s`
+- 分かったこと:
+  - 本編側 filter graph は軽くなるが、字幕PNGの時間軸配置コストは消えず、qtrle レイヤー生成側へ移る
+  - 1920x1080 / 30fps / 約396.52s / 71字幕の qtrle `.mov` 生成が重すぎる
+  - qtrle レイヤーはログ上約 `201.5MB` まで増え、可逆ARGB中間としてI/Oとエンコード負荷が大きい
+  - `--no-cache` では字幕レイヤーの永続キャッシュ利点が出ない
+- 判定:
+  - 初回・no-cache の高速化策としては不採用
+  - 再検証する場合もフラグ付き実験機能に留め、通常運用の既定値は `subtitle.layer_video.enabled: false` 相当にする
+  - 次の候補は顔 overlay の事前バッチ/キャッシュ改善、SubtitlePNGRenderer worker 数、字幕PNG事前バッチ生成
+
+2026-05-07 `copipetan-dev-room/003_php_what-is-php` 顔 overlay 事前キャッシュ採用:
+
+- 比較対象:
+  - 基準: `logs/20260506_131348_889.log`
+  - 字幕レイヤー方式: `logs/20260507_025745_059.log`
+  - 顔 overlay 事前キャッシュ後: `logs/20260507_040313_995.log`
+  - 条件はいずれも `--no-cache`、CPU filter mode、PNG字幕主体
+- 結果:
+  - 基準 `GenerationPipeline.run: 1783.44s`
+    - `AudioPhase: 53.56s`
+    - `VideoPhase: 1726.97s`
+  - 字幕レイヤー方式 `GenerationPipeline.run: 1808.28s`
+    - `VideoPhase: 1691.50s`
+  - 顔 overlay 事前キャッシュ後 `GenerationPipeline.run: 1258.94s`
+    - `AudioPhase: 42.00s`
+    - `VideoPhase: 1165.47s`
+    - `FinalizePhase: 48.67s`
+  - 基準比:
+    - 総時間 `-524.50s`、約 `29.4%` 短縮
+    - `VideoPhase` `-561.50s`、約 `32.5%` 短縮
+  - 字幕レイヤー方式比:
+    - 総時間 `-549.34s`
+    - `VideoPhase` `-526.03s`
+- 顔 overlay 事前キャッシュの観測:
+  - `Precached 6 face overlay PNG(s) for scene 'main'`
+  - 以降の clip では `temp_face_overlay_*` が大量に `Cache disabled: Reusing existing ephemeral output` になっている
+  - `--no-cache` でも同一プロセス内の ephemeral reuse により、clip ごとの顔 overlay PNG 再生成を抑制できている
+  - ただし初回 clip 開始直後に `temp_face_overlay_5a8dba7f...` と `temp_face_overlay_f6090436...` の追加生成が残った
+    - 事前候補に `mouth/close.png` と `eyes/open.png` 系が入っていない可能性が高い
+- 注意:
+  - 今回ログでは `AutoTune` が `clip_workers 1 -> 3` に上げている
+  - そのため 500 秒級の短縮を顔 overlay 事前キャッシュ単独の効果として扱わない
+  - ただし事前キャッシュ自体は動作し、clip 内の顔 overlay 生成ブレを減らす効果がログで確認できた
+- 判定:
+  - 採用
+  - `video.precache_face_overlays: true` を既定値として維持する
+  - 次の改善は事前キャッシュ候補に `mouth/close.png` と `eyes/open.png` を含め、clip 開始後の顔 overlay 追加生成を 0 に近づける
+
 2026-05-02 `intro/001_channel-intro` `--no-cache --hw-encoder auto` 調査:
 
 - 指定コマンドは無限停止ではなく `647.42s` で完走
