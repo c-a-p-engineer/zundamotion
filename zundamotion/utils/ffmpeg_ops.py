@@ -623,15 +623,23 @@ async def apply_transition_local(
     parts.append(boundary)
 
     suffix_was_stream_copy = False
+    suffix_was_reencoded = False
     if consume_next_head and suffix_start > 0:
-        suffix_path = await _copy_segment(
+        # Stream-copy seeking can include audio samples from before suffix_start
+        # when the cut point is not on a keyframe.  That makes the next scene's
+        # consumed head audible again after the transition.  Re-encode only this
+        # consumed-head suffix so the trim is sample/frame accurate.
+        suffix_path = await _encode_segment(
             input_video2_path,
             suffix,
             start=suffix_start,
             duration=max(0.0, dur2 - suffix_start),
+            video_params=video_params,
+            audio_params=audio_params,
             ffmpeg_path=ffmpeg_path,
+            hw_encoder=hw_encoder,
         )
-        suffix_was_stream_copy = bool(suffix_path)
+        suffix_was_reencoded = bool(suffix_path)
     else:
         suffix_path = await _copy_segment(
             input_video2_path,
@@ -644,8 +652,8 @@ async def apply_transition_local(
         parts.append(suffix_path)
 
     transition_note = ""
-    if wait_padding > 0 and consume_next_head and suffix_was_stream_copy:
-        transition_note = " (freeze-before-transition, consume-next-head, copied-next-suffix)"
+    if wait_padding > 0 and consume_next_head and suffix_was_reencoded:
+        transition_note = " (freeze-before-transition, consume-next-head, reencoded-next-suffix)"
     elif wait_padding > 0 and consume_next_head:
         transition_note = " (freeze-before-transition, consume-next-head)"
     elif wait_padding > 0:

@@ -60,6 +60,9 @@ def test_apply_transition_local_copies_consumed_next_suffix(monkeypatch, tmp_pat
         )
     )
 
-    assert any(call[0] == "second.mp4" and call[2] == 0.5 for call in calls["copy"])
-    assert calls["encode"] == [("second.mp4", str(tmp_path / "out_head2.mp4"), 0.0, 0.5)]
+    assert not any(call[0] == "second.mp4" and call[2] == 0.5 for call in calls["copy"])
+    assert calls["encode"] == [
+        ("second.mp4", str(tmp_path / "out_head2.mp4"), 0.0, 0.5),
+        ("second.mp4", str(tmp_path / "out_suffix.mp4"), 0.5, 19.5),
+    ]
     assert calls["concat"]

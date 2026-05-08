@@ -25,7 +25,7 @@
 - `quality=speed` で NVENC `p7` を選ぶのは逆効果。`p1` が fastest、`p7` が slowest/best
 - `cache_refresh` が同一キーを何度も消す実装は無駄だった
 - PNG 字幕焼き込みは巨大な 1 本の filter graph に戻さない。字幕範囲をチャンク分割し、字幕のない gap は stream copy する
-- FinalizePhase の `consume_next_head` 付き transition は、消費後の next scene 後続部を再エンコードせず stream copy を優先する
+- FinalizePhase の `consume_next_head` 付き transition は、消費後の next scene 後続部を再エンコードする。`-ss` + stream copy では切り出し位置より前の音声が混ざり、次シーン冒頭音声が二重化する場合がある
 - いまの CPU 経路の残ボトルネックは主に `VOICEVOX`、行クリップ生成、長尺時の字幕チャンク焼き込み
 
 ## 遅くなった変更
@@ -263,26 +263,27 @@
 - ただし旧 `004` の巨大字幕焼き込みが実用上止まったこと、変更後 `004` が `220.32s` で完走したことから、チャンク分割は採用する
 - チャンクを小さくしすぎると concat/copy の小片が増える。大きくしすぎると巨大 filter graph 問題に戻るため、既定値 `12` を基準にする
 
-### 9. Transition の next scene 後続部を copy 優先にした
+### 9. Transition の next scene 後続部は再エンコードする
 
 内容:
 - `consume_next_head` 付き local transition では、境界の短い transition 部分だけを処理する
-- 消費後の next scene 後続部は、まず stream copy で切り出す
-- concat が失敗した場合だけ、従来どおり再エンコードへ fallback する
+- トランジション境界で使用した next scene 先頭は、後続本編から消費する
+- 消費後の next scene 後続部は、stream copy ではなく再エンコードで切り出す
 
 効果:
-- dissolve transition のために next scene 後続部を丸ごと再エンコードする無駄を避けられる
-- FinalizePhase が長尺動画の主ボトルネックになりにくくなった
+- `-ss` + stream copy のキーフレーム都合で、消費済みの先頭音声が suffix 側に残る問題を避けられる
+- OP→本編のように次シーン冒頭が短い発話でも、「わかる、わかる」のような二重発話を防げる
 
 実測:
 - `logs/20260507_171633_602.log` の `005_pc_why-restart-fixes` 旧経路: `FinalizePhase: 110.72s`
 - `logs/20260507_225123_235.log` の `005_pc_why-restart-fixes` 変更後: `FinalizePhase: 5.26s`
 - `logs/20260508_005644_685.log` の `004_ai-code-readable` 変更後: `FinalizePhase: 5.16s`
-- 変更後ログでは transition 適用時に `copied-next-suffix` が出ている
+- 2026-05-08 の `scripts/copipetan-dev-room/check_transition.yaml` で、OP トランジション有効時に次シーン冒頭の「わかる」が二重に聞こえないことを確認
+- 変更後ログでは transition 適用時に `reencoded-next-suffix` が出る
 
 今後のルール:
-- stream copy を優先するが、concat 失敗時の fallback は残す
-- codec parameters や GOP 境界の都合で copy が安全でないケースを fallback で吸収する
+- `consume_next_head` 付き transition の next scene suffix は、現在の再エンコード方針を維持する
+- 速度最適化目的で suffix を stream copy に戻さない。戻す場合は、キーフレーム非境界で次シーン冒頭音声が再出現しないことを音声つきの最小再現動画で確認する
 
 ## ベンチマーク時の手順
 
@@ -515,6 +516,10 @@ GPU が利用できる環境の標準比較は `HW_FILTER_MODE=cpu --hw-encoder 
 
 2026-05-08 `copipetan-dev-room/004_ai-code-readable` / `005_pc_why-restart-fixes` PNG 字幕チャンク分割 + transition suffix copy 検証:
 
+注意:
+- この時点では transition suffix copy を採用候補にしていたが、後続の `check_transition.yaml` 検証で次シーン冒頭音声の二重化が確認されたため、transition suffix copy の採用判断は撤回する
+- 現在の推奨は、`consume_next_head` 後の next scene suffix を再エンコードする方式
+
 - 計測コマンド条件:
   - `HW_FILTER_MODE=cpu`
   - `ZUNDAMOTION_AUDIO_WORKERS=2`
@@ -529,7 +534,7 @@ GPU が利用できる環境の標準比較は `HW_FILTER_MODE=cpu --hw-encoder 
   - `VideoPhase: 191.90s`
   - `FinalizePhase: 5.16s`
   - 字幕焼き込み: `8 subtitle chunk(s)`, `base=399.47s`, `subtitles=90`, `png_chunk_size=12`
-  - transition: `copied-next-suffix`
+  - transition: `copied-next-suffix`。現在は非推奨
 - `004_ai-code-readable` 旧経路試行: `logs/20260507_233939_428.log`
   - `AudioPhase: 35.73s`
   - 字幕焼き込み ffmpeg が長時間継続し、1 時間以上経過後に中断
@@ -545,13 +550,13 @@ GPU が利用できる環境の標準比較は `HW_FILTER_MODE=cpu --hw-encoder 
   - `VideoPhase: 440.80s`
   - `FinalizePhase: 5.26s`
   - 字幕焼き込み: `6 subtitle chunk(s)`, `base=342.54s`, `subtitles=66`, `png_chunk_size=12`
-  - transition: `copied-next-suffix`
+  - transition: `copied-next-suffix`。現在は非推奨
 - 参考キャッシュ再生成:
   - `logs/20260507_224417_846.log`: `005_pc_why-restart-fixes`, `Total execution time: 21.05s`, `VideoPhase: 0.01s`, `FinalizePhase: 4.38s`
   - `logs/20260507_224930_944.log`: `005_pc_why-restart-fixes`, `Total execution time: 29.84s`, `VideoPhase: 0.01s`, `FinalizePhase: 5.80s`
 - 判定:
   - PNG 字幕チャンク分割は採用
-  - transition suffix copy は採用
+  - transition suffix copy は撤回。現在は `reencoded-next-suffix` を推奨
   - 変更後 `005` は旧経路比で総時間 `-1058.15s`、約 `68.3%` 短縮。ただし worker 数、永続キャッシュ、コマンド条件の差も含むため、全短縮を単独変更の効果として扱わない
   - cold-cache の再比較を行う場合は、同じコマンドで `cache/` を削除するか `--cache-refresh` を指定して別途記録する
 
