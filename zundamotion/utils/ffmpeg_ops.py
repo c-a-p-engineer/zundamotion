@@ -622,17 +622,16 @@ async def apply_transition_local(
     )
     parts.append(boundary)
 
+    suffix_was_stream_copy = False
     if consume_next_head and suffix_start > 0:
-        suffix_path = await _encode_segment(
+        suffix_path = await _copy_segment(
             input_video2_path,
             suffix,
             start=suffix_start,
             duration=max(0.0, dur2 - suffix_start),
-            video_params=video_params,
-            audio_params=audio_params,
             ffmpeg_path=ffmpeg_path,
-            hw_encoder=hw_encoder,
         )
+        suffix_was_stream_copy = bool(suffix_path)
     else:
         suffix_path = await _copy_segment(
             input_video2_path,
@@ -644,6 +643,14 @@ async def apply_transition_local(
     if suffix_path:
         parts.append(suffix_path)
 
+    transition_note = ""
+    if wait_padding > 0 and consume_next_head and suffix_was_stream_copy:
+        transition_note = " (freeze-before-transition, consume-next-head, copied-next-suffix)"
+    elif wait_padding > 0 and consume_next_head:
+        transition_note = " (freeze-before-transition, consume-next-head)"
+    elif wait_padding > 0:
+        transition_note = " (freeze-before-transition)"
+
     try:
         await concat_videos_copy(parts, output_path, ffmpeg_path)
         logger.info(
@@ -651,16 +658,41 @@ async def apply_transition_local(
             transition_type,
             max(0, len(parts) - 1),
             duration + wait_padding * 2.0,
-            (
-                " (freeze-before-transition, consume-next-head)"
-                if wait_padding > 0 and consume_next_head
-                else " (freeze-before-transition)"
-                if wait_padding > 0
-                else ""
-            ),
+            transition_note,
             output_path,
         )
     except Exception as err:
+        if suffix_was_stream_copy and suffix_start > 0:
+            logger.warning(
+                "Local transition concat with copied suffix failed (%s). Retrying with re-encoded suffix.",
+                err,
+            )
+            encoded_suffix = os.path.join(out_dir, f"{stem}_suffix_encoded.mp4")
+            encoded_suffix_path = await _encode_segment(
+                input_video2_path,
+                encoded_suffix,
+                start=suffix_start,
+                duration=max(0.0, dur2 - suffix_start),
+                video_params=video_params,
+                audio_params=audio_params,
+                ffmpeg_path=ffmpeg_path,
+                hw_encoder=hw_encoder,
+            )
+            if encoded_suffix_path:
+                retry_parts = list(parts)
+                retry_parts[-1] = encoded_suffix_path
+                try:
+                    await concat_videos_copy(retry_parts, output_path, ffmpeg_path)
+                    logger.info(
+                        "Applied local '%s' transition: copied %d part(s), re-encoded boundary %.2fs (freeze-before-transition, consume-next-head, suffix re-encoded after copy retry) -> %s",
+                        transition_type,
+                        max(0, len(retry_parts) - 1),
+                        duration + wait_padding * 2.0,
+                        output_path,
+                    )
+                    return
+                except Exception as retry_err:
+                    err = retry_err
         logger.warning(
             "Local transition concat failed (%s). Falling back to full transition encode.",
             err,
@@ -678,6 +710,8 @@ async def apply_transition_local(
             wait_padding=wait_padding,
             hw_encoder=hw_encoder,
         )
+
+
 async def apply_transition(
     input_video1_path: str,
     input_video2_path: str,

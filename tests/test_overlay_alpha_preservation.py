@@ -33,3 +33,39 @@ def test_overlay_chain_keeps_alpha_mask_when_effects_present():
     # Final merge should recombine color and preserved alpha
     assert any("alphamerge[ov0]" in part for part in filters)
 
+
+def test_subtitle_png_chunks_split_continuous_ranges_by_count():
+    subtitles = [
+        {"text": str(idx), "start": float(idx), "duration": 0.9, "line_config": {}}
+        for idx in range(7)
+    ]
+
+    chunks = OverlayMixin._split_subtitle_ranges_for_png(
+        subtitles,
+        base_duration=10.0,
+        gap_threshold=0.20,
+        max_subtitles=3,
+    )
+
+    assert [len(chunk["subtitles"]) for chunk in chunks] == [3, 3, 1]
+    assert chunks[0]["start"] == 0.0
+    assert chunks[0]["end"] == 2.9
+    assert chunks[1]["start"] == 3.0
+
+
+def test_subtitle_png_chunks_do_not_split_overlapping_subtitles():
+    subtitles = [
+        {"text": "a", "start": 0.0, "duration": 2.0, "line_config": {}},
+        {"text": "b", "start": 1.0, "duration": 2.0, "line_config": {}},
+        {"text": "c", "start": 2.0, "duration": 1.0, "line_config": {}},
+    ]
+
+    chunks = OverlayMixin._split_subtitle_ranges_for_png(
+        subtitles,
+        base_duration=3.0,
+        gap_threshold=0.20,
+        max_subtitles=1,
+    )
+
+    assert len(chunks) == 1
+    assert len(chunks[0]["subtitles"]) == 3

@@ -96,6 +96,14 @@ class OverlayMixin:
             getattr(self, "hw_kind", None),
         )
 
+    def _subtitle_png_chunk_size(self) -> int:
+        subtitle_cfg = self.subtitle_gen.subtitle_config or {}
+        try:
+            value = int(subtitle_cfg.get("png_chunk_size", 12))
+        except Exception:
+            value = 12
+        return max(1, value)
+
     def _subtitle_burn_video_opts(self, subtitle_mode: str) -> List[str]:
         params = self.video_params
         if self.hw_kind is None and subtitle_mode == "ass":
@@ -143,6 +151,74 @@ class OverlayMixin:
             else:
                 ranges.append({"start": start, "end": end, "subtitles": [sub]})
         return ranges
+
+    @classmethod
+    def _split_subtitle_ranges_for_png(
+        cls,
+        subtitles: List[Dict[str, Any]],
+        *,
+        base_duration: Optional[float],
+        gap_threshold: float = 0.20,
+        max_subtitles: int = 12,
+    ) -> List[Dict[str, Any]]:
+        ranges = cls._merge_subtitle_ranges(
+            subtitles,
+            base_duration=base_duration,
+            gap_threshold=gap_threshold,
+        )
+        if max_subtitles <= 0:
+            max_subtitles = 12
+
+        chunks: List[Dict[str, Any]] = []
+        for item in ranges:
+            current_subs: List[Dict[str, Any]] = []
+            current_start: Optional[float] = None
+            current_end = 0.0
+            for sub in item["subtitles"]:
+                try:
+                    start = max(0.0, float(sub.get("start", 0.0)))
+                    duration = max(0.0, float(sub.get("duration", 0.0)))
+                except Exception:
+                    continue
+                end = start + duration
+                if base_duration is not None:
+                    end = min(float(base_duration), end)
+                if end <= start:
+                    continue
+
+                can_split = (
+                    current_subs
+                    and len(current_subs) >= max_subtitles
+                    and start >= current_end - 0.001
+                )
+                if can_split:
+                    chunks.append(
+                        {
+                            "start": float(current_start or 0.0),
+                            "end": current_end,
+                            "subtitles": current_subs,
+                        }
+                    )
+                    current_subs = []
+                    current_start = None
+                    current_end = 0.0
+
+                if not current_subs:
+                    current_start = start
+                    current_end = end
+                else:
+                    current_end = max(current_end, end)
+                current_subs.append(sub)
+
+            if current_subs:
+                chunks.append(
+                    {
+                        "start": float(current_start or 0.0),
+                        "end": current_end,
+                        "subtitles": current_subs,
+                    }
+                )
+        return chunks
 
     async def _copy_video_segment(
         self,
@@ -482,14 +558,17 @@ class OverlayMixin:
             base_dur = None
 
         if subtitle_mode == "png" and base_dur and len(subtitles) >= 2:
-            ranges = self._merge_subtitle_ranges(
+            gap_threshold = float(
+                (self.subtitle_gen.subtitle_config or {}).get(
+                    "copy_gap_threshold", 0.20
+                )
+            )
+            png_chunk_size = self._subtitle_png_chunk_size()
+            ranges = self._split_subtitle_ranges_for_png(
                 subtitles,
                 base_duration=float(base_dur),
-                gap_threshold=float(
-                    (self.subtitle_gen.subtitle_config or {}).get(
-                        "copy_gap_threshold", 0.20
-                    )
-                ),
+                gap_threshold=gap_threshold,
+                max_subtitles=png_chunk_size,
             )
             if ranges and (
                 ranges[0]["start"] > 0.05
@@ -497,10 +576,11 @@ class OverlayMixin:
                 or len(ranges) > 1
             ):
                 logger.info(
-                    "[SubtitleOverlay] Segment mode: re-encoding %d subtitle range(s), copying gaps (base=%.2fs, subtitles=%d)",
+                    "[SubtitleOverlay] Segment mode: re-encoding %d subtitle chunk(s), copying gaps (base=%.2fs, subtitles=%d, png_chunk_size=%d)",
                     len(ranges),
                     float(base_dur),
                     len(subtitles),
+                    png_chunk_size,
                 )
                 segment_paths: List[Path] = []
                 cursor = 0.0

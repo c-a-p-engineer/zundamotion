@@ -24,7 +24,9 @@
 - NVENC では `veryfast` など x264 系 preset を渡してはいけない。`p1`〜`p7` へ正規化する
 - `quality=speed` で NVENC `p7` を選ぶのは逆効果。`p1` が fastest、`p7` が slowest/best
 - `cache_refresh` が同一キーを何度も消す実装は無駄だった
-- いまの CPU 経路の残ボトルネックは主に `VOICEVOX`、最終字幕焼き込み、FinalizePhase のトランジション再エンコード
+- PNG 字幕焼き込みは巨大な 1 本の filter graph に戻さない。字幕範囲をチャンク分割し、字幕のない gap は stream copy する
+- FinalizePhase の `consume_next_head` 付き transition は、消費後の next scene 後続部を再エンコードせず stream copy を優先する
+- いまの CPU 経路の残ボトルネックは主に `VOICEVOX`、行クリップ生成、長尺時の字幕チャンク焼き込み
 
 ## 遅くなった変更
 
@@ -227,6 +229,60 @@
 
 注意:
 - preset エラーは解消したが、`agile/002_agile-manifesto` では Hybrid path が停止したため、NVENC auto はまだ安全な高速化とは言えない
+
+### 8. PNG 字幕焼き込みをチャンク分割した
+
+内容:
+- 完成版 PNG 字幕焼き込みを、1 本の巨大な `filter_complex` ではなく複数チャンクへ分割する
+- 字幕同士が重なる範囲は同じチャンクに残し、見た目を崩さない
+- 字幕のない gap は再エンコードせず stream copy し、最後に concat する
+- 既定の `subtitle.png_chunk_size` は `12`
+
+効果:
+- 長尺台本で巨大 filter graph が詰まる状態を避けられる
+- PNG 字幕の可読性を維持したまま、ASS/libass へ逃がさずに完走しやすくなった
+
+実測:
+- `logs/20260508_005644_685.log` の `004_ai-code-readable`
+  - `Total execution time: 220.32s`
+  - `AudioPhase: 20.57s`
+  - `VideoPhase: 191.90s`
+  - `FinalizePhase: 5.16s`
+  - `base=399.47s`, `subtitles=90`, `png_chunk_size=12`, `8 subtitle chunk(s)`
+- 同じ `004_ai-code-readable` の旧経路実行 `logs/20260507_233939_428.log` は、字幕焼き込み ffmpeg が 1 時間以上進行した後に中断された
+- `logs/20260507_225123_235.log` の `005_pc_why-restart-fixes`
+  - `Total execution time: 490.72s`
+  - `AudioPhase: 42.19s`
+  - `VideoPhase: 440.80s`
+  - `FinalizePhase: 5.26s`
+  - `base=342.54s`, `subtitles=66`, `png_chunk_size=12`, `6 subtitle chunk(s)`
+- 旧経路 `logs/20260507_171633_602.log` の `005_pc_why-restart-fixes` は `Total execution time: 1548.87s`, `VideoPhase: 1377.01s`, `FinalizePhase: 110.72s`
+
+注意:
+- 2026-05-08 の計測は永続キャッシュ有効の再生成であり、完全な cold-cache 比較ではない
+- ただし旧 `004` の巨大字幕焼き込みが実用上止まったこと、変更後 `004` が `220.32s` で完走したことから、チャンク分割は採用する
+- チャンクを小さくしすぎると concat/copy の小片が増える。大きくしすぎると巨大 filter graph 問題に戻るため、既定値 `12` を基準にする
+
+### 9. Transition の next scene 後続部を copy 優先にした
+
+内容:
+- `consume_next_head` 付き local transition では、境界の短い transition 部分だけを処理する
+- 消費後の next scene 後続部は、まず stream copy で切り出す
+- concat が失敗した場合だけ、従来どおり再エンコードへ fallback する
+
+効果:
+- dissolve transition のために next scene 後続部を丸ごと再エンコードする無駄を避けられる
+- FinalizePhase が長尺動画の主ボトルネックになりにくくなった
+
+実測:
+- `logs/20260507_171633_602.log` の `005_pc_why-restart-fixes` 旧経路: `FinalizePhase: 110.72s`
+- `logs/20260507_225123_235.log` の `005_pc_why-restart-fixes` 変更後: `FinalizePhase: 5.26s`
+- `logs/20260508_005644_685.log` の `004_ai-code-readable` 変更後: `FinalizePhase: 5.16s`
+- 変更後ログでは transition 適用時に `copied-next-suffix` が出ている
+
+今後のルール:
+- stream copy を優先するが、concat 失敗時の fallback は残す
+- codec parameters や GOP 境界の都合で copy が安全でないケースを fallback で吸収する
 
 ## ベンチマーク時の手順
 
