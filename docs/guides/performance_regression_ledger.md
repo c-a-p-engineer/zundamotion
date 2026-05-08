@@ -513,9 +513,51 @@ GPU が利用できる環境の標準比較は `HW_FILTER_MODE=cpu --hw-encoder 
   - 修正前 `647.42s` 比で `51.48s` 短縮、約 `8.0%` 短縮
   - クリップ生成ログは `CPU path: using CPU filters for scaling/overlay` になり、`keeping NVENC encoding` は消えた
 
+2026-05-08 `copipetan-dev-room/004_ai-code-readable` / `005_pc_why-restart-fixes` PNG 字幕チャンク分割 + transition suffix copy 検証:
+
+- 計測コマンド条件:
+  - `HW_FILTER_MODE=cpu`
+  - `ZUNDAMOTION_AUDIO_WORKERS=2`
+  - `ZUNDAMOTION_SCENE_WORKERS=2`
+  - `SUB_PNG_WORKERS=2`
+  - `--hw-encoder cpu --quality speed --jobs 0 --log-kv`
+  - 永続キャッシュ有効。`--no-cache` ではないため、cold-cache の厳密比較ではない
+- `004_ai-code-readable` 変更後: `logs/20260508_005644_685.log`
+  - `Total execution time: 220.32s`
+  - `GenerationPipeline.run: 219.57s`
+  - `AudioPhase: 20.57s`
+  - `VideoPhase: 191.90s`
+  - `FinalizePhase: 5.16s`
+  - 字幕焼き込み: `8 subtitle chunk(s)`, `base=399.47s`, `subtitles=90`, `png_chunk_size=12`
+  - transition: `copied-next-suffix`
+- `004_ai-code-readable` 旧経路試行: `logs/20260507_233939_428.log`
+  - `AudioPhase: 35.73s`
+  - 字幕焼き込み ffmpeg が長時間継続し、1 時間以上経過後に中断
+  - 旧経路の巨大 PNG filter graph は、長尺台本では実用上完走しないケースがある
+- `005_pc_why-restart-fixes` 旧経路: `logs/20260507_171633_602.log`
+  - `Total execution time: 1548.87s`
+  - `AudioPhase: 57.74s`
+  - `VideoPhase: 1377.01s`
+  - `FinalizePhase: 110.72s`
+- `005_pc_why-restart-fixes` 変更後: `logs/20260507_225123_235.log`
+  - `Total execution time: 490.72s`
+  - `AudioPhase: 42.19s`
+  - `VideoPhase: 440.80s`
+  - `FinalizePhase: 5.26s`
+  - 字幕焼き込み: `6 subtitle chunk(s)`, `base=342.54s`, `subtitles=66`, `png_chunk_size=12`
+  - transition: `copied-next-suffix`
+- 参考キャッシュ再生成:
+  - `logs/20260507_224417_846.log`: `005_pc_why-restart-fixes`, `Total execution time: 21.05s`, `VideoPhase: 0.01s`, `FinalizePhase: 4.38s`
+  - `logs/20260507_224930_944.log`: `005_pc_why-restart-fixes`, `Total execution time: 29.84s`, `VideoPhase: 0.01s`, `FinalizePhase: 5.80s`
+- 判定:
+  - PNG 字幕チャンク分割は採用
+  - transition suffix copy は採用
+  - 変更後 `005` は旧経路比で総時間 `-1058.15s`、約 `68.3%` 短縮。ただし worker 数、永続キャッシュ、コマンド条件の差も含むため、全短縮を単独変更の効果として扱わない
+  - cold-cache の再比較を行う場合は、同じコマンドで `cache/` を削除するか `--cache-refresh` を指定して別途記録する
+
 ## 現時点での打ち止めライン
 
-CPU 経路では、レンダラー内部だけでさらに大きく縮める余地は小さいです。
+CPU 経路では、レンダラー内部だけでさらに大きく縮める余地は以前より小さくなっています。
 
 次の大きな改善が必要なら、候補は次の 3 つです。
 
