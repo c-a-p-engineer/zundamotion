@@ -304,11 +304,16 @@ class GenerationPipeline:
             )
             if subtitle_file_config.get("enabled", False):
                 subtitle_format = subtitle_file_config.get("format", "srt")
+                subtitle_offset = float(subtitle_file_config.get("offset_seconds", 0.0) or 0.0)
                 output_path_base = Path(output_path)
 
                 if subtitle_format in ["srt", "both"]:
                     subtitle_output_path_srt = output_path_base.with_suffix(".srt")
-                    self.timeline.save_subtitles(subtitle_output_path_srt, format="srt")
+                    self.timeline.save_subtitles(
+                        subtitle_output_path_srt,
+                        format="srt",
+                        offset_seconds=subtitle_offset,
+                    )
                     if isinstance(logger, KVLogger):
                         logger.kv_info(
                             f"Subtitle file saved to {subtitle_output_path_srt}",
@@ -320,7 +325,11 @@ class GenerationPipeline:
                         )
                 if subtitle_format in ["ass", "both"]:
                     subtitle_output_path_ass = output_path_base.with_suffix(".ass")
-                    self.timeline.save_subtitles(subtitle_output_path_ass, format="ass")
+                    self.timeline.save_subtitles(
+                        subtitle_output_path_ass,
+                        format="ass",
+                        offset_seconds=subtitle_offset,
+                    )
                     if isinstance(logger, KVLogger):
                         logger.kv_info(
                             f"Subtitle file saved to {subtitle_output_path_ass}",

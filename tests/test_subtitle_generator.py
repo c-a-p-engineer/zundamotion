@@ -2,12 +2,15 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pysubs2
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from zundamotion.cache import CacheManager
 from zundamotion.components.subtitles.generator import SubtitleGenerator
+from zundamotion.timeline import Timeline
 
 
 def test_build_subtitle_overlay_ignores_non_subtitle_xy_in_line_config(tmp_path):
@@ -34,6 +37,19 @@ def test_build_subtitle_overlay_ignores_non_subtitle_xy_in_line_config(tmp_path)
 
     assert extra_input["-i"].endswith("subtitle.png")
     assert "overlay=x='(W-w)/2':y='H-100-h/2'" in snippet
+
+
+def test_save_subtitles_applies_offset_seconds(tmp_path):
+    timeline = Timeline()
+    timeline.add_event("line", 1.2, text="字幕")
+
+    output_path = tmp_path / "out.srt"
+    timeline.save_subtitles(output_path, format="srt", offset_seconds=0.5)
+
+    subs = pysubs2.load(str(output_path), format="srt")
+    assert len(subs) == 1
+    assert subs[0].start == 500
+    assert subs[0].end == 1700
 
 
 def test_build_subtitle_overlay_accepts_numeric_subtitle_xy(tmp_path):

@@ -208,16 +208,25 @@ class Timeline:
                     ]
                 )
 
-    def save_subtitles(self, output_path: Path, format: str):
+    def save_subtitles(
+        self,
+        output_path: Path,
+        format: str,
+        offset_seconds: float = 0.0,
+    ):
         """字幕ファイルを SRT または ASS 形式で保存する。"""
         subs = pysubs2.SSAFile()
         target_format = (format or "srt").lower()
+        offset_ms = int(round(float(offset_seconds or 0.0) * 1000))
         for event in self.events:
             text = event.get("text")
             if not is_effective_subtitle_text(text):
                 continue
-            start_time = int(event["start_time"] * 1000)
-            end_time = int((event["start_time"] + event["duration"]) * 1000)
+            start_time = max(0, int(event["start_time"] * 1000) + offset_ms)
+            end_time = max(
+                start_time + 1,
+                int((event["start_time"] + event["duration"]) * 1000) + offset_ms,
+            )
             payload = normalize_subtitle_text(str(text))
             if target_format == "ass":
                 payload = payload.replace("\n", r"\N")

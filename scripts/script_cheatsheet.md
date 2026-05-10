@@ -182,6 +182,15 @@ subtitle:
 - 行ごとの `subtitle` ブロックで色や余白などを一時的に上書き可能です。
 - `defaults.characters.<name>.subtitle` で話者ごとの字幕色や縁色を既定化できます。例: [`sample_markdown.md`](./sample_markdown.md)。
 - 字幕PNGだけ改行したい場合は `subtitle_text` に `"行1\n行2"` を設定します。読み仮名は `reading` で別途管理できます。
+- SRT/ASSファイルだけ動画より少し早い、または遅い場合は `system.subtitle_file.offset_seconds` で出力字幕ファイル全体を秒単位でずらせます。正の値は字幕ファイルを遅らせ、負の値は早めます。動画に焼き込むPNG字幕のタイミングは変わりません。
+
+```yaml
+system:
+  subtitle_file:
+    enabled: true
+    format: srt          # srt / ass / both
+    offset_seconds: 0.5  # SRT/ASSファイルだけ0.5秒遅らせる
+```
 
 ## 行とシーン
 
@@ -466,7 +475,7 @@ video:
 
 - `insert` と `fg_overlays` は併用可能。優先順位は行→シーン→字幕の順。
 - `wait` 行はタイムラインにも反映され、動画全体の尺調整に便利。
-- `config.yaml` 側の `system.timeline` / `system.subtitle_file` でタイムライン・字幕の自動出力を制御。
+- `config.yaml` 側の `system.timeline` / `system.subtitle_file` でタイムライン・字幕の自動出力を制御。SRT/ASSファイルの一括タイミング補正は `system.subtitle_file.offset_seconds` を使います。
 - サンプル台本: [`sample.yaml`](./sample.yaml), [`sample_effects.yaml`](./sample_effects.yaml), [`sample_screen_shake.yaml`](./sample_screen_shake.yaml), [`sample_char_bob.yaml`](./sample_char_bob.yaml), [`sample_char_shake.yaml`](./sample_char_shake.yaml), [`sample_char_sway.yaml`](./sample_char_sway.yaml), [`sample_text_bounce.yaml`](./sample_text_bounce.yaml), [`sample_vn_minimal.yaml`](./sample_vn_minimal.yaml), [`sample_transitions.yaml`](./sample_transitions.yaml)。
 - 追加の用途別サンプルまとめ: [`docs/script_samples.md`](../docs/script_samples.md)。
 
