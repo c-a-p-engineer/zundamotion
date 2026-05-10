@@ -4,6 +4,28 @@
 
 結論から書くと、CPU 経路では「大きな 1 本の filter graph にまとめれば速い」とは限りません。実測しない最適化は簡単に悪化します。
 
+## AI向けの読み方
+
+このファイルは、次の順で読むと判断を間違えにくいです。
+
+1. `最新の採用・却下一覧` で、現在の方針を先に確認する
+2. `今回の短尺ベンチ結果` で、直近の実測値と条件を確認する
+3. `遅くなった変更` / `速くなった変更` で、過去に失敗・成功した理由を見る
+4. `ベンチマーク時の手順` で、次に測るときの条件を揃える
+5. `参考ベースライン` は過去ログの詳細。厳密比較ではなく、傾向確認として扱う
+
+検索しやすいキーワード:
+
+- `FinalizePhase cache`
+- `scene base cache`
+- `subtitle layer video`
+- `PNG 字幕チャンク分割`
+- `GPU overlay`
+- `scene-unit filter graph`
+- `static slide fast path`
+- `cache_refresh`
+- `reencoded-next-suffix`
+
 ## 目的
 
 - 何をやったら遅くなったかを残す
@@ -26,7 +48,203 @@
 - `cache_refresh` が同一キーを何度も消す実装は無駄だった
 - PNG 字幕焼き込みは巨大な 1 本の filter graph に戻さない。字幕範囲をチャンク分割し、字幕のない gap は stream copy する
 - FinalizePhase の `consume_next_head` 付き transition は、消費後の next scene 後続部を再エンコードする。`-ss` + stream copy では切り出し位置より前の音声が混ざり、次シーン冒頭音声が二重化する場合がある
+- 2026-05-10 の短尺ベンチでは、`FinalizePhase cache` は採用。transition boundary と final concat intermediate を内容ハッシュでキャッシュする
+- `FinalizePhase cache` の key に一時パスや mtime を入れると、同一内容でも cache hit しない。入力動画は `size + sha256` で識別する
+- 画像アセットは画像の差し替えが発生するため、同名ファイルでも中身が変わったら別 cache として扱う。cache key 内の既存ローカル画像パスには `sha256` を含める
+- `subtitle-only transparent video` は再度却下。qtrle/alpha 中間動画の生成・I/Oが重く、短尺ベンチでも安定完走しなかった
+- `scene-unit filter graph` と `static slide fast path` は、現状の line clip + scene cache 構造を壊すリスクに対して効果未確認。既定採用しない
+- `GPU overlay` は、この環境では CUDA filter smoke が失敗したため不採用。CPU/GPU 往復が発生する構成では採用しない
 - いまの CPU 経路の残ボトルネックは主に `VOICEVOX`、行クリップ生成、長尺時の字幕チャンク焼き込み
+
+## 最新の採用・却下一覧
+
+2026-05-10 時点の判断です。新しく高速化を試す場合は、この表を先に更新してください。
+
+| 対象 | 判定 | 理由 |
+|---|---|---|
+| scene base / subtitle cache | 採用 | 字幕済み scene cache hit で `VideoPhase` がほぼ 0 秒になる |
+| FinalizePhase cache | 採用 | transition boundary と final concat の再生成を避けられる |
+| PNG 字幕チャンク分割 | 採用 | 巨大 filter graph による長時間停止を避けられる |
+| 顔 overlay 事前キャッシュ | 採用 | 同一実行内の顔 overlay 再生成を抑制できる |
+| 画像内容署名付き cache key | 採用 | 画像の差し替えが発生するため、`13-redesign.png` のような同名画像差し替えで古い scene cache を再利用しない |
+| subtitle-only transparent video | 却下 | qtrle/alpha 中間動画が重く、I/O も増える |
+| static slide fast path | 却下 | 対象条件が狭く、既存 line clip + cache と競合する |
+| scene-unit filter graph | 却下 | 巨大 filter graph 化で debug 性と保守性が落ちる |
+| GPU overlay / CUDA overlay | 却下 | smoke test 失敗。CPU/GPU 往復のリスクが高い |
+| transition suffix stream copy | 却下 | next scene 冒頭音声が再出現する場合がある |
+
+## 今回の短尺ベンチ結果
+
+2026-05-10 に、最終 mp4 出力速度を対象として短尺ベンチを行いました。
+
+### 入力条件
+
+- 台本: `vendor/zundamotion/scripts/benchmark_short_render.yaml`
+- 発話数: 24
+- 字幕: PNG 字幕あり
+- 背景画像: あり
+- キャラクター立ち絵: あり
+- foreground PNG overlay: あり
+- scene transition: あり
+- 音声: `--no-voice` による silent audio
+- 実行環境:
+  - CPU: Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz, 12 logical CPUs
+  - GPU: NVIDIA GeForce GTX 1650 with Max-Q Design, driver 581.08
+  - ffmpeg: `7.0.1-full_build-www.gyan.dev`
+  - OS: WSL2 Linux `6.6.114.1-microsoft-standard-WSL2`
+- 主な実行オプション:
+  - `--hw-encoder cpu`
+  - `--quality speed`
+  - `--jobs 0`
+  - `--no-voice`
+  - `--debug-log`
+  - `--log-kv`
+  - `FFMPEG_LOG_CMD=1`
+  - `HW_FILTER_MODE=cpu`
+
+### ベースライン
+
+Cache OFF (`--no-cache`)。
+
+| metric | value |
+|---|---:|
+| total | 158.11s |
+| AudioPhase | 22.23s |
+| VideoPhase | 110.86s |
+| FinalizePhase | 18.76s |
+
+ログ:
+
+- `logs/20260510_165357_113.log`
+
+### FinalizePhase cache 採用結果
+
+初回生成では cache miss。transition boundary と final concat intermediate を生成します。
+
+| metric | cache refresh / miss |
+|---|---:|
+| total | 141.40s |
+| VideoPhase | 94.31s |
+| FinalizePhase | 21.68s |
+
+同一入力で cache hit した場合:
+
+| metric | cache hit |
+|---|---:|
+| total | 16.14s |
+| AudioPhase | 9.19s |
+| VideoPhase | 0.01s |
+| FinalizePhase | 0.53s |
+
+改善率:
+
+| metric | baseline | cache hit | improvement |
+|---|---:|---:|---:|
+| total | 158.11s | 16.14s | 89.8% |
+| VideoPhase | 110.86s | 0.01s | 99.99% |
+| FinalizePhase | 18.76s | 0.53s | 97.2% |
+
+重要な実装メモ:
+
+- 最初は cache key に一時ファイルパスや mtime を含めていたため、warm run と hit run で key が変わった
+- 修正後は入力動画を `size + sha256` で識別する
+- 同一内容であれば temp path と cache path が変わっても `finalize_transition_*` と `finalize_concat_*` が HIT する
+
+採用理由:
+
+- transition boundary clip の再生成を避けられる
+- final concat intermediate の再生成を避けられる
+- `FinalizePhase` が `21.68s -> 0.53s` まで短縮した
+
+### subtitle-only transparent video 再検証
+
+目的:
+
+- 大量の subtitle PNG overlay chain を、透明字幕動画 + 本編への 1 overlay に置き換える
+
+結果:
+
+| metric | before | after |
+|---|---:|---:|
+| total | 125.28s | incomplete |
+| AudioPhase | 16.33s | 4.60s |
+| VideoPhase | 85.84s | incomplete |
+| FinalizePhase | 12.86s | not reached |
+
+ログ:
+
+- before: `logs/20260510_165905_789.log`
+- after: `logs/20260510_170114_885.log`
+
+判定:
+
+- 却下
+
+理由:
+
+- `Layer-video mode` は開始したが、短尺ベンチでも安定完走しなかった
+- 透明中間動画に `qtrle` / alpha を使うため、I/O と中間エンコードが増える
+- 2026-05-07 の長尺検証でも qtrle 字幕レイヤー生成が `1200.22s` かかっており、同じ失敗傾向
+- 通常運用の既定値にはしない
+
+### scene base cache 強化
+
+判定:
+
+- 採用済み機能として維持
+
+実測上の効果:
+
+- cache hit run では `scene_bench_a_sub` / `scene_bench_b_sub` が HIT
+- `VideoPhase` は `0.01s`
+
+補足:
+
+- 字幕変更のみの再生成では、scene base を再利用して字幕 burn-in だけやり直す既存テストがある
+- 今回は新規大改修ではなく、既存キャッシュ方針の有効性確認として扱う
+
+### static slide fast path
+
+判定:
+
+- 却下
+
+理由:
+
+- 今回の短尺台本は静的背景だが、foreground overlay、立ち絵、字幕 burn-in があり、既存の line clip path が使われた
+- 対象条件を厳密に絞ると適用範囲が狭い
+- 広く適用しようとすると `scene-unit filter graph` と同じ高リスク改修になる
+
+### scene-unit filter graph
+
+判定:
+
+- 却下
+
+理由:
+
+- `1 scene = 1 filter_complex` は clip 数を減らせる可能性があるが、filter graph が巨大化する
+- 既存の line clip + scene cache は debug しやすく、キャッシュも効いている
+- OSS 保守性と障害調査性を落としてまで採用する根拠がない
+
+### GPU overlay
+
+判定:
+
+- 却下
+
+観測:
+
+- CUDA filter smoke は一部失敗
+  - RGBA path: `Unsupported input format: yuva420p`
+  - NV12 download path: `Invalid output format rgba for hwframe download`
+- CPU-mode ベンチ中の GPU utilization はほぼ 0%
+
+理由:
+
+- overlay を完全に GPU 側へ寄せられない
+- CPU/GPU 往復が発生する可能性が高い
+- この環境では本番レンダリング高速化として採用できるだけの実測効果がない
 
 ## 遅くなった変更
 
@@ -286,6 +504,73 @@
 - 速度最適化目的で suffix を stream copy に戻さない。戻す場合は、キーフレーム非境界で次シーン冒頭音声が再出現しないことを音声つきの最小再現動画で確認する
 
 ## ベンチマーク時の手順
+
+### 短尺ベンチツール
+
+短尺ベンチは vendor 側のツールを使う。
+
+```bash
+python vendor/zundamotion/tools/zundamotion_perf_benchmark.py --case baseline
+```
+
+全ケースをまとめて測る場合:
+
+```bash
+python vendor/zundamotion/tools/zundamotion_perf_benchmark.py --case all
+```
+
+Task 1 / Task 4 だけを測る場合:
+
+```bash
+python vendor/zundamotion/tools/zundamotion_perf_benchmark.py --case task1
+python vendor/zundamotion/tools/zundamotion_perf_benchmark.py --case task4
+```
+
+入力台本を変える場合:
+
+```bash
+python vendor/zundamotion/tools/zundamotion_perf_benchmark.py \
+  --script vendor/zundamotion/scripts/benchmark_short_render.yaml \
+  --output-dir output/perf \
+  --case all
+```
+
+出力:
+
+- `output/perf/benchmark_results.json`
+- `output/perf/*.mp4`
+- `output/perf/variants/*.yaml`
+
+ツールが固定する主な条件:
+
+- `--hw-encoder cpu`
+- `--quality speed`
+- `--jobs 0`
+- `--no-voice`
+- `--debug-log`
+- `--log-kv`
+- `FFMPEG_LOG_CMD=1`
+- `HW_FILTER_MODE=cpu`
+- `ZUNDAMOTION_AUDIO_WORKERS=2`
+- `ZUNDAMOTION_SCENE_WORKERS=1`
+- `SUB_PNG_WORKERS=2`
+
+結果 JSON では次を見る:
+
+- `timings.total`
+- `timings.AudioPhase`
+- `timings.VideoPhase`
+- `timings.FinalizePhase`
+- `gpu_before`
+- `gpu_after`
+- `log_tail`
+
+注意:
+
+- `--case baseline` は `--no-cache` で cache off を測る
+- `--case task4` は `task4_after_warmup` で cache refresh、`task4_after_cache_hit` で cache hit を測る
+- WSL 側に `ffmpeg` / `ffprobe` がない場合、Windows 側の実行ファイルを `.bench/bin` に wrapper として自動登録する
+- vendor repo 単体で実行する場合は、必要に応じて `--script` で台本パスを明示する
 
 ### コールド計測
 

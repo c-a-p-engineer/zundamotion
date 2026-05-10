@@ -83,6 +83,41 @@ def test_get_cached_path_respects_cache_refresh(tmp_path: Path) -> None:
     assert not cached_path.exists()
 
 
+def test_image_content_changes_cache_key_for_same_path(tmp_path: Path) -> None:
+    cache = CacheManager(tmp_path / "cache")
+    image_path = tmp_path / "13-redesign.png"
+
+    image_path.write_bytes(b"old-image")
+    first = cache.get_cache_path(
+        {"kind": "scene", "background": {"path": str(image_path)}},
+        "scene_demo",
+        "mp4",
+    )
+
+    image_path.write_bytes(b"new-image")
+    second = cache.get_cache_path(
+        {"kind": "scene", "background": {"path": str(image_path)}},
+        "scene_demo",
+        "mp4",
+    )
+
+    assert first != second
+
+
+def test_file_name_field_is_not_treated_as_asset_path(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    cache = CacheManager(tmp_path / "cache")
+    media_name = tmp_path / "clip.mp4"
+
+    media_name.write_bytes(b"old")
+    first = cache.get_cache_path({"file_name": "clip.mp4"}, "duration", "json")
+
+    media_name.write_bytes(b"new")
+    second = cache.get_cache_path({"file_name": "clip.mp4"}, "duration", "json")
+
+    assert first == second
+
+
 def test_no_cache_reuses_duration_within_ephemeral_dir(tmp_path: Path, monkeypatch) -> None:
     async def _run() -> None:
         media = tmp_path / "clip.mp4"

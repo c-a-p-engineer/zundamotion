@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio
+import hashlib
 import json
 import os
 import subprocess
@@ -45,6 +46,9 @@ class FinalizePhase:
         self.hw_encoder = hw_encoder
         self.quality = quality
         self.final_copy_only = final_copy_only  # 追加
+        self.finalize_cache_enabled = bool(
+            (config.get("system", {}) or {}).get("finalize_cache", True)
+        )
         transitions_cfg = (config.get("transitions") or {})
         wait_value = transitions_cfg.get("wait_padding_seconds", 2.0)
         try:
@@ -56,6 +60,22 @@ class FinalizePhase:
             )
             wait_seconds = 0.0
         self.transition_wait_padding = max(0.0, wait_seconds)
+
+    @staticmethod
+    def _file_signature(path: Path) -> Dict[str, Any]:
+        resolved = Path(path).resolve()
+        try:
+            stat = resolved.stat()
+            digest = hashlib.sha256()
+            with resolved.open("rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            return {
+                "size": stat.st_size,
+                "sha256": digest.hexdigest(),
+            }
+        except Exception:
+            return {"path": str(resolved), "missing": True}
 
     @time_log(logger)
     async def run(  # async を追加
@@ -129,19 +149,48 @@ class FinalizePhase:
                         current.name,
                         Path(next_path).name,
                     )
-                    await apply_transition_local(
-                        str(current),
-                        str(next_path),
-                        str(out_path),
-                        t_type,
-                        t_dur,
-                        offset,
-                        self.video_params,
-                        self.audio_params,
-                        wait_padding=self.transition_wait_padding,
-                        hw_encoder=self.hw_encoder,
-                        consume_next_head=consume_next_head,
-                    )
+                    transition_key_data = {
+                        "type": "finalize_transition_boundary",
+                        "version": "20260510_v1",
+                        "current": self._file_signature(current),
+                        "next": self._file_signature(next_path),
+                        "transition": {
+                            "type": t_type,
+                            "duration": t_dur,
+                            "offset": offset,
+                            "wait_padding": self.transition_wait_padding,
+                            "consume_next_head": consume_next_head,
+                        },
+                        "video_params": self.video_params.__dict__,
+                        "audio_params": self.audio_params.__dict__,
+                        "hw_encoder": self.hw_encoder,
+                    }
+
+                    async def transition_creator(cache_output_path: Path) -> Path:
+                        await apply_transition_local(
+                            str(current),
+                            str(next_path),
+                            str(cache_output_path),
+                            t_type,
+                            t_dur,
+                            offset,
+                            self.video_params,
+                            self.audio_params,
+                            wait_padding=self.transition_wait_padding,
+                            hw_encoder=self.hw_encoder,
+                            consume_next_head=consume_next_head,
+                        )
+                        return cache_output_path
+
+                    if self.finalize_cache_enabled:
+                        out_path = await self.cache_manager.get_or_create(
+                            key_data=transition_key_data,
+                            file_name=f"finalize_transition_{i:03d}_{i+1:03d}",
+                            extension="mp4",
+                            creator_func=transition_creator,
+                        )
+                    else:
+                        await transition_creator(out_path)
                     if timeline_shift > 0 and timeline is not None and i + 1 < len(scenes):
                         next_scene = scenes[i + 1]
                         next_scene_id = str(next_scene.get("id", f"scene_{i+1}"))
@@ -180,6 +229,50 @@ class FinalizePhase:
         output_video_path = self.temp_dir / f"{safe_output_stem}.mp4"
         input_video_str_paths = [str(p.resolve()) for p in processed_paths]
 
+        final_concat_key_data = {
+            "type": "finalize_concat_intermediate",
+            "version": "20260510_v1",
+            "inputs": [self._file_signature(path) for path in processed_paths],
+            "video_params": self.video_params.__dict__,
+            "audio_params": self.audio_params.__dict__,
+            "hw_encoder": self.hw_encoder,
+            "quality": self.quality,
+            "movflags_faststart": True,
+        }
+
+        async def final_concat_creator(cache_output_path: Path) -> Path:
+            await self._concat_processed_paths(
+                processed_paths,
+                cache_output_path,
+                input_video_str_paths,
+            )
+            return cache_output_path
+
+        if self.finalize_cache_enabled:
+            output_video_path = await self.cache_manager.get_or_create(
+                key_data=final_concat_key_data,
+                file_name="finalize_concat",
+                extension="mp4",
+                creator_func=final_concat_creator,
+            )
+        else:
+            await final_concat_creator(output_video_path)
+
+        final_video_duration = await get_media_duration(str(output_video_path))
+        logger.info(
+            f"FinalizePhase: Final video '{output_video_path.name}' actual duration: {final_video_duration:.2f}s"
+        )
+
+        return output_video_path
+
+    async def _concat_processed_paths(
+        self,
+        processed_paths: List[Path],
+        output_video_path: Path,
+        input_video_str_paths: List[str],
+    ) -> Path:
+        """Concat transition-processed scene videos, copying when possible."""
+
         if await compare_media_params(input_video_str_paths):
             logger.info(
                 "FinalizePhase: All video clips have identical parameters. Attempting -c copy concat."
@@ -192,7 +285,7 @@ class FinalizePhase:
                 logger.info(
                     f"FinalizePhase: Successfully concatenated videos using -c copy to {output_video_path}"
                 )
-                return output_video_path  # 成功時に即座にリターン
+                return output_video_path
             except Exception as e:
                 logger.warning(
                     f"FinalizePhase: Failed to concat with -c copy: {e}. Falling back to re-encode concat."
@@ -225,11 +318,6 @@ class FinalizePhase:
                 )
             logger.warning("FinalizePhase: Falling back to re-encode concat.")
             await self._reencode_concat(processed_paths, output_video_path)
-
-        final_video_duration = await get_media_duration(str(output_video_path))
-        logger.info(
-            f"FinalizePhase: Final video '{output_video_path.name}' actual duration: {final_video_duration:.2f}s"
-        )
 
         return output_video_path
 

@@ -18,6 +18,42 @@ from .utils.ffmpeg_ops import normalize_media
 from .utils.logger import logger
 
 
+_IMAGE_CACHE_KEY_SUFFIXES = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".bmp",
+    ".webp",
+    ".gif",
+    ".tif",
+    ".tiff",
+}
+_MEDIA_CACHE_KEY_SUFFIXES = _IMAGE_CACHE_KEY_SUFFIXES | {
+    ".mp4",
+    ".mov",
+    ".webm",
+    ".avi",
+    ".mkv",
+    ".wav",
+    ".mp3",
+    ".m4a",
+    ".flac",
+    ".ogg",
+}
+_CACHE_KEY_PATH_FIELDS = {
+    "path",
+    "input_path",
+    "src",
+    "bg",
+    "background",
+    "background_default",
+    "bg_image_path",
+    "image_path",
+    "audio_path",
+    "video_path",
+}
+
+
 class CacheManager:
     """メディア情報や正規化ファイルをキャッシュする。"""
 
@@ -104,6 +140,94 @@ class CacheManager:
             )
             cached_path.unlink()
 
+    def _resolve_cache_key_file(self, value: str | Path) -> Optional[Path]:
+        """Resolve a local media path referenced by cache key data, if it exists."""
+        try:
+            raw = Path(value)
+        except (TypeError, ValueError):
+            return None
+        if raw.suffix.lower() not in _MEDIA_CACHE_KEY_SUFFIXES:
+            return None
+
+        candidates = [raw]
+        if not raw.is_absolute():
+            candidates.append(Path.cwd() / raw)
+
+        for candidate in candidates:
+            try:
+                resolved = candidate.expanduser().resolve()
+            except Exception:
+                continue
+            if resolved.is_file():
+                return resolved
+        return None
+
+    def _cache_key_file_signature(self, file_path: Path) -> Dict[str, Any]:
+        """Return file identity for cache keys so same-path asset replacements miss."""
+        stat = file_path.stat()
+        signature: Dict[str, Any] = {
+            "path": str(file_path),
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+        }
+
+        if file_path.suffix.lower() in _IMAGE_CACHE_KEY_SUFFIXES:
+            digest = hashlib.sha256()
+            with file_path.open("rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            signature["sha256"] = digest.hexdigest()
+
+        return signature
+
+    def _is_cache_key_path_field(self, key: Any) -> bool:
+        if not isinstance(key, str):
+            return False
+        lowered = key.lower()
+        return (
+            lowered in _CACHE_KEY_PATH_FIELDS
+            or lowered.endswith("_path")
+            or lowered.endswith("_src")
+        )
+
+    def _augment_file_signatures_for_hash(
+        self,
+        value: Any,
+        *,
+        parent_key: Any = None,
+    ) -> Any:
+        """Recursively include media file signatures in cache key data."""
+        if isinstance(value, dict):
+            return {
+                key: self._augment_file_signatures_for_hash(item, parent_key=key)
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            return [
+                self._augment_file_signatures_for_hash(item, parent_key=parent_key)
+                for item in value
+            ]
+        if isinstance(value, Path):
+            if not self._is_cache_key_path_field(parent_key):
+                return str(value)
+            resolved = self._resolve_cache_key_file(value)
+            if resolved is not None:
+                return {
+                    "__cache_path": str(value),
+                    "__file_signature": self._cache_key_file_signature(resolved),
+                }
+            return str(value)
+        if isinstance(value, str):
+            if not self._is_cache_key_path_field(parent_key):
+                return value
+            resolved = self._resolve_cache_key_file(value)
+            if resolved is not None:
+                return {
+                    "__cache_path": value,
+                    "__file_signature": self._cache_key_file_signature(resolved),
+                }
+        return value
+
     def _generate_hash(self, data: Dict[str, Any]) -> str:
         """辞書データから SHA256 ハッシュを生成する。"""
 
@@ -113,7 +237,13 @@ class CacheManager:
                     return str(obj)
                 return json.JSONEncoder.default(self, obj)
 
-        sorted_data = json.dumps(data, sort_keys=True, cls=PathEncoder).encode("utf-8")
+        key_data = {
+            "__cache_key_version": "20260510_media_content_signature_v1",
+            "data": self._augment_file_signatures_for_hash(data),
+        }
+        sorted_data = json.dumps(key_data, sort_keys=True, cls=PathEncoder).encode(
+            "utf-8"
+        )
         return hashlib.sha256(sorted_data).hexdigest()
 
     def _media_probe_cache_key_data(self, file_path: Path, operation: str) -> Dict[str, Any]:

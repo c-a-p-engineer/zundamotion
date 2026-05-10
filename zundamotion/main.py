@@ -135,6 +135,11 @@ async def main() -> None:
         help="If set, outputs logs in human-readable Key-Value pair format.",
     )
     parser.add_argument(
+        "--debug-log",
+        action="store_true",
+        help="Enable DEBUG logging, including FFmpeg command lines.",
+    )
+    parser.add_argument(
         "--hw-encoder",
         type=str,
         default="auto",
@@ -206,7 +211,7 @@ async def main() -> None:
 
     # Setup logging based on --log-json or --log-kv argument
     # If both are set, --log-kv takes precedence for console output
-    setup_logging(log_json=args.log_json, log_kv=args.log_kv)
+    setup_logging(log_json=args.log_json, debug_mode=args.debug_log, log_kv=args.log_kv)
     logger: KVLogger = get_logger()  # Explicitly type hint logger as KVLogger
 
     # Ensure FFmpeg/ffprobe dependencies are available before proceeding

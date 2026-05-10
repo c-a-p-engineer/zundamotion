@@ -557,6 +557,35 @@ class OverlayMixin:
         except Exception:
             base_dur = None
 
+        video_cfg = getattr(self, "video_config", {}) or {}
+        if (
+            subtitle_mode == "png"
+            and base_dur
+            and bool(video_cfg.get("subtitle_layer_video", False))
+        ):
+            logger.info(
+                "[SubtitleOverlay] Layer-video mode: generating transparent subtitle layer (%d subtitles, base=%.2fs)",
+                len(subtitles),
+                float(base_dur),
+            )
+            try:
+                layer_path = await self._render_subtitle_layer_video(
+                    subtitles,
+                    duration=float(base_dur),
+                    output_path=self.temp_dir / f"{base_video.stem}_subtitle_layer.mov",
+                )
+                return await self._overlay_subtitle_layer_video(
+                    base_video,
+                    layer_path,
+                    output_path,
+                    duration=float(base_dur),
+                )
+            except Exception as err:
+                logger.warning(
+                    "[SubtitleOverlay] Layer-video mode failed (%s). Falling back to default burn.",
+                    err,
+                )
+
         if subtitle_mode == "png" and base_dur and len(subtitles) >= 2:
             gap_threshold = float(
                 (self.subtitle_gen.subtitle_config or {}).get(
@@ -636,6 +665,94 @@ class OverlayMixin:
                     )
 
         return await self._apply_subtitle_overlays_full(base_video, subtitles, output_path)
+
+    async def _render_subtitle_layer_video(
+        self,
+        subtitles: List[Dict[str, Any]],
+        *,
+        duration: float,
+        output_path: Path,
+    ) -> Path:
+        """Render subtitle PNGs into one transparent intermediate video."""
+        params = self.video_params
+        cmd: List[str] = [
+            self.ffmpeg_path,
+            "-y",
+            "-nostdin",
+            "-f",
+            "lavfi",
+            "-i",
+            (
+                f"color=c=black@0.0:s={int(params.width)}x{int(params.height)}:"
+                f"r={int(params.fps)}:d={duration:.3f},format=rgba"
+            ),
+        ]
+
+        filter_parts: List[str] = []
+        prev_stream = "[0:v]"
+        for idx, sub in enumerate(subtitles, start=1):
+            input_index = idx
+            extra_input, snippet = await self.subtitle_gen.build_subtitle_overlay(
+                sub["text"],
+                sub["duration"],
+                sub.get("line_config", {}),
+                in_label=prev_stream.strip("[]"),
+                index=input_index,
+                force_cpu=True,
+                allow_cuda=False,
+            )
+            for k, v in extra_input.items():
+                cmd.extend([k, v])
+
+            start = float(sub["start"])
+            end = start + float(sub["duration"])
+            snippet = snippet.replace(
+                f"between(t,0,{sub['duration']})", f"between(t,{start},{end})"
+            )
+            filter_parts.append(snippet)
+            prev_stream = f"[with_subtitle_{input_index}]"
+
+        cmd.extend(self._single_job_thread_flags())
+        cmd.extend(["-filter_complex", ";".join(filter_parts), "-map", prev_stream])
+        cmd.extend(["-an", "-c:v", "qtrle", "-pix_fmt", "argb", "-t", f"{duration:.3f}"])
+        cmd.append(str(output_path))
+
+        await _run_ffmpeg(cmd)
+        return output_path
+
+    async def _overlay_subtitle_layer_video(
+        self,
+        base_video: Path,
+        layer_video: Path,
+        output_path: Path,
+        *,
+        duration: float,
+    ) -> Path:
+        """Overlay a pre-rendered transparent subtitle layer onto the base video."""
+        cmd: List[str] = [
+            self.ffmpeg_path,
+            "-y",
+            "-nostdin",
+            "-i",
+            str(base_video),
+            "-i",
+            str(layer_video),
+        ]
+        cmd.extend(self._single_job_thread_flags())
+        cmd.extend(
+            [
+                "-filter_complex",
+                "[0:v][1:v]overlay=0:0:format=auto[final_v]",
+                "-map",
+                "[final_v]",
+                "-map",
+                "0:a?",
+            ]
+        )
+        cmd.extend(self._subtitle_burn_video_opts("png"))
+        cmd.extend(["-c:a", "copy", "-t", f"{duration:.3f}", str(output_path)])
+        await _run_ffmpeg(cmd)
+        return output_path
 
     async def _apply_subtitle_overlays_full(
         self,

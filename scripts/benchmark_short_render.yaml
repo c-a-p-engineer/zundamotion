@@ -1,0 +1,110 @@
+meta:
+  title: short render benchmark
+  version: 1
+video:
+  width: 1280
+  height: 720
+  fps: 30
+  audio_codec: aac
+  audio_bitrate_kbps: 128
+  gpu_scale_with_cpu_overlay: false
+  allow_opencl_overlay_in_cpu_mode: false
+  subtitle_layer_video: false
+system:
+  cache_scene_base_video: true
+  finalize_cache: true
+  timeline:
+    enabled: false
+  subtitle_file:
+    enabled: false
+transitions:
+  wait_padding_seconds: 0.25
+defaults:
+  characters_persist: true
+  speed: 1.05
+  pause: 0.05
+  characters:
+    copipetan:
+      speaker_id: 3
+      position: {x: -500, y: 620}
+      scale: 0.62
+      anchor: bottom_center
+      mouth_sync: false
+      subtitle:
+        font_color: "#FDE68A"
+        stroke_color: "#7C2D12"
+    linka:
+      speaker_id: 8
+      position: {x: 500, y: 620}
+      scale: 0.52
+      anchor: bottom_center
+      mouth_sync: false
+      subtitle:
+        font_color: "#BFDBFE"
+        stroke_color: "#1E3A8A"
+voice:
+  estimate_chars_per_second: 16
+  estimate_min_duration: 0.55
+subtitle:
+  font_path: /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf
+  font_size: 34
+  max_chars_per_line: 20
+  y: h-70-text_h/2
+  png_chunk_size: 24
+scenes:
+  - id: bench_a
+    bg: assets/slides/copipetan-dev-room/008_dev_zundamotion-intro/01-cover.png
+    fg_overlays:
+      - src: assets/overlay/speedlines.png
+        mode: overlay
+        opacity: 0.18
+        start: 1.0
+        duration: 1.2
+    items:
+      - say:
+          text: "ベンチ一、背景と字幕を重ねます。"
+          speaker_name: copipetan
+          characters:
+            - {name: copipetan, expression: default, visible: true}
+            - {name: linka, expression: default, visible: true}
+      - say: {text: "短い発話を続けて、オーバーレイ数を作ります。", speaker_name: linka}
+      - say: {text: "字幕PNGの数を増やすための行です。", speaker_name: copipetan}
+      - say: {text: "同じ背景のまま、キャラも固定します。", speaker_name: linka}
+      - say: {text: "ここでは大きなアニメーションは使いません。", speaker_name: copipetan}
+      - say: {text: "ただし前景オーバーレイは少し入れます。", speaker_name: linka}
+      - say: {text: "シーンベースの効果を測れる構成です。", speaker_name: copipetan}
+      - say: {text: "字幕だけ変えるケースにも使います。", speaker_name: linka}
+      - say: {text: "クリップ分割の影響も見ます。", speaker_name: copipetan}
+      - say: {text: "最後にトランジションへ進みます。", speaker_name: linka}
+      - say: {text: "この行で一つ目のシーンを閉じます。", speaker_name: copipetan}
+      - say: {text: "境界処理の時間も記録します。", speaker_name: linka}
+    transition:
+      type: dissolve
+      duration: 0.25
+
+  - id: bench_b
+    bg: assets/bg/room.png
+    fg_overlays:
+      - src: assets/overlay/speedlines.png
+        mode: overlay
+        opacity: 0.12
+        start: 0.6
+        duration: 1.0
+    items:
+      - say:
+          text: "二つ目のシーンです。"
+          speaker_name: linka
+          characters:
+            - {name: copipetan, expression: default, visible: true}
+            - {name: linka, expression: default, visible: true}
+      - say: {text: "背景画像を変えて、concat対象を増やします。", speaker_name: copipetan}
+      - say: {text: "字幕PNGの焼き込みをもう一度測ります。", speaker_name: linka}
+      - say: {text: "静的スライドの高速経路も対象です。", speaker_name: copipetan}
+      - say: {text: "キャラクターは同じ位置で固定です。", speaker_name: linka}
+      - say: {text: "音声は短く、測定時間を抑えます。", speaker_name: copipetan}
+      - say: {text: "ファイナライズのキャッシュも確認します。", speaker_name: linka}
+      - say: {text: "同じ入力で二回目を走らせます。", speaker_name: copipetan}
+      - say: {text: "字幕だけ変える比較もできます。", speaker_name: linka}
+      - say: {text: "フィルタグラフの長さをログで見ます。", speaker_name: copipetan}
+      - say: {text: "GPU状態もベンチログへ残します。", speaker_name: linka}
+      - say: {text: "これで短いベンチ台本は完了です。", speaker_name: copipetan}
