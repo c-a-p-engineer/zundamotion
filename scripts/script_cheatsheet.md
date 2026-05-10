@@ -476,6 +476,7 @@ video:
 - `insert` と `fg_overlays` は併用可能。優先順位は行→シーン→字幕の順。
 - `wait` 行はタイムラインにも反映され、動画全体の尺調整に便利。
 - `config.yaml` 側の `system.timeline` / `system.subtitle_file` でタイムライン・字幕の自動出力を制御。SRT/ASSファイルの一括タイミング補正は `system.subtitle_file.offset_seconds` を使います。
+- `system.cache_scene_base_video: true` で、字幕焼き込み前のシーン動画を内部キャッシュします。字幕だけを直した再生成では `[SceneCache] layer=base HIT` が出れば、発話クリップ生成とシーンconcatをスキップして字幕焼き込みから再開できます。`system.generate_no_sub_video` は `*_no_sub.mp4` を成果物として出す別機能です。
 - サンプル台本: [`sample.yaml`](./sample.yaml), [`sample_effects.yaml`](./sample_effects.yaml), [`sample_screen_shake.yaml`](./sample_screen_shake.yaml), [`sample_char_bob.yaml`](./sample_char_bob.yaml), [`sample_char_shake.yaml`](./sample_char_shake.yaml), [`sample_char_sway.yaml`](./sample_char_sway.yaml), [`sample_text_bounce.yaml`](./sample_text_bounce.yaml), [`sample_vn_minimal.yaml`](./sample_vn_minimal.yaml), [`sample_transitions.yaml`](./sample_transitions.yaml)。
 - 追加の用途別サンプルまとめ: [`docs/script_samples.md`](../docs/script_samples.md)。
 

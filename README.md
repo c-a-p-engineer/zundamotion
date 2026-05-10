@@ -1055,6 +1055,8 @@ voice:
   parallel_workers: auto
 
 system:
+  # 字幕なしのシーン動画を内部キャッシュし、字幕だけの再生成を速くする
+  cache_scene_base_video: true
   # *_no_sub.mp4 は必要なときだけ有効化
   generate_no_sub_video: false
 ```
@@ -1063,6 +1065,7 @@ system:
 - 静的オーバーレイが1つ以上ある場合は常にベース映像を生成（静的レイヤを事前合成）。
 - 静的オーバーレイが無い場合、行数が `scene_base_min_lines` 未満ならベース生成をスキップし、背景動画を一度だけ正規化して各行の合成に使います（`normalized=True`/`pre_scaled=True` 伝搬）。
 - 行数がしきい値以上なら、再利用効率の観点からベース映像を生成します。
+- `system.cache_scene_base_video: true` の場合、シーン結合後かつ字幕焼き込み前の動画を `scene_<id>_base` として内部キャッシュします。字幕テキスト、字幕位置、フォントなどを調整した再生成では、このベース動画を再利用し、字幕焼き込みからやり直せます。`*_no_sub.mp4` を成果物として出力する `system.generate_no_sub_video` とは別機能です。
 
 ---
 
@@ -1097,6 +1100,7 @@ system:
   - オーバーレイが重いシーンは初回から `clip_workers=2` へ寄せ、単一シーンで6本以上の FFmpeg を同時起動して遅くなるケースを避けます。
 - リップシンク補正: 口パクタイムラインは `audio_delay` を加味してシフトするようにし、キャラ登場アニメ後に音声を遅延再生するケースでも口の動きが先行しないようにします。
 - no_sub 動画は opt-in: `system.generate_no_sub_video: false` を既定にし、必要なときだけ `*_no_sub.mp4` を生成するようにしました。高速化優先時は余分な Finalize/BGM を避けられます。
+- 字幕なしシーン内部キャッシュ: `system.cache_scene_base_video: true` を既定にし、字幕焼き込み前の `scene_<id>_base` を再利用します。字幕だけを調整する再生成では `[SceneCache] layer=base HIT` のログが出れば、発話クリップ生成とシーンconcatをスキップできます。
 - 完成版 / no_sub の分離: no_sub を有効にした場合は FinalizePhase の出力ファイル名を分け、完成版を no_sub 版で上書きしないようにしました。
 - 一時ディレクトリ（RAMディスク）: `USE_RAMDISK=1`（既定）で空き容量が十分なら `/dev/shm` を一時ディレクトリに使用し、I/Oを高速化します。
 - 正規化の再実行抑止: 正規化出力に `<name>.meta.json` を隣接保存し、同一 `target_spec` の入力は再正規化をスキップします。

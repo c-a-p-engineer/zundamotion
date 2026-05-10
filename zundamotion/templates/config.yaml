@@ -15,6 +15,7 @@ system:
   subtitle_file:
     enabled: true
     format: "srt" # Can be "srt", "ass", "both", or "none"
+  cache_scene_base_video: true # Cache per-scene no-subtitle video internally for faster subtitle-only rebuilds.
   generate_no_sub_video: false # Generate *_no_sub.mp4 only when explicitly needed.
 
 # Plugin system

@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,18 +25,53 @@ class _DummyCacheManager:
     def __init__(self, cache_dir: Path) -> None:
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_calls: list[dict[str, object]] = []
+        self.get_calls: list[dict[str, object]] = []
 
-    def get_cached_path(self, **_kwargs):
-        return None
+    def get_cached_path(self, *, key_data, file_name: str, extension: str):
+        self.get_calls.append(
+            {
+                "key_data": key_data,
+                "key_hash": self._generate_hash(key_data),
+                "file_name": file_name,
+                "extension": extension,
+            }
+        )
+        path = self.get_cache_path(
+            key_data=key_data,
+            file_name=file_name,
+            extension=extension,
+        )
+        return path if path.exists() else None
 
-    def _generate_hash(self, _data):
-        return "dummyhash"
+    def _generate_hash(self, data):
+        payload = json.dumps(data, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def get_cache_path(self, *, key_data, file_name: str, extension: str) -> Path:
+        return self.cache_dir / f"{file_name}_{self._generate_hash(key_data)}.{extension}"
 
     async def get_or_create(self, *, file_name: str, extension: str, creator_func, **_kwargs):
         return await creator_func(self.cache_dir / f"{file_name}.{extension}")
 
-    def cache_file(self, **_kwargs) -> None:
-        return None
+    def cache_file(self, *, source_path: Path, key_data, file_name: str, extension: str) -> Path:
+        target = self.get_cache_path(
+            key_data=key_data,
+            file_name=file_name,
+            extension=extension,
+        )
+        target.write_bytes(Path(source_path).read_bytes())
+        self.cache_calls.append(
+            {
+                "source_path": source_path,
+                "key_data": key_data,
+                "key_hash": self._generate_hash(key_data),
+                "file_name": file_name,
+                "extension": extension,
+                "target": target,
+            }
+        )
+        return target
 
 
 class _DummySubtitleGen:
@@ -191,6 +228,206 @@ def test_scene_renderer_keeps_subtitles_scene_level_while_passing_line_config_fo
         assert video_renderer.render_clip_calls[0]["subtitle_line_config"] == line_config
         assert len(video_renderer.apply_subtitle_calls) == 1
         assert video_renderer.apply_subtitle_calls[0][0]["text"] == "字幕テスト"
+
+    asyncio.run(_run())
+
+
+def test_scene_renderer_reuses_cached_base_before_subtitle_burn(
+    tmp_path: Path,
+) -> None:
+    async def _run() -> None:
+        audio_path = tmp_path / "audio.wav"
+        audio_path.write_bytes(b"audio")
+
+        line_config = {"subtitle": {"size": 48}}
+        scene = {
+            "id": "demo",
+            "lines": [{"text": "字幕テスト"}],
+        }
+        line_data_map = {
+            "demo_1": {
+                "type": "talk",
+                "text": "字幕テスト",
+                "audio_path": audio_path,
+                "duration": 1.0,
+                "line_config": line_config,
+            }
+        }
+        phase_base = {
+            "config": {
+                "background": {"default": "assets/bg/sample.png"},
+                "subtitle": {},
+                "system": {
+                    "generate_no_sub_video": False,
+                    "cache_scene_base_video": True,
+                },
+                "video": {},
+            },
+            "temp_dir": tmp_path,
+            "hw_kind": None,
+            "video_params": VideoParams(width=320, height=180, fps=30),
+            "audio_params": AudioParams(),
+            "video_extensions": {".mp4", ".mov", ".webm", ".avi", ".mkv"},
+            "_norm_char_entries": lambda _line: {},
+            "clip_workers": 1,
+            "auto_tune_enabled": False,
+            "parallel_scene_rendering": False,
+            "_profile_samples": [],
+            "profile_limit": 4,
+            "_clip_samples_all": [],
+            "_retuned": False,
+        }
+
+        cache_manager = _DummyCacheManager(tmp_path / "cache")
+        first_video_renderer = _DummyVideoRenderer(tmp_path)
+        first_phase = SimpleNamespace(
+            **phase_base,
+            cache_manager=cache_manager,
+            video_renderer=first_video_renderer,
+        )
+        first_renderer = SceneRenderer(
+            phase=first_phase,
+            scene=scene,
+            scene_hash_data={"scene": "demo", "subtitle_config": {}},
+            scene_idx=0,
+            total_scenes=1,
+            line_data_map=line_data_map,
+            timeline=None,
+            pbar_scenes=_DummyPbar(),
+        )
+
+        await first_renderer.render_scene()
+
+        assert any(call["file_name"] == "scene_demo_base" for call in cache_manager.cache_calls)
+        assert any(call["file_name"] == "scene_demo_sub" for call in cache_manager.cache_calls)
+
+        for call in list(cache_manager.cache_calls):
+            if call["file_name"] == "scene_demo_sub":
+                Path(call["target"]).unlink()
+
+        second_video_renderer = _DummyVideoRenderer(tmp_path)
+        second_phase = SimpleNamespace(
+            **phase_base,
+            cache_manager=cache_manager,
+            video_renderer=second_video_renderer,
+        )
+        second_renderer = SceneRenderer(
+            phase=second_phase,
+            scene=scene,
+            scene_hash_data={"scene": "demo", "subtitle_config": {"font_size": 52}},
+            scene_idx=0,
+            total_scenes=1,
+            line_data_map=line_data_map,
+            timeline=None,
+            pbar_scenes=_DummyPbar(),
+        )
+
+        outputs = await second_renderer.render_scene()
+
+        assert outputs == [tmp_path / "scene_output_demo_sub.mp4"]
+        assert second_video_renderer.render_clip_calls == []
+        assert len(second_video_renderer.apply_subtitle_calls) == 1
+        assert second_video_renderer.apply_subtitle_calls[0][0]["text"] == "字幕テスト"
+
+    asyncio.run(_run())
+
+
+def test_scene_renderer_scene_cache_key_stays_stable_after_character_persist_mutation(
+    tmp_path: Path,
+) -> None:
+    async def _run() -> None:
+        audio_path = tmp_path / "audio.wav"
+        audio_path.write_bytes(b"audio")
+
+        line_config = {"subtitle": {"size": 48}}
+        scene = {
+            "id": "demo",
+            "characters_persist": True,
+            "lines": [
+                {
+                    "text": "最初",
+                    "characters": [
+                        {
+                            "name": "hero",
+                            "expression": "default",
+                            "anchor": "bottom_center",
+                            "position": {"x": 0, "y": 0},
+                            "scale": 1.0,
+                        }
+                    ],
+                },
+                {"text": "次"},
+            ],
+        }
+        line_data_map = {
+            "demo_1": {
+                "type": "talk",
+                "text": "最初",
+                "audio_path": audio_path,
+                "duration": 1.0,
+                "line_config": line_config,
+            },
+            "demo_2": {
+                "type": "talk",
+                "text": "次",
+                "audio_path": audio_path,
+                "duration": 1.0,
+                "line_config": line_config,
+            },
+        }
+
+        cache_manager = _DummyCacheManager(tmp_path / "cache")
+        phase = SimpleNamespace(
+            config={
+                "background": {"default": "assets/bg/sample.png"},
+                "subtitle": {},
+                "system": {
+                    "generate_no_sub_video": False,
+                    "cache_scene_base_video": True,
+                },
+                "video": {},
+                "defaults": {"characters_persist": False},
+            },
+            cache_manager=cache_manager,
+            video_renderer=_DummyVideoRenderer(tmp_path),
+            temp_dir=tmp_path,
+            hw_kind=None,
+            video_params=VideoParams(width=320, height=180, fps=30),
+            audio_params=AudioParams(),
+            video_extensions={".mp4", ".mov", ".webm", ".avi", ".mkv"},
+            _norm_char_entries=lambda _line: {},
+            clip_workers=1,
+            auto_tune_enabled=False,
+            parallel_scene_rendering=False,
+            _profile_samples=[],
+            profile_limit=4,
+            _clip_samples_all=[],
+            _retuned=False,
+        )
+        renderer = SceneRenderer(
+            phase=phase,
+            scene=scene,
+            scene_hash_data={
+                "scene": "demo",
+                "lines": scene["lines"],
+                "subtitle_config": {},
+            },
+            scene_idx=0,
+            total_scenes=1,
+            line_data_map=line_data_map,
+            timeline=None,
+            pbar_scenes=_DummyPbar(),
+        )
+
+        await renderer.render_scene()
+
+        sub_get = next(
+            call for call in cache_manager.get_calls if call["file_name"] == "scene_demo_sub"
+        )
+        sub_store = next(
+            call for call in cache_manager.cache_calls if call["file_name"] == "scene_demo_sub"
+        )
+        assert sub_get["key_hash"] == sub_store["key_hash"]
 
     asyncio.run(_run())
 

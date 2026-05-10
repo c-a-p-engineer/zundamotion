@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
 import subprocess
@@ -1112,15 +1113,76 @@ class SceneRenderer:
         logger.info("Scene %s: rendered via simple fast path -> %s", scene_id, output_path.name)
         return output_path
 
+    def _scene_base_cache_data(self, scene_hash_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Build cache data for the no-subtitle scene layer."""
+        base_data = {
+            key: value
+            for key, value in scene_hash_data.items()
+            if key != "subtitle_config"
+        }
+        base_data.update(
+            {
+                "scene_cache_layer": "base_no_subtitle",
+                "scene_base_cache_version": "20260510_scene_base_v1",
+            }
+        )
+        return base_data
+
+    def _scene_subtitle_cache_data(
+        self,
+        scene_hash_data: Dict[str, Any],
+        scene_base_hash_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Build cache data for the subtitle-burned scene layer."""
+        return {
+            **scene_hash_data,
+            "scene_cache_layer": "subtitle_burned",
+            "scene_subtitle_cache_version": "20260510_scene_sub_v1",
+            "scene_base_cache_key": self.cache_manager._generate_hash(
+                scene_base_hash_data
+            ),
+        }
+
+    def _cache_key_short(self, key_data: Dict[str, Any]) -> str:
+        try:
+            return self.cache_manager._generate_hash(key_data)[:8]
+        except Exception:
+            return "-"
+
+    def _build_subtitle_entries(
+        self,
+        scene_id: str,
+        start_time_by_idx: Dict[int, float],
+    ) -> List[Dict[str, Any]]:
+        subtitle_entries: List[Dict[str, Any]] = []
+        for idx, _line in enumerate(self.scene.get("lines", []) or [], start=1):
+            data = self.line_data_map.get(f"{scene_id}_{idx}") or {}
+            text = data.get("text")
+            if not is_effective_subtitle_text(text):
+                continue
+            subtitle_entries.append(
+                {
+                    "text": text,
+                    "line_config": data.get("line_config", {}),
+                    "duration": float(data.get("duration", 0.0)),
+                    "start": float(start_time_by_idx.get(idx, 0.0)),
+                }
+            )
+        subtitle_entries.sort(key=lambda item: item["start"])
+        return subtitle_entries
+
     async def render_scene(self) -> List[Path]:
         scene = self.scene
         scene_id = scene["id"]
         bg_default = self.config.get("background", {}).get("default")
         pbar_scenes = self.pbar_scenes
-        scene_hash_data = {
-            **self.scene_hash_data,
-            "scene_render_version": "20260502_subtitle_render_mode_v1",
-        }
+        scene_hash_data = copy.deepcopy(self.scene_hash_data)
+        scene_hash_data["scene_render_version"] = "20260502_subtitle_render_mode_v1"
+        scene_base_hash_data = self._scene_base_cache_data(scene_hash_data)
+        scene_sub_hash_data = self._scene_subtitle_cache_data(
+            scene_hash_data,
+            scene_base_hash_data,
+        )
 
         scene_cp = bool(
             scene.get(
@@ -1147,19 +1209,57 @@ class SceneRenderer:
             self.config.get("system", {}).get("generate_no_sub_video", False)
         )
         cached_scene_video_path = self.cache_manager.get_cached_path(
+            key_data=scene_sub_hash_data,
+            file_name=f"scene_{scene_id}_sub",
+            extension="mp4",
+        )
+        if cached_scene_video_path:
+            logger.info(
+                "[SceneCache] scene=%s layer=sub HIT key=%s file=%s",
+                scene_id,
+                self._cache_key_short(scene_sub_hash_data),
+                cached_scene_video_path.name,
+            )
+            pbar_scenes.update(1)
+            return [cached_scene_video_path]
+
+        cached_legacy_scene_video_path = self.cache_manager.get_cached_path(
             key_data=scene_hash_data,
             file_name=f"scene_{scene_id}",
             extension="mp4",
         )
+        if cached_legacy_scene_video_path:
+            logger.info(
+                "[SceneCache] scene=%s layer=legacy HIT key=%s file=%s",
+                scene_id,
+                self._cache_key_short(scene_hash_data),
+                cached_legacy_scene_video_path.name,
+            )
+            pbar_scenes.update(1)
+            return [cached_legacy_scene_video_path]
+
         if generate_no_sub_video:
             cached_scene_video_path = self.cache_manager.get_cached_path(
                 key_data=scene_hash_data,
                 file_name=f"scene_{scene_id}_sub",
                 extension="mp4",
-            ) or cached_scene_video_path
-        if cached_scene_video_path:
-            pbar_scenes.update(1)
-            return [cached_scene_video_path]
+            )
+            if cached_scene_video_path:
+                logger.info(
+                    "[SceneCache] scene=%s layer=legacy_sub HIT key=%s file=%s",
+                    scene_id,
+                    self._cache_key_short(scene_hash_data),
+                    cached_scene_video_path.name,
+                )
+                pbar_scenes.update(1)
+                return [cached_scene_video_path]
+
+        logger.info(
+            "[SceneCache] scene=%s layer=sub MISS key=%s base_key=%s",
+            scene_id,
+            self._cache_key_short(scene_sub_hash_data),
+            self._cache_key_short(scene_base_hash_data),
+        )
 
         if not getattr(self.phase, "parallel_scene_rendering", False):
             pbar_scenes.set_description(
@@ -1181,6 +1281,14 @@ class SceneRenderer:
         scene_results: List[Path] = []
         generate_no_sub_video = bool(
             self.config.get("system", {}).get("generate_no_sub_video", False)
+        )
+        cache_scene_base_video = bool(
+            self.config.get("system", {}).get("cache_scene_base_video", True)
+        )
+        scene_base_hash_data = self._scene_base_cache_data(scene_hash_data)
+        scene_sub_hash_data = self._scene_subtitle_cache_data(
+            scene_hash_data,
+            scene_base_hash_data,
         )
 
         bg_image = scene.get("bg", bg_default)
@@ -1233,6 +1341,61 @@ class SceneRenderer:
             d = line_data_map[line_id2]["duration"]
             start_time_by_idx[idx] = t_acc
             t_acc += d
+        subtitle_entries = self._build_subtitle_entries(scene_id, start_time_by_idx)
+
+        if cache_scene_base_video:
+            cached_base_scene_path = self.cache_manager.get_cached_path(
+                key_data=scene_base_hash_data,
+                file_name=f"scene_{scene_id}_base",
+                extension="mp4",
+            )
+            if cached_base_scene_path:
+                logger.info(
+                    "[SceneCache] scene=%s layer=base HIT key=%s file=%s; reusing before subtitle burn",
+                    scene_id,
+                    self._cache_key_short(scene_base_hash_data),
+                    cached_base_scene_path.name,
+                )
+                scene_output_path = cached_base_scene_path
+                if subtitle_entries:
+                    scene_output_path = await self.video_renderer.apply_subtitle_overlays(
+                        cached_base_scene_path,
+                        subtitle_entries,
+                    )
+                    logger.info(
+                        "[SceneCache] scene=%s layer=sub MISS -> burned subtitles from cached base (%d subtitles)",
+                        scene_id,
+                        len(subtitle_entries),
+                    )
+                    self.cache_manager.cache_file(
+                        source_path=scene_output_path,
+                        key_data=scene_sub_hash_data,
+                        file_name=f"scene_{scene_id}_sub",
+                        extension="mp4",
+                    )
+                    logger.info(
+                        "[SceneCache] scene=%s layer=sub STORE key=%s subtitles=%d",
+                        scene_id,
+                        self._cache_key_short(scene_sub_hash_data),
+                        len(subtitle_entries),
+                    )
+                    if generate_no_sub_video:
+                        self.cache_manager.cache_file(
+                            source_path=scene_output_path,
+                            key_data=scene_hash_data,
+                            file_name=f"scene_{scene_id}_sub",
+                            extension="mp4",
+                        )
+                scene_results.append(scene_output_path)
+                pbar_scenes.update(1)
+                return scene_results
+            logger.info(
+                "[SceneCache] scene=%s layer=base MISS key=%s",
+                scene_id,
+                self._cache_key_short(scene_base_hash_data),
+            )
+        else:
+            logger.info("[SceneCache] scene=%s layer=base disabled", scene_id)
 
         can_use_fast_path, fast_path_reason = self._can_use_simple_scene_fast_path(
             scene_duration=scene_duration,
@@ -1715,7 +1878,6 @@ class SceneRenderer:
         # If auto-tune has retuned clip_workers, new sem will reflect it
         sem = asyncio.Semaphore(self.phase.clip_workers)
         results: List[Optional[Path]] = [None] * len(lines)
-        subtitle_entries: List[Dict[str, Any]] = []
 
         async def process_one(idx: int, line: Dict[str, Any]):
             async with sem:
@@ -2023,15 +2185,6 @@ class SceneRenderer:
                     clip_path = await self.video_renderer.apply_foreground_overlays(
                         clip_path, fg_overlays
                     )
-                if is_effective_subtitle_text(text):
-                    subtitle_entries.append(
-                        {
-                            "text": text,
-                            "line_config": line_config,
-                            "duration": duration,
-                            "start": start_time_by_idx[idx],
-                        }
-                    )
                 # Collect lightweight samples for auto-tune
                 try:
                     if (
@@ -2191,62 +2344,64 @@ class SceneRenderer:
 
             fg_overlays = scene.get("fg_overlays") or []
             scene_output_no_sub_path = scene_output_path
-            if fg_overlays and subtitle_entries and not generate_no_sub_video:
-                subtitle_entries.sort(key=lambda s: s["start"])
-                scene_output_path = await self.video_renderer.apply_overlays(
-                    scene_output_path, fg_overlays, subtitle_entries
+            if fg_overlays:
+                scene_output_no_sub_path = await self.video_renderer.apply_foreground_overlays(
+                    scene_output_path, fg_overlays
                 )
                 logger.info(
-                    f"Applied foreground + subtitles -> {scene_output_path.name}"
+                    f"Applied foreground overlays -> {scene_output_no_sub_path.name}"
                 )
+            if cache_scene_base_video:
+                self.cache_manager.cache_file(
+                    source_path=scene_output_no_sub_path,
+                    key_data=scene_base_hash_data,
+                    file_name=f"scene_{scene_id}_base",
+                    extension="mp4",
+                )
+                logger.info(
+                    "[SceneCache] scene=%s layer=base STORE key=%s file_name=scene_%s_base.mp4",
+                    scene_id,
+                    self._cache_key_short(scene_base_hash_data),
+                    scene_id,
+                )
+            if subtitle_entries:
+                scene_output_path = await self.video_renderer.apply_subtitle_overlays(
+                    scene_output_no_sub_path, subtitle_entries
+                )
+                logger.info(f"Applied subtitles -> {scene_output_path.name}")
+                self.cache_manager.cache_file(
+                    source_path=scene_output_path,
+                    key_data=scene_sub_hash_data,
+                    file_name=f"scene_{scene_id}_sub",
+                    extension="mp4",
+                )
+                logger.info(
+                    "[SceneCache] scene=%s layer=sub STORE key=%s subtitles=%d",
+                    scene_id,
+                    self._cache_key_short(scene_sub_hash_data),
+                    len(subtitle_entries),
+                )
+                if generate_no_sub_video:
+                    self.cache_manager.cache_file(
+                        source_path=scene_output_no_sub_path,
+                        key_data=scene_hash_data,
+                        file_name=f"scene_{scene_id}",
+                        extension="mp4",
+                    )
+                    self.cache_manager.cache_file(
+                        source_path=scene_output_path,
+                        key_data=scene_hash_data,
+                        file_name=f"scene_{scene_id}_sub",
+                        extension="mp4",
+                    )
+            else:
+                scene_output_path = scene_output_no_sub_path
                 self.cache_manager.cache_file(
                     source_path=scene_output_path,
                     key_data=scene_hash_data,
                     file_name=f"scene_{scene_id}",
                     extension="mp4",
                 )
-            else:
-                if fg_overlays:
-                    scene_output_no_sub_path = await self.video_renderer.apply_foreground_overlays(
-                        scene_output_path, fg_overlays
-                    )
-                    logger.info(
-                        f"Applied foreground overlays -> {scene_output_no_sub_path.name}"
-                    )
-                if subtitle_entries:
-                    subtitle_entries.sort(key=lambda s: s["start"])
-                    scene_output_path = await self.video_renderer.apply_subtitle_overlays(
-                        scene_output_no_sub_path, subtitle_entries
-                    )
-                    logger.info(f"Applied subtitles -> {scene_output_path.name}")
-                    if generate_no_sub_video:
-                        self.cache_manager.cache_file(
-                            source_path=scene_output_no_sub_path,
-                            key_data=scene_hash_data,
-                            file_name=f"scene_{scene_id}",
-                            extension="mp4",
-                        )
-                        self.cache_manager.cache_file(
-                            source_path=scene_output_path,
-                            key_data=scene_hash_data,
-                            file_name=f"scene_{scene_id}_sub",
-                            extension="mp4",
-                        )
-                    else:
-                        self.cache_manager.cache_file(
-                            source_path=scene_output_path,
-                            key_data=scene_hash_data,
-                            file_name=f"scene_{scene_id}",
-                            extension="mp4",
-                        )
-                else:
-                    scene_output_path = scene_output_no_sub_path
-                    self.cache_manager.cache_file(
-                        source_path=scene_output_path,
-                        key_data=scene_hash_data,
-                        file_name=f"scene_{scene_id}",
-                        extension="mp4",
-                    )
             scene_results.append(scene_output_path)
 
         if (
