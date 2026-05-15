@@ -6,6 +6,11 @@ from zundamotion.components.video.overlays import OverlayMixin
 class _DummyOverlay(OverlayMixin):
     def __init__(self) -> None:
         self.scale_flags = "bicubic"
+        self.subtitle_gen = type(
+            "SubtitleGen",
+            (),
+            {"subtitle_config": {}},
+        )()
 
     def _build_effect_filters(self, effects):  # type: ignore[override]
         # Reuse base implementation
@@ -69,3 +74,20 @@ def test_subtitle_png_chunks_do_not_split_overlapping_subtitles():
 
     assert len(chunks) == 1
     assert len(chunks[0]["subtitles"]) == 3
+
+
+def test_auto_subtitle_png_chunk_size_scales_for_long_many_subtitle_scene():
+    value = OverlayMixin._auto_subtitle_png_chunk_size(
+        90,
+        base_duration=534.25,
+        cpu_count=12,
+    )
+
+    assert value == 15
+
+
+def test_explicit_subtitle_png_chunk_size_overrides_auto():
+    dummy = _DummyOverlay()
+    dummy.subtitle_gen.subtitle_config = {"png_chunk_size": 24}
+
+    assert dummy._subtitle_png_chunk_size([{}] * 90, base_duration=534.25) == 24

@@ -522,5 +522,20 @@ class VideoPhase:
                 )
         except Exception:
             pass
+        try:
+            subtitle_stats = getattr(self.video_renderer, "subtitle_overlay_stats", None)
+            if isinstance(subtitle_stats, dict):
+                logger.info(
+                    "[Diagnostics] Subtitle overlay: mode=%s, subtitles=%s, chunks=%s, png_chunk_size=%s, base=%.2fs, layer_attempted=%s, layer_used=%s",
+                    subtitle_stats.get("mode", "none"),
+                    subtitle_stats.get("subtitles", 0),
+                    subtitle_stats.get("chunks", 0),
+                    subtitle_stats.get("png_chunk_size"),
+                    float(subtitle_stats.get("base_duration") or 0.0),
+                    bool(subtitle_stats.get("layer_video_attempted")),
+                    bool(subtitle_stats.get("layer_video_used")),
+                )
+        except Exception:
+            pass
 
         return all_clips

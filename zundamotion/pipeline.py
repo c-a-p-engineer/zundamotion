@@ -190,6 +190,16 @@ class GenerationPipeline:
             all_clips = await self._run_phase(
                 "VideoPhase", video_phase.run, scenes, line_data_map, self.timeline
             )
+            video_renderer = getattr(video_phase, "video_renderer", None)
+            self.stats["filter_path_usage"] = getattr(
+                video_renderer, "path_counters", {}
+            )
+            self.stats["subtitle_overlay"] = getattr(
+                video_renderer, "subtitle_overlay_stats", {}
+            )
+            self.stats["subtitle_overlay_history"] = getattr(
+                video_renderer, "subtitle_overlay_stats_history", []
+            )
             generate_no_sub_video = bool(
                 self.config.get("system", {}).get("generate_no_sub_video", False)
             )
@@ -418,6 +428,46 @@ class GenerationPipeline:
             for phase_name, data in self.stats["phases"].items():
                 summary_kv[f"Phase{phase_name}Duration"] = f"{data['duration']:.2f}s"
 
+            filter_stats = self.stats.get("filter_path_usage") or {}
+            if isinstance(filter_stats, dict):
+                for key in ("cuda_overlay", "opencl_overlay", "gpu_scale_only", "cpu"):
+                    summary_kv[f"FilterPath{key}"] = filter_stats.get(key, 0)
+
+            subtitle_stats = self.stats.get("subtitle_overlay") or {}
+            subtitle_history = self.stats.get("subtitle_overlay_history") or []
+            if isinstance(subtitle_history, list) and subtitle_history:
+                subtitle_stats = {
+                    "mode": ",".join(
+                        sorted({str(item.get("mode", "none")) for item in subtitle_history})
+                    ),
+                    "subtitles": sum(int(item.get("subtitles", 0) or 0) for item in subtitle_history),
+                    "chunks": sum(int(item.get("chunks", 0) or 0) for item in subtitle_history),
+                    "png_chunk_size": ",".join(
+                        sorted({
+                            str(item.get("png_chunk_size"))
+                            for item in subtitle_history
+                            if item.get("png_chunk_size") is not None
+                        })
+                    ) or None,
+                    "layer_video_attempted": any(
+                        bool(item.get("layer_video_attempted")) for item in subtitle_history
+                    ),
+                    "layer_video_used": any(
+                        bool(item.get("layer_video_used")) for item in subtitle_history
+                    ),
+                }
+            if isinstance(subtitle_stats, dict):
+                summary_kv["SubtitleMode"] = subtitle_stats.get("mode", "none")
+                summary_kv["SubtitleCount"] = subtitle_stats.get("subtitles", 0)
+                summary_kv["SubtitleChunks"] = subtitle_stats.get("chunks", 0)
+                summary_kv["SubtitlePngChunkSize"] = subtitle_stats.get("png_chunk_size")
+                summary_kv["SubtitleLayerVideoAttempted"] = bool(
+                    subtitle_stats.get("layer_video_attempted")
+                )
+                summary_kv["SubtitleLayerVideoUsed"] = bool(
+                    subtitle_stats.get("layer_video_used")
+                )
+
             logger.kv_info("Pipeline Summary", kv_pairs=summary_kv)
         else:
             logger.info("--- Pipeline Summary ---")
@@ -428,6 +478,48 @@ class GenerationPipeline:
                 logger.info(f"Clip P95 Duration: {p95_duration:.2f}s")
             for phase_name, data in self.stats["phases"].items():
                 logger.info(f"  {phase_name} Duration: {data['duration']:.2f}s")
+            filter_stats = self.stats.get("filter_path_usage") or {}
+            if isinstance(filter_stats, dict):
+                logger.info(
+                    "Filter Path Usage: cuda_overlay=%s, opencl_overlay=%s, gpu_scale_only=%s, cpu=%s",
+                    filter_stats.get("cuda_overlay", 0),
+                    filter_stats.get("opencl_overlay", 0),
+                    filter_stats.get("gpu_scale_only", 0),
+                    filter_stats.get("cpu", 0),
+                )
+            subtitle_stats = self.stats.get("subtitle_overlay") or {}
+            subtitle_history = self.stats.get("subtitle_overlay_history") or []
+            if isinstance(subtitle_history, list) and subtitle_history:
+                subtitle_stats = {
+                    "mode": ",".join(
+                        sorted({str(item.get("mode", "none")) for item in subtitle_history})
+                    ),
+                    "subtitles": sum(int(item.get("subtitles", 0) or 0) for item in subtitle_history),
+                    "chunks": sum(int(item.get("chunks", 0) or 0) for item in subtitle_history),
+                    "png_chunk_size": ",".join(
+                        sorted({
+                            str(item.get("png_chunk_size"))
+                            for item in subtitle_history
+                            if item.get("png_chunk_size") is not None
+                        })
+                    ) or None,
+                    "layer_video_attempted": any(
+                        bool(item.get("layer_video_attempted")) for item in subtitle_history
+                    ),
+                    "layer_video_used": any(
+                        bool(item.get("layer_video_used")) for item in subtitle_history
+                    ),
+                }
+            if isinstance(subtitle_stats, dict):
+                logger.info(
+                    "Subtitle Overlay: mode=%s, subtitles=%s, chunks=%s, png_chunk_size=%s, layer_attempted=%s, layer_used=%s",
+                    subtitle_stats.get("mode", "none"),
+                    subtitle_stats.get("subtitles", 0),
+                    subtitle_stats.get("chunks", 0),
+                    subtitle_stats.get("png_chunk_size"),
+                    bool(subtitle_stats.get("layer_video_attempted")),
+                    bool(subtitle_stats.get("layer_video_used")),
+                )
             logger.info("------------------------")
 
     @staticmethod

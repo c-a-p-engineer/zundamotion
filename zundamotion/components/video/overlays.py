@@ -5,6 +5,8 @@ VideoRendererに継承させることで、前景動画や字幕PNGを
 """
 from pathlib import Path
 from dataclasses import replace
+import math
+import os
 from typing import Any, Dict, List, Optional
 
 from importlib import import_module
@@ -96,10 +98,59 @@ class OverlayMixin:
             getattr(self, "hw_kind", None),
         )
 
-    def _subtitle_png_chunk_size(self) -> int:
+    @staticmethod
+    def _auto_subtitle_png_chunk_size(
+        subtitle_count: int,
+        *,
+        base_duration: Optional[float] = None,
+        cpu_count: Optional[int] = None,
+    ) -> int:
+        if subtitle_count <= 0:
+            return 12
+
+        nproc = max(1, int(cpu_count or (os.cpu_count() or 1)))
+        base = float(base_duration or 0.0)
+        if base >= 420 or subtitle_count >= 84:
+            target_chunks = 6
+        elif base >= 180 or subtitle_count >= 48:
+            return 12
+        else:
+            target_chunks = 4
+
+        if nproc <= 4:
+            target_chunks = max(3, target_chunks - 2)
+        elif nproc <= 8:
+            target_chunks = max(4, target_chunks - 1)
+
+        value = int(math.ceil(subtitle_count / max(1, target_chunks)))
+        return max(8, min(36, value))
+
+    def _subtitle_png_chunk_size(
+        self,
+        subtitles: Optional[List[Dict[str, Any]]] = None,
+        *,
+        base_duration: Optional[float] = None,
+    ) -> int:
         subtitle_cfg = self.subtitle_gen.subtitle_config or {}
+        env_value = os.getenv("ZUNDAMOTION_SUB_PNG_CHUNK_SIZE")
+        raw_value = env_value if env_value else subtitle_cfg.get("png_chunk_size", "auto")
+        if str(raw_value).strip().lower() in {"auto", ""}:
+            count = len(subtitles or [])
+            value = self._auto_subtitle_png_chunk_size(
+                count,
+                base_duration=base_duration,
+            )
+            logger.info(
+                "[SubtitleOverlay] Auto png_chunk_size=%s (subtitles=%s, base=%.2fs, nproc=%s%s)",
+                value,
+                count,
+                float(base_duration or 0.0),
+                os.cpu_count() or 1,
+                ", env override" if env_value else "",
+            )
+            return value
         try:
-            value = int(subtitle_cfg.get("png_chunk_size", 12))
+            value = int(raw_value)
         except Exception:
             value = 12
         return max(1, value)
@@ -552,10 +603,20 @@ class OverlayMixin:
 
         output_path = self.temp_dir / f"{base_video.stem}_sub.mp4"
         subtitle_mode = self._subtitle_render_mode(subtitles)
+        self.subtitle_overlay_stats = {
+            "mode": subtitle_mode,
+            "subtitles": len(subtitles),
+            "chunks": 0,
+            "png_chunk_size": None,
+            "base_duration": None,
+            "layer_video_attempted": False,
+            "layer_video_used": False,
+        }
         try:
             base_dur = await get_media_duration(str(base_video))
         except Exception:
             base_dur = None
+        self.subtitle_overlay_stats["base_duration"] = base_dur
 
         video_cfg = getattr(self, "video_config", {}) or {}
         if (
@@ -563,6 +624,7 @@ class OverlayMixin:
             and base_dur
             and bool(video_cfg.get("subtitle_layer_video", False))
         ):
+            self.subtitle_overlay_stats["layer_video_attempted"] = True
             logger.info(
                 "[SubtitleOverlay] Layer-video mode: generating transparent subtitle layer (%d subtitles, base=%.2fs)",
                 len(subtitles),
@@ -573,6 +635,10 @@ class OverlayMixin:
                     subtitles,
                     duration=float(base_dur),
                     output_path=self.temp_dir / f"{base_video.stem}_subtitle_layer.mov",
+                )
+                self.subtitle_overlay_stats["layer_video_used"] = True
+                self.subtitle_overlay_stats_history.append(
+                    dict(self.subtitle_overlay_stats)
                 )
                 return await self._overlay_subtitle_layer_video(
                     base_video,
@@ -592,13 +658,18 @@ class OverlayMixin:
                     "copy_gap_threshold", 0.20
                 )
             )
-            png_chunk_size = self._subtitle_png_chunk_size()
+            png_chunk_size = self._subtitle_png_chunk_size(
+                subtitles,
+                base_duration=float(base_dur),
+            )
+            self.subtitle_overlay_stats["png_chunk_size"] = png_chunk_size
             ranges = self._split_subtitle_ranges_for_png(
                 subtitles,
                 base_duration=float(base_dur),
                 gap_threshold=gap_threshold,
                 max_subtitles=png_chunk_size,
             )
+            self.subtitle_overlay_stats["chunks"] = len(ranges or [])
             if ranges and (
                 ranges[0]["start"] > 0.05
                 or ranges[-1]["end"] < float(base_dur) - 0.05
@@ -657,6 +728,9 @@ class OverlayMixin:
                         str(output_path),
                         self.ffmpeg_path,
                     )
+                    self.subtitle_overlay_stats_history.append(
+                        dict(self.subtitle_overlay_stats)
+                    )
                     return output_path
                 except Exception as err:
                     logger.warning(
@@ -664,7 +738,10 @@ class OverlayMixin:
                         err,
                     )
 
-        return await self._apply_subtitle_overlays_full(base_video, subtitles, output_path)
+        self.subtitle_overlay_stats["chunks"] = 1
+        result = await self._apply_subtitle_overlays_full(base_video, subtitles, output_path)
+        self.subtitle_overlay_stats_history.append(dict(self.subtitle_overlay_stats))
+        return result
 
     async def _render_subtitle_layer_video(
         self,

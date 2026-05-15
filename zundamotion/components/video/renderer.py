@@ -92,6 +92,16 @@ class VideoRenderer(OverlayMixin):
             "gpu_scale_only": 0,
             "cpu": 0,
         }
+        self.subtitle_overlay_stats: Dict[str, Any] = {
+            "mode": "none",
+            "subtitles": 0,
+            "chunks": 0,
+            "png_chunk_size": None,
+            "base_duration": None,
+            "layer_video_attempted": False,
+            "layer_video_used": False,
+        }
+        self.subtitle_overlay_stats_history: List[Dict[str, Any]] = []
         # CPU scaler flags and fps filter policy (quality-aware)
         try:
             vcfg = config.get("video", {}) or {}

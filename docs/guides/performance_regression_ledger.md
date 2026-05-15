@@ -47,6 +47,7 @@
 - `quality=speed` で NVENC `p7` を選ぶのは逆効果。`p1` が fastest、`p7` が slowest/best
 - `cache_refresh` が同一キーを何度も消す実装は無駄だった
 - PNG 字幕焼き込みは巨大な 1 本の filter graph に戻さない。字幕範囲をチャンク分割し、字幕のない gap は stream copy する
+- `subtitle.png_chunk_size` は `auto` を既定にする。ただし既知の中尺ケースでチャンク数が増えないよう、90字幕級だけを大きめにし、66字幕級は従来の `12` 相当に留める
 - FinalizePhase の `consume_next_head` 付き transition は、消費後の next scene 後続部を再エンコードする。`-ss` + stream copy では切り出し位置より前の音声が混ざり、次シーン冒頭音声が二重化する場合がある
 - 2026-05-10 の短尺ベンチでは、`FinalizePhase cache` は採用。transition boundary と final concat intermediate を内容ハッシュでキャッシュする
 - `FinalizePhase cache` の key に一時パスや mtime を入れると、同一内容でも cache hit しない。入力動画は `size + sha256` で識別する
@@ -65,6 +66,7 @@
 | scene base / subtitle cache | 採用 | 字幕済み scene cache hit で `VideoPhase` がほぼ 0 秒になる |
 | FinalizePhase cache | 採用 | transition boundary と final concat の再生成を避けられる |
 | PNG 字幕チャンク分割 | 採用 | 巨大 filter graph による長時間停止を避けられる |
+| PNG 字幕チャンクサイズ auto | 採用 | 長尺・字幕多数時だけチャンク数を減らし、既知の中尺ケースでは `12` 相当を維持する |
 | 顔 overlay 事前キャッシュ | 採用 | 同一実行内の顔 overlay 再生成を抑制できる |
 | 画像内容署名付き cache key | 採用 | 画像の差し替えが発生するため、`13-redesign.png` のような同名画像差し替えで古い scene cache を再利用しない |
 | subtitle-only transparent video | 却下 | qtrle/alpha 中間動画が重く、I/O も増える |
@@ -454,11 +456,14 @@ Cache OFF (`--no-cache`)。
 - 完成版 PNG 字幕焼き込みを、1 本の巨大な `filter_complex` ではなく複数チャンクへ分割する
 - 字幕同士が重なる範囲は同じチャンクに残し、見た目を崩さない
 - 字幕のない gap は再エンコードせず stream copy し、最後に concat する
-- 既定の `subtitle.png_chunk_size` は `12`
+- 2026-05-11 以降、既定の `subtitle.png_chunk_size` は `auto`
+  - `ZUNDAMOTION_SUB_PNG_CHUNK_SIZE` で実行環境ごとの固定値に上書きできる
+  - 90字幕級・長尺では `15-16` 程度を選び、66字幕級では従来相当の `12` を維持する
 
 効果:
 - 長尺台本で巨大 filter graph が詰まる状態を避けられる
 - PNG 字幕の可読性を維持したまま、ASS/libass へ逃がさずに完走しやすくなった
+- 長尺・字幕多数時の ffmpeg 起動/concat 小片数を減らす。ただし巨大 filter graph へ戻さないため上限は `36` に制限する
 
 実測:
 - `logs/20260508_005644_685.log` の `004_ai-code-readable`
@@ -476,10 +481,31 @@ Cache OFF (`--no-cache`)。
   - `base=342.54s`, `subtitles=66`, `png_chunk_size=12`, `6 subtitle chunk(s)`
 - 旧経路 `logs/20260507_171633_602.log` の `005_pc_why-restart-fixes` は `Total execution time: 1548.87s`, `VideoPhase: 1377.01s`, `FinalizePhase: 110.72s`
 
+2026-05-11 の auto 選択値確認:
+
+| source | previous | auto | expected chunk count |
+|---|---:|---:|---:|
+| `logs/20260510_123809_482.log` / 009, `subtitles=94`, `base=521.15s` | `png_chunk_size=12`, `8 chunk(s)` | `16` | 約 `6 chunk(s)` |
+| `logs/20260510_131146_816.log` / 010, `subtitles=90`, `base=534.25s` | `png_chunk_size=12`, `8 chunk(s)` | `15` | 約 `6 chunk(s)` |
+| `logs/20260507_225123_235.log` / 005, `subtitles=66`, `base=342.54s` | `png_chunk_size=12`, `6 chunk(s)` | `12` | `6 chunk(s)` 維持 |
+
+検証:
+- `python3 -m py_compile vendor/zundamotion/zundamotion/components/video/overlays.py vendor/zundamotion/zundamotion/components/video/renderer.py vendor/zundamotion/zundamotion/components/pipeline_phases/video_phase/main.py vendor/zundamotion/zundamotion/pipeline.py vendor/zundamotion/tools/zundamotion_perf_benchmark.py vendor/zundamotion/tests/test_overlay_alpha_preservation.py`
+- Docker app container:
+  - `python -m py_compile vendor/zundamotion/zundamotion/components/video/overlays.py vendor/zundamotion/zundamotion/components/video/renderer.py vendor/zundamotion/zundamotion/components/pipeline_phases/video_phase/main.py vendor/zundamotion/zundamotion/pipeline.py vendor/zundamotion/tools/zundamotion_perf_benchmark.py`
+  - `python -m pytest -q tests/test_overlay_alpha_preservation.py tests/test_scene_renderer_subtitle_flow.py`: `9 passed in 5.47s`
+- `python3` による auto 選択値 smoke:
+  - `90/534.25s -> 15`
+  - `94/521.15s -> 16`
+  - `66/342.54s -> 12`
+
+未実施:
+- このホストには `ffmpeg` / `ffprobe` がなかったため、実動画の壁時計ベンチは未実施。次回は Docker/Dev Container 側で、同じ台本を `png_chunk_size: 12` と `auto` の2条件で比較する
+
 注意:
 - 2026-05-08 の計測は永続キャッシュ有効の再生成であり、完全な cold-cache 比較ではない
 - ただし旧 `004` の巨大字幕焼き込みが実用上止まったこと、変更後 `004` が `220.32s` で完走したことから、チャンク分割は採用する
-- チャンクを小さくしすぎると concat/copy の小片が増える。大きくしすぎると巨大 filter graph 問題に戻るため、既定値 `12` を基準にする
+- チャンクを小さくしすぎると concat/copy の小片が増える。大きくしすぎると巨大 filter graph 問題に戻るため、auto は既知ログで悪化しない範囲に留める
 
 ### 9. Transition の next scene 後続部は再エンコードする
 
