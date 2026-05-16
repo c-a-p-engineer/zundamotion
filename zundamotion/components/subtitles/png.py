@@ -1,8 +1,10 @@
 import atexit
+import hashlib
 import json
 import logging
 import os
 import statistics
+import time
 from concurrent.futures import ProcessPoolExecutor
 from functools import lru_cache
 from pathlib import Path  # Pathをインポート
@@ -411,6 +413,41 @@ def _write_subtitle_dimensions_meta(png_path: Path, width: int, height: int) -> 
         logger.debug("Failed to write subtitle PNG metadata: %s", png_path, exc_info=True)
 
 
+def _inspect_subtitle_png_bbox(png_path: Path) -> Dict[str, int | bool | str]:
+    with Image.open(png_path) as img:
+        rgba = img.convert("RGBA")
+        alpha = rgba.getchannel("A")
+        bbox = alpha.getbbox()
+        width, height = rgba.size
+    if bbox is None:
+        return {
+            "width": width,
+            "height": height,
+            "transparent_left": width,
+            "transparent_top": height,
+            "transparent_right": width,
+            "transparent_bottom": height,
+            "full_canvas": False,
+            "bbox_mode": "empty",
+        }
+    x0, y0, x1, y1 = bbox
+    left = x0
+    top = y0
+    right = max(0, width - x1)
+    bottom = max(0, height - y1)
+    bbox_mode = "tight" if any((left, top, right, bottom)) else "full"
+    return {
+        "width": width,
+        "height": height,
+        "transparent_left": left,
+        "transparent_top": top,
+        "transparent_right": right,
+        "transparent_bottom": bottom,
+        "full_canvas": bbox_mode == "full",
+        "bbox_mode": bbox_mode,
+    }
+
+
 def _measure_text_width(font: ImageFont.FreeTypeFont, text: str) -> int:
     if hasattr(font, "getbbox"):
         try:
@@ -494,6 +531,23 @@ class SubtitlePNGRenderer:
             "text": text,
             "style": style,
         }
+        cache_key = self.cache_manager._generate_hash(key_data)
+        expected_cached_path = self.cache_manager.get_cache_path(
+            key_data=key_data,
+            file_name="subtitle",
+            extension="png",
+        )
+        expected_ephemeral_path = (
+            (self.cache_manager.ephemeral_dir or self.cache_manager.cache_dir)
+            / f"temp_subtitle_{cache_key}.png"
+        )
+        was_cached = (
+            expected_ephemeral_path.exists()
+            if self.cache_manager.no_cache
+            else expected_cached_path.exists()
+        )
+        render_started = time.perf_counter()
+        text_hash = hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()[:12]
 
         async def creator_func(output_path: Path) -> Path:
             logger.info(
@@ -508,6 +562,7 @@ class SubtitlePNGRenderer:
             except Exception:
                 pass
 
+            create_started = time.perf_counter()
             if loop:
                 width, height = await loop.run_in_executor(
                     self._executor, _render_subtitle_png, text, style, str(output_path)
@@ -515,6 +570,23 @@ class SubtitlePNGRenderer:
             else:
                 width, height = _render_subtitle_png(text, style, str(output_path))
             _write_subtitle_dimensions_meta(output_path, width, height)
+            try:
+                bbox = _inspect_subtitle_png_bbox(output_path)
+                logger.info(
+                    "[SubtitlePNG] text_hash=%s size=%sx%s bbox=%s margin_ltrb=%s,%s,%s,%s full_canvas=%s render_ms=%.1f cache=miss",
+                    text_hash,
+                    bbox["width"],
+                    bbox["height"],
+                    bbox["bbox_mode"],
+                    bbox["transparent_left"],
+                    bbox["transparent_top"],
+                    bbox["transparent_right"],
+                    bbox["transparent_bottom"],
+                    bbox["full_canvas"],
+                    (time.perf_counter() - create_started) * 1000.0,
+                )
+            except Exception:
+                logger.debug("Failed to inspect subtitle PNG bbox: %s", output_path, exc_info=True)
             logger.info(f"Saved subtitle PNG to {output_path}")
             return output_path
 
@@ -528,6 +600,24 @@ class SubtitlePNGRenderer:
 
         dims = _read_subtitle_dimensions_meta(png_path)
         if dims is not None:
+            if was_cached:
+                try:
+                    bbox = _inspect_subtitle_png_bbox(png_path)
+                    logger.info(
+                        "[SubtitlePNG] text_hash=%s size=%sx%s bbox=%s margin_ltrb=%s,%s,%s,%s full_canvas=%s render_ms=%.1f cache=hit",
+                        text_hash,
+                        bbox["width"],
+                        bbox["height"],
+                        bbox["bbox_mode"],
+                        bbox["transparent_left"],
+                        bbox["transparent_top"],
+                        bbox["transparent_right"],
+                        bbox["transparent_bottom"],
+                        bbox["full_canvas"],
+                        (time.perf_counter() - render_started) * 1000.0,
+                    )
+                except Exception:
+                    logger.debug("Failed to inspect cached subtitle PNG bbox: %s", png_path, exc_info=True)
             return png_path, dims
 
         with Image.open(png_path) as img:
@@ -792,7 +882,19 @@ def _render_subtitle_png(
         if i < len(lines) - 1 and spacing_offsets:
             current_y += spacing_offsets[i]
 
-    img.save(out_path_str)
+    save_kwargs: Dict[str, Any] = {}
+    try:
+        compress_level = style_.get("png_compress_level", style_.get("compress_level"))
+        if compress_level is not None:
+            save_kwargs["compress_level"] = max(0, min(9, int(compress_level)))
+    except (TypeError, ValueError):
+        pass
+    if "png_optimize" in style_:
+        save_kwargs["optimize"] = bool(style_.get("png_optimize"))
+    elif "optimize" in style_:
+        save_kwargs["optimize"] = bool(style_.get("optimize"))
+
+    img.save(out_path_str, **save_kwargs)
     return img_w, img_h
 
 

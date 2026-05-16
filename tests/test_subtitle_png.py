@@ -20,6 +20,14 @@ from zundamotion.components.subtitles.png import (
 class StubCacheManager:
     def __init__(self, cache_dir: Path):
         self.cache_dir = cache_dir
+        self.ephemeral_dir = cache_dir
+        self.no_cache = False
+
+    def _generate_hash(self, _key_data):
+        return "stub"
+
+    def get_cache_path(self, key_data, file_name, extension):
+        return self.cache_dir / f"{file_name}.png"
 
     async def get_or_create(self, *, key_data, file_name, extension, creator_func):
         output_path = self.cache_dir / f"{file_name}.png"
@@ -82,11 +90,6 @@ def test_subtitle_png_renderer_reads_dimensions_from_sidecar_on_cache_hit(
 
         assert _read_subtitle_dimensions_meta(png_path) == dims
 
-        def _raise_if_reopened(*_args, **_kwargs):
-            raise AssertionError("subtitle PNG should not be reopened when sidecar exists")
-
-        monkeypatch.setattr("zundamotion.components.subtitles.png.Image.open", _raise_if_reopened)
-
         cached_path, cached_dims = await renderer.render("字幕", style)
 
         assert cached_path == png_path
@@ -137,3 +140,23 @@ def test_render_subtitle_png_hides_background_and_padding_when_show_is_false(tmp
 
     assert visible_width > hidden_width
     assert visible_height > hidden_height
+
+
+def test_render_subtitle_png_accepts_png_save_options(tmp_path):
+    out_path = tmp_path / "subtitle.png"
+
+    width, height = _render_subtitle_png(
+        "PNG保存設定の確認",
+        {
+            "font_path": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+            "font_size": 40,
+            "font_color": "white",
+            "png_compress_level": 1,
+            "png_optimize": False,
+        },
+        str(out_path),
+    )
+
+    assert out_path.exists()
+    assert width > 0
+    assert height > 0

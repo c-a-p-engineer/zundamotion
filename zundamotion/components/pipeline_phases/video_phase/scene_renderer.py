@@ -1255,10 +1255,11 @@ class SceneRenderer:
                 return [cached_scene_video_path]
 
         logger.info(
-            "[SceneCache] scene=%s layer=sub MISS key=%s base_key=%s",
+            "[SceneCache] scene=%s layer=sub MISS key=%s base_key=%s reason=%s",
             scene_id,
             self._cache_key_short(scene_sub_hash_data),
             self._cache_key_short(scene_base_hash_data),
+            "subtitle_config_or_timing_changed",
         )
 
         if not getattr(self.phase, "parallel_scene_rendering", False):
@@ -1390,12 +1391,16 @@ class SceneRenderer:
                 pbar_scenes.update(1)
                 return scene_results
             logger.info(
-                "[SceneCache] scene=%s layer=base MISS key=%s",
+                "[SceneCache] scene=%s layer=base MISS key=%s reason=%s",
                 scene_id,
                 self._cache_key_short(scene_base_hash_data),
+                "base_video_not_cached",
             )
         else:
-            logger.info("[SceneCache] scene=%s layer=base disabled", scene_id)
+            logger.info(
+                "[SceneCache] scene=%s layer=base disabled reason=cache_scene_base_video_false",
+                scene_id,
+            )
 
         can_use_fast_path, fast_path_reason = self._can_use_simple_scene_fast_path(
             scene_duration=scene_duration,

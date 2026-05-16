@@ -195,16 +195,20 @@ async def apply_face_overlays(
         if path.exists():
             cmd.extend(["-loop", "1", "-i", str(path.resolve())])
             index = len(input_layers)
-            input_layers.append({"type": "video", "index": index})
+            input_layers.append({"type": "video", "index": index, "path": str(path.resolve()), "role": "face"})
             return index
         return None
 
     preprocessed_inputs: set[int] = set()
+    face_input_paths: List[str] = []
 
     async def _add_preprocessed_overlay(path: Path, scale_value: float) -> Optional[int]:
         try:
             if os.environ.get("FACE_CACHE_DISABLE", "0") == "1":
-                return _add_image_input(path)
+                idx = _add_image_input(path)
+                if idx is not None:
+                    face_input_paths.append(str(path.resolve()))
+                return idx
             thr_env = os.environ.get("FACE_ALPHA_THRESHOLD")
             thr = int(thr_env) if (thr_env and thr_env.isdigit()) else 128
             cached = await renderer.face_cache.get_scaled_overlay(
@@ -217,9 +221,13 @@ async def apply_face_overlays(
             idx = _add_image_input(cached)
             if idx is not None:
                 preprocessed_inputs.add(idx)
+                face_input_paths.append(str(cached.resolve()))
             return idx
         except Exception:
-            return _add_image_input(path)
+            idx = _add_image_input(path)
+            if idx is not None:
+                face_input_paths.append(str(path.resolve()))
+            return idx
 
     def _prep_overlay(
         input_index: int,
@@ -304,3 +312,15 @@ async def apply_face_overlays(
                 overlay_filters.append(
                     f"overlay=x={x_pos}:y={y_pos}:enable='{open_expr}'"
                 )
+
+    if face_input_paths:
+        unique_assets = len(set(face_input_paths))
+        input_count = len(face_input_paths)
+        logger.info(
+            "[FaceOverlay] unique_assets=%d ffmpeg_inputs=%d overlay_filters=%d duplicated=%d target=%s",
+            unique_assets,
+            input_count,
+            len(overlay_filters),
+            max(0, input_count - unique_assets),
+            target_name,
+        )

@@ -86,6 +86,32 @@ def test_auto_subtitle_png_chunk_size_scales_for_long_many_subtitle_scene():
     assert value == 15
 
 
+def test_auto_subtitle_png_chunk_size_accounts_for_dense_continuous_subtitles():
+    value = OverlayMixin._auto_subtitle_png_chunk_size(
+        149,
+        base_duration=975.77,
+        cpu_count=12,
+        subtitle_density=149 / 975.77,
+        gap_duration=120.0,
+        longest_zone=420.0,
+    )
+
+    assert value == 22
+
+
+def test_auto_subtitle_png_chunk_size_allows_fewer_chunks_for_sparse_gap_heavy_scene():
+    value = OverlayMixin._auto_subtitle_png_chunk_size(
+        90,
+        base_duration=534.25,
+        cpu_count=12,
+        subtitle_density=90 / 534.25,
+        gap_duration=300.0,
+        longest_zone=70.0,
+    )
+
+    assert value == 18
+
+
 def test_explicit_subtitle_png_chunk_size_overrides_auto():
     dummy = _DummyOverlay()
     dummy.subtitle_gen.subtitle_config = {"png_chunk_size": 24}

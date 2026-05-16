@@ -7,6 +7,7 @@ from pathlib import Path
 from dataclasses import replace
 import math
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 from importlib import import_module
@@ -104,18 +105,34 @@ class OverlayMixin:
         *,
         base_duration: Optional[float] = None,
         cpu_count: Optional[int] = None,
+        subtitle_density: Optional[float] = None,
+        gap_duration: Optional[float] = None,
+        longest_zone: Optional[float] = None,
     ) -> int:
         if subtitle_count <= 0:
             return 12
 
         nproc = max(1, int(cpu_count or (os.cpu_count() or 1)))
         base = float(base_duration or 0.0)
+        density = float(subtitle_density or 0.0)
+        gap_ratio = 0.0
+        if base > 0:
+            gap_ratio = max(0.0, min(1.0, float(gap_duration or 0.0) / base))
+        continuous_ratio = 0.0
+        if base > 0:
+            continuous_ratio = max(0.0, min(1.0, float(longest_zone or 0.0) / base))
+
         if base >= 420 or subtitle_count >= 84:
             target_chunks = 6
         elif base >= 180 or subtitle_count >= 48:
-            return 12
+            target_chunks = max(4, int(math.ceil(subtitle_count / 12)))
         else:
             target_chunks = 4
+
+        if density >= 0.18 or continuous_ratio >= 0.35:
+            target_chunks += 1
+        elif gap_ratio >= 0.45 and continuous_ratio <= 0.18:
+            target_chunks = max(3, target_chunks - 1)
 
         if nproc <= 4:
             target_chunks = max(3, target_chunks - 2)
@@ -136,15 +153,22 @@ class OverlayMixin:
         raw_value = env_value if env_value else subtitle_cfg.get("png_chunk_size", "auto")
         if str(raw_value).strip().lower() in {"auto", ""}:
             count = len(subtitles or [])
+            timing_stats = self._subtitle_timing_stats(subtitles or [], base_duration)
             value = self._auto_subtitle_png_chunk_size(
                 count,
                 base_duration=base_duration,
+                subtitle_density=timing_stats["density"],
+                gap_duration=timing_stats["gap_duration"],
+                longest_zone=timing_stats["longest_zone"],
             )
             logger.info(
-                "[SubtitleOverlay] Auto png_chunk_size=%s (subtitles=%s, base=%.2fs, nproc=%s%s)",
+                "[SubtitleOverlay] Auto png_chunk_size=%s (subtitles=%s, base=%.2fs, density=%.3f_per_s, gap=%.2fs, longest_zone=%.2fs, nproc=%s%s)",
                 value,
                 count,
                 float(base_duration or 0.0),
+                timing_stats["density"],
+                timing_stats["gap_duration"],
+                timing_stats["longest_zone"],
                 os.cpu_count() or 1,
                 ", env override" if env_value else "",
             )
@@ -154,6 +178,33 @@ class OverlayMixin:
         except Exception:
             value = 12
         return max(1, value)
+
+    @staticmethod
+    def _subtitle_timing_stats(subtitles: List[Dict[str, Any]], base_duration: Optional[float]) -> Dict[str, float]:
+        if not subtitles:
+            return {"density": 0.0, "gap_duration": 0.0, "longest_zone": 0.0}
+        ordered = sorted(
+            subtitles,
+            key=lambda item: float(item.get("start", 0.0) or 0.0),
+        )
+        merged = OverlayMixin._merge_subtitle_ranges(
+            ordered,
+            base_duration=base_duration,
+            gap_threshold=0.20,
+        )
+        covered = sum(max(0.0, float(item["end"]) - float(item["start"])) for item in merged)
+        longest_zone = max(
+            (max(0.0, float(item["end"]) - float(item["start"])) for item in merged),
+            default=0.0,
+        )
+        duration = float(base_duration or 0.0)
+        gap_duration = max(0.0, duration - covered) if duration > 0 else 0.0
+        density = (len(subtitles) / duration) if duration > 0 else 0.0
+        return {
+            "density": density,
+            "gap_duration": gap_duration,
+            "longest_zone": longest_zone,
+        }
 
     def _subtitle_burn_video_opts(self, subtitle_mode: str) -> List[str]:
         params = self.video_params
@@ -670,6 +721,16 @@ class OverlayMixin:
                 max_subtitles=png_chunk_size,
             )
             self.subtitle_overlay_stats["chunks"] = len(ranges or [])
+            timing_stats = self._subtitle_timing_stats(subtitles, float(base_dur))
+            logger.info(
+                "[SubtitleChunk] subtitles=%d chunk_size=%d chunk_count=%d density=%.3f_per_s total_gap=%.3f longest_zone=%.3f",
+                len(subtitles),
+                png_chunk_size,
+                len(ranges or []),
+                timing_stats["density"],
+                timing_stats["gap_duration"],
+                timing_stats["longest_zone"],
+            )
             if ranges and (
                 ranges[0]["start"] > 0.05
                 or ranges[-1]["end"] < float(base_dur) - 0.05
@@ -684,18 +745,33 @@ class OverlayMixin:
                 )
                 segment_paths: List[Path] = []
                 cursor = 0.0
+                gap_count = 0
+                copied_gap_duration = 0.0
+                reencoded_gap_duration = 0.0
+                slowest_chunk_ms = 0.0
                 for seg_idx, item in enumerate(ranges):
                     start = float(item["start"])
                     end = float(item["end"])
                     if start > cursor + 0.02:
+                        gap_duration = start - cursor
+                        logger.info(
+                            "[SubtitleGap] start=%.3f end=%.3f duration=%.3f mode=copy",
+                            cursor,
+                            start,
+                            gap_duration,
+                        )
                         copied = await self._copy_video_segment(
                             base_video,
                             self.temp_dir / f"{base_video.stem}_sub_gap_{seg_idx:03d}.mp4",
                             cursor,
-                            start - cursor,
+                            gap_duration,
                         )
                         if copied:
+                            gap_count += 1
+                            copied_gap_duration += gap_duration
                             segment_paths.append(copied)
+                        else:
+                            reencoded_gap_duration += gap_duration
 
                     adjusted: List[Dict[str, Any]] = []
                     for sub in item["subtitles"]:
@@ -704,23 +780,54 @@ class OverlayMixin:
                         adjusted.append(copied_sub)
                     seg_base = self.temp_dir / f"{base_video.stem}_sub_base_{seg_idx:03d}.mp4"
                     await self._copy_video_segment(base_video, seg_base, start, end - start)
+                    chunk_started = time.perf_counter()
                     burned = await self._apply_subtitle_overlays_full(
                         seg_base,
                         adjusted,
                         self.temp_dir / f"{base_video.stem}_sub_burn_{seg_idx:03d}.mp4",
                     )
+                    chunk_ms = (time.perf_counter() - chunk_started) * 1000.0
+                    slowest_chunk_ms = max(slowest_chunk_ms, chunk_ms)
+                    logger.info(
+                        "[SubtitleChunk] index=%d subtitles=%d duration=%.3f gap_copy_before=%.3f ffmpeg_ms=%.1f",
+                        seg_idx + 1,
+                        len(adjusted),
+                        end - start,
+                        max(0.0, start - cursor),
+                        chunk_ms,
+                    )
                     segment_paths.append(burned)
                     cursor = end
 
                 if float(base_dur) > cursor + 0.02:
+                    gap_duration = float(base_dur) - cursor
+                    logger.info(
+                        "[SubtitleGap] start=%.3f end=%.3f duration=%.3f mode=copy",
+                        cursor,
+                        float(base_dur),
+                        gap_duration,
+                    )
                     copied = await self._copy_video_segment(
                         base_video,
                         self.temp_dir / f"{base_video.stem}_sub_gap_tail.mp4",
                         cursor,
-                        float(base_dur) - cursor,
+                        gap_duration,
                     )
                     if copied:
+                        gap_count += 1
+                        copied_gap_duration += gap_duration
                         segment_paths.append(copied)
+                    else:
+                        reencoded_gap_duration += gap_duration
+                logger.info(
+                    "[SubtitleGap] count=%d total=%.3f copied=%.3f reencoded=%.3f copy_fail_reason=%s slowest_chunk_ms=%.1f",
+                    gap_count,
+                    copied_gap_duration + reencoded_gap_duration,
+                    copied_gap_duration,
+                    reencoded_gap_duration,
+                    "none" if reencoded_gap_duration <= 0.0 else "copy_segment_returned_none",
+                    slowest_chunk_ms,
+                )
 
                 try:
                     await concat_videos_copy(
@@ -858,6 +965,7 @@ class OverlayMixin:
             prev_stream = "[with_subtitle_ass]"
         else:
             use_cuda_for_subtitles = self._should_use_cuda_for_subtitles(subtitles)
+            subtitle_png_inputs: List[str] = []
             for idx, sub in enumerate(subtitles):
                 extra_input, snippet = await self.subtitle_gen.build_subtitle_overlay(
                     sub["text"],
@@ -869,6 +977,8 @@ class OverlayMixin:
                 )
                 for k, v in extra_input.items():
                     cmd.extend([k, v])
+                    if k == "-i":
+                        subtitle_png_inputs.append(str(v))
 
                 start = float(sub["start"])
                 end = start + float(sub["duration"])
@@ -880,6 +990,26 @@ class OverlayMixin:
 
         cmd.extend(self._single_job_thread_flags())
         filter_complex = ";".join(filter_parts)
+        if subtitle_mode == "png":
+            unique_inputs = len(set(subtitle_png_inputs))
+            input_count = len(subtitle_png_inputs)
+            overlay_count = filter_complex.count("overlay")
+            enable_count = filter_complex.count("enable=")
+            logger.info(
+                "[SubtitleInput] unique_png=%d ffmpeg_inputs=%d duplicated=%d duplicate_reason=%s",
+                unique_inputs,
+                input_count,
+                max(0, input_count - unique_inputs),
+                "same_png_referenced_by_multiple_subtitles" if input_count > unique_inputs else "none",
+            )
+            logger.info(
+                "[FilterGraph] target=%s inputs=%d overlays=%d len=%d enable_expr=%d",
+                output_path.stem,
+                1 + input_count,
+                overlay_count,
+                len(filter_complex),
+                enable_count,
+            )
         cmd.extend(["-filter_complex", filter_complex, "-map", prev_stream, "-map", "0:a?"])
         cmd.extend(self._subtitle_burn_video_opts(subtitle_mode))
         cmd.extend(["-c:a", "copy"])
@@ -887,5 +1017,11 @@ class OverlayMixin:
             cmd.extend(["-t", f"{base_dur:.3f}"])
         cmd.append(str(output_path))
 
+        ffmpeg_started = time.perf_counter()
         await _run_ffmpeg(cmd)
+        logger.info(
+            "[FilterGraph] target=%s ffmpeg_ms=%.1f",
+            output_path.stem,
+            (time.perf_counter() - ffmpeg_started) * 1000.0,
+        )
         return output_path
