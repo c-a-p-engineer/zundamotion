@@ -1,3 +1,85 @@
+# zundamotion AGENTS.md
+
+このファイルは、`zundamotion` 本体で AI / Codex が作業する際の運用ルールを定義する。  
+親ワークスペースから `vendor/zundamotion` を編集する場合も、作業前にこのファイルを確認すること。
+
+---
+
+# 1. ドキュメント更新ルール
+
+YAML オプション、CLI オプション、設定項目、挙動フラグを追加・変更した場合は、同じリポジトリ内の README、チートシート、サンプル、関連ドキュメントの更新要否を必ず確認する。
+
+特に台本 YAML オプションを追加した場合は、原則として以下の両方へ、値による挙動差が確認できる説明を追記する。
+
+- `README.md`
+- `scripts/script_cheatsheet.md`
+
+説明には、少なくとも以下を含める。
+
+- `true` / `false` など値ごとの挙動差
+- 最小 YAML 例
+- 既定値、または省略時の挙動
+- 既存オプションとの関係がある場合はその注意点
+
+---
+
+# 2. 作業開始前の参照順
+
+作業内容に応じて、以下を確認してから変更する。
+
+1. `README.md`
+2. `scripts/script_cheatsheet.md`
+3. `docs/README.md`
+4. 仕様や機能一覧を確認する場合は `docs/features.md`
+5. サンプル台本との対応を確認する場合は `docs/script_samples.md`
+6. 性能、並列度、キャッシュ、FFmpeg 経路を触る場合は `docs/guides/performance_regression_ledger.md`
+7. 設計やスキーマの大きな変更では `docs/design/` 配下の関連資料
+
+特に性能改善では、`docs/guides/performance_regression_ledger.md` を読まずに CPU 経路の並列度、scene fast path、字幕合成経路、キャッシュ方針を変更してはならない。
+
+---
+
+# 3. 開発ルール
+
+- 推論、回答、コメント、ドキュメントは日本語を基本にする。
+- 明示指示のないコミットは禁止する。ユーザーから依頼された場合のみコミットする。
+- Python は PEP 8 と既存コードのスタイルに従う。
+- DRY、KISS、YAGNI を優先し、実際に必要になる前の過度な抽象化を避ける。
+- 変更は差分最小にし、無関係な整形や大規模置換をしない。
+- I/F、設定、CLI、YAML スキーマを変える場合は、後方互換、移行手順、ドキュメント更新を確認する。
+- 依存追加は最小限にし、必要性、CVE、ライセンス、サイズ影響を確認する。
+- 本番資格情報、トークン、社内 URL、PII を出力・ログ・サンプルへ含めない。
+
+---
+
+# 4. コード規模と分割基準
+
+AI が読みやすく保守しやすい規模を維持する。
+
+- 1 ファイルは 200 から 400 行を目安にし、上限は 500 行程度とする。
+- 1 関数は 20 から 40 行を目安にし、上限は 80 行程度とする。
+- 1 ファイルに異なる責務を混在させない。
+- ネストが深い処理、長い条件分岐、テストしづらい処理は小さな関数へ分ける。
+- ファイル先頭や複雑な処理には、目的、公開 API、前提、外部依存が分かる短い説明を置く。
+
+分割判断の目安:
+
+- ロード、検証、キャッシュ、実行など異なる責務が混ざっている。
+- ネストが 3 段以上になっている。
+- 同じ変更で毎回触る箇所と、滅多に触らない箇所が同居している。
+- テスト対象の単位が異なるものが同居している。
+
+---
+
+# 5. ログとエラー
+
+- 標準出力への `print` は避け、`zundamotion/utils/logger.py` の logger を使う。
+- 進捗表示と干渉しないよう、ログは既存の QueueHandler / QueueListener 方針に合わせる。
+- エラーは入力不備、外部 I/O、内部バグ、セキュリティ懸念を区別できる形にする。
+- VOICEVOX、FFmpeg、GPU/NVENC など外部 I/O はタイムアウト、リトライ、フォールバックを意識する。
+
+---
+
 # === Codex Custom Instructions (v3.1 - issue対応) ===
 role: >
   あなたはシニアソフトウェアエンジニア兼コードレビュワー。
@@ -29,18 +111,19 @@ global_principles:
 docs_structure:
   base_dir: "docs/"
   files:
-    - tasks.md            # 未完タスク: タイトル/背景/詳細/実装イメージ/確認観点/補足
-    - tasks_complete.md   # 完了タスク(先頭追記/完了日必須)
     - issues_pending.md   # 未確定の課題: 問題点/未確定事項/懸念点/履歴
-    - issues_complete.md  # 確定済み課題: 確定日/決定内容/影響範囲/背景
-    - adr/ , runbook/ , design/
+    - README.md           # docs全体の入口
+    - features.md         # 実装済み機能と計画中機能
+    - script_samples.md   # サンプル台本カタログ
+    - design/             # 設計メモ
+    - guides/             # 利用・性能・素材作成ガイド
   flow:
-    - タスク完了→対象を tasks_complete.md 先頭へ移動し「完了日: YYYY-MM-DD」を追記、tasks.md から削除
-    - 課題確定→issues_complete.md 先頭へ移動し「確定日/決定内容/対応方針」を追記
+    - AI/Codex向けの作業ルールはAGENTS.mdへ集約する
+    - 利用者向け説明はREADME.mdまたはscripts/script_cheatsheet.mdへ置く
+    - 設計判断や検証履歴はdocs/design/またはdocs/guides/へ置く
   ci_rules:
-    - "tasks.mdとissues_pending.mdで重複タイトル禁止"
-    - "完了/確定日必須"
-    - "markdownlint + doctocチェック必須"
+    - "docs/README.mdから主要ドキュメントへ辿れること"
+    - "台本YAMLオプション追加時はREADME.mdとscripts/script_cheatsheet.mdを更新すること"
 
 issues_format:
   sections:
@@ -107,5 +190,5 @@ principles_checklist:
   - "[ ] テスト(FIRST)/境界値/異常系"
   - "[ ] セキュリティ基線(最小権限/依存pin/サニタイズ)"
   - "[ ] 変更はIssue紐付け/README更新"
-  - "[ ] docs運用フロー(tasks*/issues*)遵守"
+  - "[ ] docs/README.mdと関連ドキュメント更新"
   - "[ ] コミットメッセージ提案(Conventional, ≥2案)"

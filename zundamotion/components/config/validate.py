@@ -571,6 +571,11 @@ def validate_config(config: Dict[str, Any]) -> None:
             raise ValidationError(
                 "'defaults.characters_persist' must be a boolean."
             )
+        bp = defaults.get("background_persist")
+        if bp is not None and not isinstance(bp, bool):
+            raise ValidationError(
+                "'defaults.background_persist' must be a boolean."
+            )
 
     transitions_cfg = config.get("transitions")
     if transitions_cfg is not None:
@@ -668,6 +673,11 @@ def validate_config(config: Dict[str, Any]) -> None:
         if cp is not None and not isinstance(cp, bool):
             raise ValidationError(
                 f"Scene '{scene_id}' characters_persist must be a boolean."
+            )
+        bp = scene.get("background_persist")
+        if bp is not None and not isinstance(bp, bool):
+            raise ValidationError(
+                f"Scene '{scene_id}' background_persist must be a boolean."
             )
 
         items = scene.get("items")

@@ -432,6 +432,106 @@ def test_scene_renderer_scene_cache_key_stays_stable_after_character_persist_mut
     asyncio.run(_run())
 
 
+def test_scene_renderer_background_persist_fills_missing_line_backgrounds(
+    tmp_path: Path,
+) -> None:
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(b"audio")
+
+    scene = {
+        "id": "demo",
+        "bg": "assets/bg/first.png",
+        "lines": [
+            {"text": "最初"},
+            {
+                "text": "切り替え",
+                "background": {"path": "assets/bg/second.png"},
+            },
+            {"text": "継続"},
+        ],
+    }
+    line_data_map = {
+        "demo_1": {
+            "type": "talk",
+            "text": "最初",
+            "audio_path": audio_path,
+            "duration": 1.0,
+            "line_config": {},
+        },
+        "demo_2": {
+            "type": "talk",
+            "text": "切り替え",
+            "audio_path": audio_path,
+            "duration": 1.0,
+            "line_config": {},
+        },
+        "demo_3": {
+            "type": "talk",
+            "text": "継続",
+            "audio_path": audio_path,
+            "duration": 1.0,
+            "line_config": {},
+        },
+    }
+    phase = SimpleNamespace(
+        config={
+            "background": {},
+            "subtitle": {},
+            "system": {
+                "generate_no_sub_video": False,
+                "cache_scene_base_video": True,
+            },
+            "video": {},
+            "defaults": {"background_persist": True},
+        },
+        cache_manager=_DummyCacheManager(tmp_path / "cache"),
+        video_renderer=_DummyVideoRenderer(tmp_path),
+        temp_dir=tmp_path,
+        hw_kind=None,
+        video_params=VideoParams(width=320, height=180, fps=30),
+        audio_params=AudioParams(),
+        video_extensions={".mp4", ".mov", ".webm", ".avi", ".mkv"},
+        _norm_char_entries=lambda _line: {},
+        clip_workers=1,
+        auto_tune_enabled=False,
+        parallel_scene_rendering=False,
+        _profile_samples=[],
+        profile_limit=4,
+        _clip_samples_all=[],
+        _retuned=False,
+    )
+    renderer = SceneRenderer(
+        phase=phase,
+        scene=scene,
+        scene_hash_data={
+            "scene": "demo",
+            "lines": scene["lines"],
+            "subtitle_config": {},
+        },
+        scene_idx=0,
+        total_scenes=1,
+        line_data_map=line_data_map,
+        timeline=None,
+        pbar_scenes=_DummyPbar(),
+    )
+
+    asyncio.run(renderer.render_scene())
+
+    assert [line["background"]["path"] for line in scene["lines"]] == [
+        "assets/bg/first.png",
+        "assets/bg/second.png",
+        "assets/bg/second.png",
+    ]
+    assert [
+        line_data_map[f"demo_{idx}"]["line_config"]["background"]["path"]
+        for idx in range(1, 4)
+    ] == [
+        "assets/bg/first.png",
+        "assets/bg/second.png",
+        "assets/bg/second.png",
+    ]
+
+
 def test_scene_renderer_precaches_unique_face_overlay_assets(
     tmp_path: Path,
     monkeypatch,

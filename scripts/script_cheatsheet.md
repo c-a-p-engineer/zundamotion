@@ -107,6 +107,7 @@ video:
 
 defaults:
   characters_persist: false        # true にするとVNモード（行間で立ち絵を維持）
+  background_persist: false        # true にすると行間で直前の背景を維持
   characters:
     copetan:
       speaker_id: 3
@@ -151,6 +152,21 @@ background:
 - `video.background_fit` で背景のフィットモードを指定。余白の扱いは `background.fill_color` に従います。縦長キャンバスの比較: [`sample_vertical.yaml`](./sample_vertical.yaml)。
 - ルート `background` はシーンで `bg` が未指定の場合のデフォルト。`anchor` / `position` / `fit` はシーンや行ごとにも上書き可能です。
 - 行レベルの `background` でズームやパンを切り替えることで、同じ素材でも構図を変えられます。
+- `defaults.background_persist: true` またはシーンの `background_persist: true` を指定すると、`background.path` を指定した行以降は、省略行でも直前の背景を使い続けます。`false` の場合、省略行はシーンの `bg` またはルート `background.default` に戻ります。
+
+```yaml
+defaults:
+  background_persist: true
+
+scenes:
+  - id: lesson
+    bg: assets/slides/01-cover.png
+    lines:
+      - text: "表紙です。"
+      - text: "2枚目へ切り替えます。"
+        background: {path: assets/slides/02-topic.png}
+      - text: "この行も 02-topic.png のままです。"
+```
 
 ## 字幕設定
 

@@ -1205,6 +1205,27 @@ class SceneRenderer:
                 else:
                     line.pop("characters", None)
 
+        bg_persist = bool(
+            scene.get(
+                "background_persist",
+                self.config.get("defaults", {}).get("background_persist", False),
+            )
+        )
+        if bg_persist:
+            current_bg = scene.get("bg", bg_default)
+            for idx, line in enumerate(scene.get("lines", []), start=1):
+                line_bg = line.get("background")
+                if isinstance(line_bg, dict) and line_bg.get("path"):
+                    current_bg = str(line_bg["path"])
+                elif current_bg:
+                    line["background"] = {"path": current_bg}
+                line_id = f"{scene_id}_{idx}"
+                line_data = self.line_data_map.get(line_id)
+                if line_data is not None and current_bg:
+                    line_config = line_data.setdefault("line_config", {})
+                    if isinstance(line_config, dict):
+                        line_config["background"] = {"path": current_bg}
+
         generate_no_sub_video = bool(
             self.config.get("system", {}).get("generate_no_sub_video", False)
         )
