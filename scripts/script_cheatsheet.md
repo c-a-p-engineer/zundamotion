@@ -217,6 +217,34 @@ system:
 - `defaults.characters_persist: true` で VN 風に立ち絵を保持。サンプル: [`sample_vn_minimal.yaml`](./sample_vn_minimal.yaml)。
 - 字幕を任意位置で改行したい場合は `text` / `subtitle_text` に `\\n`（YAML では `"行1\\n行2"`）または `<br>` を挿入すると、字幕PNGと SRT/ASS ファイルで複数行表示されます。サンプル: [`sample.yaml`](./sample.yaml)。
 
+### キャッシュを効かせやすいシーン分割
+
+長い台本は 1 つの `main` シーンにまとめすぎず、トピックや章ごとにシーンを分けると再生成が扱いやすくなります。
+Zundamotion はシーン単位の動画キャッシュを持つため、一部の章だけを修正した場合、変更していないシーンのキャッシュを再利用しやすくなります。
+
+```yaml
+scenes:
+  - id: main_intro
+    bg: assets/slides/01-cover.png
+    items:
+      - topic: "導入"
+      - say:
+          text: "今日は設計の話です。"
+
+  - id: main_topic_a
+    bg: assets/slides/02-topic-a.png
+    items:
+      - topic: "考え方"
+      - say:
+          text: "ここから本題です。"
+```
+
+注意:
+
+- 1 スライド 1 シーンまで細かくする必要はありません。章、トピック、数枚のスライド単位を目安にします。
+- `characters_persist` と `background_persist` は同一シーン内の継続です。シーンを分けた場合は、各シーン冒頭で必要な `characters` や `bg` を明示してください。
+- シーン境界で `transition` を指定すると、その境界ごとに遷移処理が入ります。単にキャッシュ粒度を分けたいだけなら、遷移を指定しない通常のシーン分割で十分です。
+
 ### 複数キャラクターの同時発話
 
 `voice_layers` にキャラクターごとのボイス設定を列挙すると、同じ行で複数の音声をミックスできます。

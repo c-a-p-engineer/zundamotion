@@ -55,6 +55,7 @@
 - 画像アセットは画像の差し替えが発生するため、同名ファイルでも中身が変わったら別 cache として扱う。cache key 内の既存ローカル画像パスには `sha256` を含める
 - `subtitle-only transparent video` は再度却下。qtrle/alpha 中間動画の生成・I/Oが重く、短尺ベンチでも安定完走しなかった
 - `scene-unit filter graph` と `static slide fast path` は、現状の line clip + scene cache 構造を壊すリスクに対して効果未確認。既定採用しない
+- 長い台本は 1 つの巨大な `main` シーンにまとめすぎず、トピックや章ごとにシーンを分けると、シーン単位キャッシュが効きやすく再生成範囲を小さくできる
 - `GPU overlay` は、この環境では CUDA filter smoke が失敗したため不採用。CPU/GPU 往復が発生する構成では採用しない
 - いまの CPU 経路の残ボトルネックは主に `VOICEVOX`、行クリップ生成、長尺時の字幕チャンク焼き込み
 
@@ -65,6 +66,7 @@
 | 対象 | 判定 | 理由 |
 |---|---|---|
 | scene base / subtitle cache | 採用 | 字幕済み scene cache hit で `VideoPhase` がほぼ 0 秒になる |
+| トピック単位のシーン分割 | 採用 | 章ごとにキャッシュ粒度を分けると、一部修正時に未変更シーンを再利用しやすい |
 | FinalizePhase cache | 採用 | transition boundary と final concat の再生成を避けられる |
 | PNG 字幕チャンク分割 | 採用 | 巨大 filter graph による長時間停止を避けられる |
 | PNG 字幕チャンクサイズ auto | 採用 | 字幕密度、gap、最長連続字幕区間を見て chunk size を決める |
@@ -80,6 +82,29 @@
 | scene-unit filter graph | 却下 | 巨大 filter graph 化で debug 性と保守性が落ちる |
 | GPU overlay / CUDA overlay | 却下 | smoke test 失敗。CPU/GPU 往復のリスクが高い |
 | transition suffix stream copy | 却下 | next scene 冒頭音声が再出現する場合がある |
+
+## 台本設計でキャッシュを効かせる
+
+長尺動画では、台本構造そのものも再生成時間に影響します。
+
+推奨:
+
+- 長い本編を 1 つの `main` シーンに詰め込まず、トピック、章、数枚のスライド単位でシーンを分ける。
+- 変更されやすい導入、用語説明、実例、まとめは別シーンにしておく。
+- 各シーンの `id` は、`main_intro`、`main_inheritance`、`main_summary` のように内容が分かる名前にする。
+- シーンを分けた場合は、各シーン冒頭で必要な `bg`、`characters`、表情を明示する。
+
+理由:
+
+- Zundamotion はシーン単位で `scene_<id>_base` / `scene_<id>_sub` のキャッシュを持つ。
+- 字幕やセリフを一部だけ直した場合、未変更シーンは cache hit しやすい。
+- 1 つの巨大シーンにまとめると、その中の一部変更でもシーン全体のキャッシュが無効になりやすい。
+
+注意:
+
+- シーンを細かくしすぎると、シーン連結やトランジション境界が増える。1 スライド 1 シーンを機械的な標準にはしない。
+- `transition` を多用すると境界処理が増える。キャッシュ粒度を分けたいだけなら、通常のシーン分割でよい。
+- `characters_persist` と `background_persist` は同一シーン内の継続であり、シーンをまたいだ状態継承に依存しない。
 
 ## 今回の短尺ベンチ結果
 
