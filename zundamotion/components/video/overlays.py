@@ -322,7 +322,7 @@ class OverlayMixin:
                 )
         return chunks
 
-    async def _copy_video_segment(
+    async def _cut_video_segment_exact(
         self,
         base_video: Path,
         output_path: Path,
@@ -335,20 +335,36 @@ class OverlayMixin:
             self.ffmpeg_path,
             "-y",
             "-nostdin",
-            "-ss",
-            f"{start:.3f}",
             "-i",
             str(base_video),
-            "-t",
-            f"{duration:.3f}",
-            "-map",
-            "0",
-            "-c",
-            "copy",
-            "-avoid_negative_ts",
-            "make_zero",
-            str(output_path),
         ]
+        cmd.extend(self._single_job_thread_flags())
+        filter_complex = (
+            f"[0:v]trim=start={start:.3f}:duration={duration:.3f},"
+            "setpts=PTS-STARTPTS[v];"
+            f"[0:a]atrim=start={start:.3f}:duration={duration:.3f},"
+            "asetpts=PTS-STARTPTS[a]"
+        )
+        cmd.extend(
+            [
+                "-filter_complex",
+                filter_complex,
+                "-map",
+                "[v]",
+                "-map",
+                "[a]",
+            ]
+        )
+        cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))
+        cmd.extend(self.audio_params.to_ffmpeg_opts())
+        cmd.extend(
+            [
+                "-shortest",
+                "-t",
+                f"{duration:.3f}",
+                str(output_path),
+            ]
+        )
         await _run_ffmpeg(cmd)
         return output_path
 
@@ -746,7 +762,7 @@ class OverlayMixin:
                 segment_paths: List[Path] = []
                 cursor = 0.0
                 gap_count = 0
-                copied_gap_duration = 0.0
+                exact_gap_duration = 0.0
                 reencoded_gap_duration = 0.0
                 slowest_chunk_ms = 0.0
                 for seg_idx, item in enumerate(ranges):
@@ -755,12 +771,12 @@ class OverlayMixin:
                     if start > cursor + 0.02:
                         gap_duration = start - cursor
                         logger.info(
-                            "[SubtitleGap] start=%.3f end=%.3f duration=%.3f mode=copy",
+                            "[SubtitleGap] start=%.3f end=%.3f duration=%.3f mode=exact",
                             cursor,
                             start,
                             gap_duration,
                         )
-                        copied = await self._copy_video_segment(
+                        copied = await self._cut_video_segment_exact(
                             base_video,
                             self.temp_dir / f"{base_video.stem}_sub_gap_{seg_idx:03d}.mp4",
                             cursor,
@@ -768,7 +784,7 @@ class OverlayMixin:
                         )
                         if copied:
                             gap_count += 1
-                            copied_gap_duration += gap_duration
+                            exact_gap_duration += gap_duration
                             segment_paths.append(copied)
                         else:
                             reencoded_gap_duration += gap_duration
@@ -779,7 +795,12 @@ class OverlayMixin:
                         copied_sub["start"] = max(0.0, float(sub["start"]) - start)
                         adjusted.append(copied_sub)
                     seg_base = self.temp_dir / f"{base_video.stem}_sub_base_{seg_idx:03d}.mp4"
-                    await self._copy_video_segment(base_video, seg_base, start, end - start)
+                    await self._cut_video_segment_exact(
+                        base_video,
+                        seg_base,
+                        start,
+                        end - start,
+                    )
                     chunk_started = time.perf_counter()
                     burned = await self._apply_subtitle_overlays_full(
                         seg_base,
@@ -802,12 +823,12 @@ class OverlayMixin:
                 if float(base_dur) > cursor + 0.02:
                     gap_duration = float(base_dur) - cursor
                     logger.info(
-                        "[SubtitleGap] start=%.3f end=%.3f duration=%.3f mode=copy",
+                        "[SubtitleGap] start=%.3f end=%.3f duration=%.3f mode=exact",
                         cursor,
                         float(base_dur),
                         gap_duration,
                     )
-                    copied = await self._copy_video_segment(
+                    copied = await self._cut_video_segment_exact(
                         base_video,
                         self.temp_dir / f"{base_video.stem}_sub_gap_tail.mp4",
                         cursor,
@@ -815,17 +836,17 @@ class OverlayMixin:
                     )
                     if copied:
                         gap_count += 1
-                        copied_gap_duration += gap_duration
+                        exact_gap_duration += gap_duration
                         segment_paths.append(copied)
                     else:
                         reencoded_gap_duration += gap_duration
                 logger.info(
-                    "[SubtitleGap] count=%d total=%.3f copied=%.3f reencoded=%.3f copy_fail_reason=%s slowest_chunk_ms=%.1f",
+                    "[SubtitleGap] count=%d total=%.3f exact=%.3f fallback=%.3f fail_reason=%s slowest_chunk_ms=%.1f",
                     gap_count,
-                    copied_gap_duration + reencoded_gap_duration,
-                    copied_gap_duration,
+                    exact_gap_duration + reencoded_gap_duration,
+                    exact_gap_duration,
                     reencoded_gap_duration,
-                    "none" if reencoded_gap_duration <= 0.0 else "copy_segment_returned_none",
+                    "none" if reencoded_gap_duration <= 0.0 else "exact_segment_returned_none",
                     slowest_chunk_ms,
                 )
 

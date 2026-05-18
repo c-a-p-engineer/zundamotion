@@ -1,16 +1,28 @@
 """Ensure overlay filters preserve transparency when effects are applied."""
 
+import asyncio
+from pathlib import Path
+
+import zundamotion.components.video.overlays as overlays_module
 from zundamotion.components.video.overlays import OverlayMixin
+from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
 
 
 class _DummyOverlay(OverlayMixin):
     def __init__(self) -> None:
         self.scale_flags = "bicubic"
+        self.ffmpeg_path = "ffmpeg"
+        self.video_params = VideoParams(width=1080, height=1920, fps=30)
+        self.audio_params = AudioParams(sample_rate=48000, channels=2)
+        self.hw_kind = None
         self.subtitle_gen = type(
             "SubtitleGen",
             (),
             {"subtitle_config": {}},
         )()
+
+    def _single_job_thread_flags(self):  # type: ignore[override]
+        return ["-threads", "1"]
 
     def _build_effect_filters(self, effects):  # type: ignore[override]
         # Reuse base implementation
@@ -117,3 +129,30 @@ def test_explicit_subtitle_png_chunk_size_overrides_auto():
     dummy.subtitle_gen.subtitle_config = {"png_chunk_size": 24}
 
     assert dummy._subtitle_png_chunk_size([{}] * 90, base_duration=534.25) == 24
+
+
+def test_subtitle_segment_cut_uses_exact_trim_not_stream_copy(monkeypatch, tmp_path):
+    dummy = _DummyOverlay()
+    captured = {}
+
+    async def fake_run_ffmpeg(cmd):
+        captured["cmd"] = cmd
+
+    monkeypatch.setattr(overlays_module, "_run_ffmpeg", fake_run_ffmpeg)
+
+    asyncio.run(
+        dummy._cut_video_segment_exact(
+            tmp_path / "base.mp4",
+            tmp_path / "segment.mp4",
+            start=1.92,
+            duration=0.25,
+        )
+    )
+
+    cmd = captured["cmd"]
+    filter_complex = cmd[cmd.index("-filter_complex") + 1]
+    assert "trim=start=1.920:duration=0.250" in filter_complex
+    assert "atrim=start=1.920:duration=0.250" in filter_complex
+    assert "-c" not in cmd
+    assert "copy" not in cmd
+    assert str(tmp_path / "segment.mp4") == cmd[-1]

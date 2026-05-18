@@ -47,7 +47,7 @@
 - NVENC では `veryfast` など x264 系 preset を渡してはいけない。`p1`〜`p7` へ正規化する
 - `quality=speed` で NVENC `p7` を選ぶのは逆効果。`p1` が fastest、`p7` が slowest/best
 - `cache_refresh` が同一キーを何度も消す実装は無駄だった
-- PNG 字幕焼き込みは巨大な 1 本の filter graph に戻さない。字幕範囲をチャンク分割し、字幕のない gap は stream copy する
+- PNG 字幕焼き込みは巨大な 1 本の filter graph に戻さない。字幕範囲をチャンク分割する。ただしチャンクや gap の切り出しは stream copy ではなく `trim` / `atrim` で正確に行う
 - `subtitle.png_chunk_size` は `auto` を既定にする。ただし既知の中尺ケースでチャンク数が増えないよう、90字幕級だけを大きめにし、66字幕級は従来の `12` 相当に留める
 - FinalizePhase の `consume_next_head` 付き transition は、消費後の next scene 後続部を再エンコードする。`-ss` + stream copy では切り出し位置より前の音声が混ざり、次シーン冒頭音声が二重化する場合がある
 - 2026-05-10 の短尺ベンチでは、`FinalizePhase cache` は採用。transition boundary と final concat intermediate を内容ハッシュでキャッシュする
@@ -69,6 +69,7 @@
 | トピック単位のシーン分割 | 採用 | 章ごとにキャッシュ粒度を分けると、一部修正時に未変更シーンを再利用しやすい |
 | FinalizePhase cache | 採用 | transition boundary と final concat の再生成を避けられる |
 | PNG 字幕チャンク分割 | 採用 | 巨大 filter graph による長時間停止を避けられる |
+| PNG 字幕チャンク/gap exact trim | 採用 | `-ss` + stream copy では非キーフレーム境界で切り出し前の音声が混ざり、短尺で発話が二重化する場合がある |
 | PNG 字幕チャンクサイズ auto | 採用 | 字幕密度、gap、最長連続字幕区間を見て chunk size を決める |
 | PNG 字幕 `compress_level=1` | 採用 | bounded bench で `compress_level=6` より速く、サイズ差も小さい |
 | 顔 overlay 事前キャッシュ | 採用 | 同一実行内の顔 overlay 再生成を抑制できる |
@@ -486,7 +487,7 @@ Cache OFF (`--no-cache`)。
 内容:
 - 完成版 PNG 字幕焼き込みを、1 本の巨大な `filter_complex` ではなく複数チャンクへ分割する
 - 字幕同士が重なる範囲は同じチャンクに残し、見た目を崩さない
-- 字幕のない gap は再エンコードせず stream copy し、最後に concat する
+- 字幕のない gap と字幕チャンクのベース動画は、`trim` / `atrim` で正確に切り出して最後に concat する
 - 2026-05-11 以降、既定の `subtitle.png_chunk_size` は `auto`
   - `ZUNDAMOTION_SUB_PNG_CHUNK_SIZE` で実行環境ごとの固定値に上書きできる
   - 90字幕級・長尺では `15-16` 程度を選び、66字幕級では従来相当の `12` を維持する
@@ -495,6 +496,7 @@ Cache OFF (`--no-cache`)。
 - 長尺台本で巨大 filter graph が詰まる状態を避けられる
 - PNG 字幕の可読性を維持したまま、ASS/libass へ逃がさずに完走しやすくなった
 - 長尺・字幕多数時の ffmpeg 起動/concat 小片数を減らす。ただし巨大 filter graph へ戻さないため上限は `36` に制限する
+- 2026-05-18 に、gap / chunk 切り出しの `-ss` + stream copy は廃止した。短尺動画で切り出し前の音声が混ざり、同じ発話が二重に聞こえる再現があったため、速度より音声境界の正確さを優先する
 
 実測:
 - `logs/20260508_005644_685.log` の `004_ai-code-readable`
