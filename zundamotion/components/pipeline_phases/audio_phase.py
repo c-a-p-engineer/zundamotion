@@ -331,19 +331,26 @@ class AudioPhase:
                     "line_config": line,
                     "voice_config": self.config.get("voice", {}),
                 }
-                self.cache_manager.save_to_cache(
-                    key_data=audio_cache_data,
-                    file_name=line_id,
-                    extension="wav",
-                    source_path=audio_path,
+                needs_line_audio_cache = bool(
+                    line.get("audio_filter")
+                    or line.get("sound_effects")
+                    or line.get("voice_layers")
+                    or not Path(audio_path).exists()
                 )
-                audio_path = self.cache_manager.get_cache_path(
-                    key_data=audio_cache_data,
-                    file_name=line_id,
-                    extension="wav",
-                )
-                if not audio_path.exists():
-                    audio_path = self.temp_dir / f"{line_id}_speech.wav"
+                if needs_line_audio_cache:
+                    self.cache_manager.save_to_cache(
+                        key_data=audio_cache_data,
+                        file_name=line_id,
+                        extension="wav",
+                        source_path=audio_path,
+                    )
+                    audio_path = self.cache_manager.get_cache_path(
+                        key_data=audio_cache_data,
+                        file_name=line_id,
+                        extension="wav",
+                    )
+                    if not audio_path.exists():
+                        audio_path = self.temp_dir / f"{line_id}_speech.wav"
 
                 audio_filter = line.get("audio_filter")
                 if audio_filter:

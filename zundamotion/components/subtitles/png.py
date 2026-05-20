@@ -13,6 +13,7 @@ from typing import Any, Dict, Tuple
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 
 from ...cache import CacheManager
+from ...utils import perf_stats
 
 logger = logging.getLogger(__name__)
 
@@ -547,6 +548,7 @@ class SubtitlePNGRenderer:
             else expected_cached_path.exists()
         )
         render_started = time.perf_counter()
+        perf_stats.incr("subtitle_png")
         text_hash = hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()[:12]
 
         async def creator_func(output_path: Path) -> Path:

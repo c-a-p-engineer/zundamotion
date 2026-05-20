@@ -1,4 +1,5 @@
 import os
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -7,11 +8,10 @@ import httpx
 from ...cache import CacheManager  # CacheManagerをインポート
 from ...exceptions import CacheError
 from ...utils.ffmpeg_params import AudioParams
-from ...utils.ffmpeg_probe import get_audio_duration
 from ...utils.ffmpeg_audio import create_silent_audio, mix_audio_tracks
 
 from ...utils.logger import logger  # loggerをインポート
-from .voicevox_client import generate_voice, get_speakers_info
+from .voicevox_client import generate_voice, get_engine_version, get_speakers_info
 
 
 class AudioGenerator:
@@ -31,6 +31,8 @@ class AudioGenerator:
         self.audio_params = audio_params
         self.cache_manager = cache_manager  # インスタンス変数として保持
         self._speaker_info_cache: Optional[Dict[int, Dict[str, Any]]] = None
+        self._engine_version_cache: Optional[str] = None
+        self._dictionary_hash_cache: Optional[str] = None
         self._speaker_validation_unavailable = False
         self.voice_request_timeout = float(self.voice_config.get("request_timeout", 6.0) or 6.0)
         self.voice_retry_attempts = int(self.voice_config.get("retry_attempts", 3) or 3)
@@ -62,6 +64,44 @@ class AudioGenerator:
             return None
 
         return self._speaker_info_cache
+
+    async def _get_engine_version(self) -> str:
+        if self._engine_version_cache is not None:
+            return self._engine_version_cache
+        self._engine_version_cache = await get_engine_version(
+            self.voicevox_url,
+            timeout=self.voice_request_timeout,
+            retry_attempts=self.speaker_retry_attempts,
+            retry_wait_min=self.voice_retry_wait_min,
+            retry_wait_max=self.voice_retry_wait_max,
+        )
+        return self._engine_version_cache
+
+    def _get_dictionary_hash(self) -> str:
+        if self._dictionary_hash_cache is not None:
+            return self._dictionary_hash_cache
+        configured = self.voice_config.get("dictionary_hash") or os.getenv(
+            "ZUNDAMOTION_DICTIONARY_HASH"
+        )
+        if configured:
+            self._dictionary_hash_cache = str(configured)
+            return self._dictionary_hash_cache
+
+        candidates = [
+            Path("tools/dictionary.csv"),
+            Path("dictionary.csv"),
+        ]
+        digest = hashlib.sha256()
+        matched = False
+        for candidate in candidates:
+            try:
+                if candidate.is_file():
+                    matched = True
+                    digest.update(candidate.read_bytes())
+            except OSError:
+                continue
+        self._dictionary_hash_cache = digest.hexdigest() if matched else "none"
+        return self._dictionary_hash_cache
 
     async def _validate_speaker(self, speaker: int, line_config: Dict[str, Any]) -> None:
         speaker_info = await self._get_speaker_info()
@@ -143,7 +183,9 @@ class AudioGenerator:
                 audio_tracks_to_mix.append((str(layer_audio_path), start_time, volume))
 
                 try:
-                    layer_duration = await get_audio_duration(str(layer_audio_path))
+                    layer_duration = await self.cache_manager.get_or_create_media_duration(
+                        Path(layer_audio_path)
+                    )
                 except Exception:
                     layer_duration = 0.0
                 max_end_time = max(max_end_time, start_time + layer_duration)
@@ -179,7 +221,7 @@ class AudioGenerator:
                 se_start_time = float(se.get("start_time", 0.0))
                 se_volume = float(se.get("volume", 1.0))
                 audio_tracks_to_mix.append((se_path, se_start_time, se_volume))
-                se_duration = await get_audio_duration(se_path)
+                se_duration = await self.cache_manager.get_or_create_media_duration(Path(se_path))
                 max_end_time = max(max_end_time, se_start_time + se_duration)
 
             if not audio_tracks_to_mix:
@@ -189,7 +231,7 @@ class AudioGenerator:
                     0.001,
                     self.audio_params,
                 )
-                return silent_path, voice_usage
+                return silent_path, voice_usage, layer_voice_segments
 
             total_duration = max(max_end_time, 0.001)
             mixed_wav_path = self.temp_dir / f"{output_filename}_mixed.wav"
@@ -208,7 +250,9 @@ class AudioGenerator:
             for se in sound_effects:
                 se_path = se["path"]
                 se_start_time = se.get("start_time", 0.0)
-                se_duration = await get_audio_duration(se_path)
+                se_duration = await self.cache_manager.get_or_create_media_duration(
+                    Path(se_path)
+                )
                 required_speech_duration_for_ses = max(
                     required_speech_duration_for_ses, se_start_time + se_duration
                 )
@@ -231,13 +275,26 @@ class AudioGenerator:
                     "Please ensure 'speaker_id' is defined in defaults or line_config."
                 )
             await self._validate_speaker(int(speaker), line_config)
+            engine_version = await self._get_engine_version()
+            dictionary_hash = self._get_dictionary_hash()
 
             # VOICEVOX合成パラメータをキャッシュキーに含める
             voice_key_data = {
+                "kind": "voicevox_speech",
                 "text": text,
                 "speaker": speaker,
                 "speed": speed,
                 "pitch": pitch,
+                "intonation": line_config.get("intonation", self.voice_config.get("intonation")),
+                "volume": line_config.get("volume", self.voice_config.get("volume")),
+                "pre_phoneme_length": line_config.get(
+                    "pre_phoneme_length", self.voice_config.get("pre_phoneme_length")
+                ),
+                "post_phoneme_length": line_config.get(
+                    "post_phoneme_length", self.voice_config.get("post_phoneme_length")
+                ),
+                "voicevox_engine_version": engine_version,
+                "dictionary_hash": dictionary_hash,
                 "voicevox_url": self.voicevox_url,
                 "audio_params": self.audio_params.__dict__,  # AudioParamsもキャッシュキーに含める
             }
@@ -263,11 +320,13 @@ class AudioGenerator:
             try:
                 speech_wav_path = await self.cache_manager.get_or_create(
                     key_data=voice_key_data,
-                    file_name=f"{output_filename}_speech",
+                    file_name="voice_speech",
                     extension="wav",
                     creator_func=creator_func,
                 )
-                speech_duration = await get_audio_duration(str(speech_wav_path))
+                speech_duration = await self.cache_manager.get_or_create_media_duration(
+                    speech_wav_path
+                )
                 voice_usage.append((int(speaker), text))
                 layer_voice_segments.append(
                     {
@@ -349,7 +408,7 @@ class AudioGenerator:
             se_start_time = se.get("start_time", 0.0)
             se_volume = se.get("volume", 1.0)
             audio_tracks_to_mix.append((se_path, se_start_time, se_volume))
-            se_duration = await get_audio_duration(se_path)
+            se_duration = await self.cache_manager.get_or_create_media_duration(Path(se_path))
             max_end_time = max(max_end_time, se_start_time + se_duration)
 
         # Mix all audio tracks

@@ -16,6 +16,7 @@ from ...utils.ffmpeg_probe import get_media_duration
 from ...utils.ffmpeg_ops import concat_videos_copy
 from ...utils.filter_presets import get_video_filter_chain
 from ...utils.logger import logger
+from ...utils import perf_stats
 from .overlay_effects import resolve_overlay_effects
 from .threading import build_ffmpeg_thread_flags
 
@@ -789,6 +790,7 @@ class OverlayMixin:
                 or ranges[-1]["end"] < float(base_dur) - 0.05
                 or len(ranges) > 1
             ):
+                perf_stats.incr("subtitle_chunks", len(ranges))
                 logger.info(
                     "[SubtitleOverlay] Segment mode: re-encoding %d subtitle chunk(s), copying gaps (base=%.2fs, subtitles=%d, png_chunk_size=%d)",
                     len(ranges),
@@ -845,6 +847,7 @@ class OverlayMixin:
                         self.temp_dir / f"{base_video.stem}_sub_burn_{seg_idx:03d}.mp4",
                     )
                     chunk_ms = (time.perf_counter() - chunk_started) * 1000.0
+                    perf_stats.add_ms("subtitle_burn_ms", chunk_ms)
                     slowest_chunk_ms = max(slowest_chunk_ms, chunk_ms)
                     logger.info(
                         "[SubtitleChunk] index=%d subtitles=%d duration=%.3f gap_copy_before=%.3f ffmpeg_ms=%.1f",
@@ -904,7 +907,10 @@ class OverlayMixin:
                     )
 
         self.subtitle_overlay_stats["chunks"] = 1
+        perf_stats.incr("subtitle_chunks", 1)
+        burn_started = time.perf_counter()
         result = await self._apply_subtitle_overlays_full(base_video, subtitles, output_path)
+        perf_stats.add_ms("subtitle_burn_ms", (time.perf_counter() - burn_started) * 1000.0)
         self.subtitle_overlay_stats_history.append(dict(self.subtitle_overlay_stats))
         return result
 

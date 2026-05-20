@@ -1,0 +1,46 @@
+meta:
+  title: voice cache reuse benchmark
+  version: 1
+
+video:
+  width: 640
+  height: 360
+  fps: 30
+
+system:
+  timeline:
+    enabled: false
+  subtitle_file:
+    enabled: false
+
+defaults:
+  characters:
+    narrator:
+      speaker_id: 3
+      mouth_sync: false
+  speed: 1.05
+  pitch: 0.0
+
+voice:
+  estimate_chars_per_second: 16
+  estimate_min_duration: 0.55
+
+subtitle:
+  font_path: /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf
+  font_size: 26
+  max_chars_per_line: 18
+  y: h-60-text_h/2
+
+scenes:
+  - id: reuse_a
+    bg: assets/bg/room.png
+    items:
+      - say: {text: "同じ音声キャッシュを再利用します。", speaker_name: narrator}
+      - say: {text: "同じ音声キャッシュを再利用します。", speaker_name: narrator}
+      - say: {text: "同じ音声キャッシュを再利用します。", speaker_name: narrator}
+  - id: reuse_b
+    bg: assets/bg/room.png
+    items:
+      - say: {text: "同じ音声キャッシュを再利用します。", speaker_name: narrator}
+      - say: {text: "別の文章も一度だけ生成します。", speaker_name: narrator}
+      - say: {text: "別の文章も一度だけ生成します。", speaker_name: narrator}

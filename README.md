@@ -1034,6 +1034,7 @@ defaults:
 
 ```yaml
 system:
+  cache_dir: ".cache/zundamotion" # キャッシュ保存先。必要に応じて変更可能
   timeline:
     enabled: true
     format: "md" # "md", "csv", "both", "none" から選択

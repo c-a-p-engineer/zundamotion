@@ -5,6 +5,7 @@ import copy
 import json
 import os
 import subprocess
+import time as _time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -23,6 +24,7 @@ from ....utils.ffmpeg_ops import (
 )
 from ....utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from ....utils.logger import logger
+from ....utils import perf_stats
 from ....utils.subtitle_text import is_effective_subtitle_text
 from ...video.clip.face import _enable_expr, _resolve_face_asset
 from ...video.clip.characters import is_horizontal_flip_enabled, is_vertical_flip_enabled
@@ -1511,11 +1513,13 @@ class SceneRenderer:
             logger.debug("Subtitle precache skipped (scene=%s): %s", scene_id, e)
 
         try:
+            face_precache_started = _time.time()
             await self._precache_face_overlays(
                 scene_id=scene_id,
                 scene=scene,
                 line_data_map=line_data_map,
             )
+            perf_stats.add_ms("face_precache_ms", (_time.time() - face_precache_started) * 1000.0)
         except Exception as e:
             logger.debug("Face overlay precache skipped (scene=%s): %s", scene_id, e)
 
@@ -2239,6 +2243,8 @@ class SceneRenderer:
                         )
                     # Also record full diagnostic sample (independent of profiling caps)
                     try:
+                        perf_stats.incr("line_clips")
+                        perf_stats.add_ms("video_line_clip_ms", elapsed * 1000.0)
                         self.phase._clip_samples_all.append(
                             {
                                 "scene": scene_id,
@@ -2363,9 +2369,11 @@ class SceneRenderer:
 
         if scene_line_clips:
             scene_output_path = self.temp_dir / f"scene_output_{scene_id}.mp4"
+            concat_started = _time.time()
             await self.video_renderer.concat_clips(
                 scene_line_clips, str(scene_output_path)
             )
+            perf_stats.add_ms("scene_concat_ms", (_time.time() - concat_started) * 1000.0)
             logger.info(f"Concatenated scene clips -> {scene_output_path.name}")
 
             fg_overlays = scene.get("fg_overlays") or []

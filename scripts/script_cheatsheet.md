@@ -202,6 +202,7 @@ subtitle:
 
 ```yaml
 system:
+  cache_dir: ".cache/zundamotion" # キャッシュ保存先
   subtitle_file:
     enabled: true
     format: srt          # srt / ass / both

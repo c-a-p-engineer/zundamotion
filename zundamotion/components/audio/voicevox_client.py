@@ -79,6 +79,33 @@ async def get_speakers_info(
         raise
 
 
+async def get_engine_version(
+    voicevox_url: str = "http://127.0.0.1:50021",
+    *,
+    timeout: float = 6.0,
+    retry_attempts: int = 2,
+    retry_wait_min: float = 1.0,
+    retry_wait_max: float = 2.0,
+) -> str:
+    """Fetch VOICEVOX engine version when the endpoint is available."""
+
+    async def _fetch() -> str:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(f"{voicevox_url}/version", timeout=timeout)
+            res.raise_for_status()
+            return str(res.json() if res.headers.get("content-type", "").startswith("application/json") else res.text).strip().strip('"')
+
+    try:
+        return await _with_retry(
+            _fetch,
+            attempts=retry_attempts,
+            wait_min=retry_wait_min,
+            wait_max=retry_wait_max,
+        )
+    except Exception:
+        return "unknown"
+
+
 async def generate_voice(
     text: str,
     speaker: int,

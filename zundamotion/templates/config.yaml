@@ -2,7 +2,7 @@
 
 # System settings
 system:
-  cache_dir: "cache"
+  cache_dir: ".cache/zundamotion"
   video_extensions:
     - ".mp4"
     - ".mov"

@@ -16,6 +16,7 @@ from .utils.ffmpeg_probe import (MediaInfo, get_media_info, get_media_duration, 
 from .utils.ffmpeg_ops import normalize_media
 
 from .utils.logger import logger
+from .utils import perf_stats
 
 
 _IMAGE_CACHE_KEY_SUFFIXES = {
@@ -286,6 +287,7 @@ class CacheManager:
                 logger.info(
                     f"Cache HIT for media info of {file_path.name} (key: {cache_key[:8]})"
                 )
+                perf_stats.incr("cache_hit")
                 return info
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning(
@@ -296,18 +298,40 @@ class CacheManager:
         logger.info(
             f"Cache MISS for media info of {file_path.name} (key: {cache_key[:8]}). Generating..."
         )
-        try:
-            info = await get_media_info(str(file_path))
-            with open(cached_meta_path, "w", encoding="utf-8") as f:
-                json.dump({"media_info": info, "created_at": time.time()}, f)
-            logger.debug(f"Cached media info for {file_path.name}")
-            if not self.no_cache:
-                self._clean_cache()
-            return info
-        except Exception as e:
-            raise CacheError(
-                f"Failed to get or cache media info for {file_path.name}: {e}"
-            )
+        task_key = f"media_info:{cache_key}"
+        async with self._inflight_lock:
+            existing = self._inflight_tasks.get(task_key)
+            if existing is None:
+                perf_stats.incr("cache_miss")
+
+                async def _create_media_info() -> MediaInfo:
+                    try:
+                        if cached_meta_path.exists():
+                            with open(cached_meta_path, "r", encoding="utf-8") as f:
+                                meta = json.load(f)
+                            perf_stats.incr("cache_hit")
+                            return meta["media_info"]
+                        info = await get_media_info(str(file_path))
+                        with open(cached_meta_path, "w", encoding="utf-8") as f:
+                            json.dump({"media_info": info, "created_at": time.time()}, f)
+                        perf_stats.incr("cache_write")
+                        logger.debug(f"Cached media info for {file_path.name}")
+                        if not self.no_cache:
+                            self._clean_cache()
+                        return info
+                    except Exception as e:
+                        raise CacheError(
+                            f"Failed to get or cache media info for {file_path.name}: {e}"
+                        )
+                    finally:
+                        async with self._inflight_lock:
+                            self._inflight_tasks.pop(task_key, None)
+
+                task = asyncio.create_task(_create_media_info())
+                self._inflight_tasks[task_key] = task
+            else:
+                task = existing
+        return await task
     async def get_or_create_media_duration(self, file_path: Path) -> float:
         """メディアの再生時間を取得しキャッシュする。"""
         key_data = self._media_probe_cache_key_data(file_path, "media_duration")
@@ -328,6 +352,7 @@ class CacheManager:
                 logger.info(
                     f"Cache HIT for duration of {file_path.name} (key: {cache_key[:8]}) -> {duration:.2f}s"
                 )
+                perf_stats.incr("cache_hit")
                 return duration
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning(
@@ -338,18 +363,40 @@ class CacheManager:
         logger.info(
             f"Cache MISS for duration of {file_path.name} (key: {cache_key[:8]}). Generating..."
         )
-        try:
-            duration = await get_media_duration(str(file_path))
-            with open(cached_meta_path, "w", encoding="utf-8") as f:
-                json.dump({"duration": duration, "created_at": time.time()}, f)
-            logger.debug(f"Cached duration for {file_path.name} -> {duration:.2f}s")
-            if not self.no_cache:
-                self._clean_cache()
-            return duration
-        except Exception as e:
-            raise CacheError(
-                f"Failed to get or cache media duration for {file_path.name}: {e}"
-            )
+        task_key = f"media_duration:{cache_key}"
+        async with self._inflight_lock:
+            existing = self._inflight_tasks.get(task_key)
+            if existing is None:
+                perf_stats.incr("cache_miss")
+
+                async def _create_duration() -> float:
+                    try:
+                        if cached_meta_path.exists():
+                            with open(cached_meta_path, "r", encoding="utf-8") as f:
+                                meta = json.load(f)
+                            perf_stats.incr("cache_hit")
+                            return float(meta["duration"])
+                        duration = await get_media_duration(str(file_path))
+                        with open(cached_meta_path, "w", encoding="utf-8") as f:
+                            json.dump({"duration": duration, "created_at": time.time()}, f)
+                        perf_stats.incr("cache_write")
+                        logger.debug(f"Cached duration for {file_path.name} -> {duration:.2f}s")
+                        if not self.no_cache:
+                            self._clean_cache()
+                        return duration
+                    except Exception as e:
+                        raise CacheError(
+                            f"Failed to get or cache media duration for {file_path.name}: {e}"
+                        )
+                    finally:
+                        async with self._inflight_lock:
+                            self._inflight_tasks.pop(task_key, None)
+
+                task = asyncio.create_task(_create_duration())
+                self._inflight_tasks[task_key] = task
+            else:
+                task = existing
+        return await task
     def _remove_expired_files(self, files):
         """有効期限切れのキャッシュを削除し、残りのファイル情報を返す。"""
         if self.ttl_hours is None:
@@ -428,8 +475,10 @@ class CacheManager:
             logger.info(
                 f"Cache HIT for {file_name}.{extension} (key: {cache_key[:8]}) -> {cached_path.name}"
             )
+            perf_stats.incr("cache_hit")
             return cached_path
         logger.info(f"Cache MISS for {file_name}.{extension} (key: {cache_key[:8]})")
+        perf_stats.incr("cache_miss")
         return None
 
     def cache_file(
@@ -443,6 +492,7 @@ class CacheManager:
         cache_key = self._generate_hash(key_data)
         cached_path = self.cache_dir / f"{file_name}_{cache_key}.{extension}"
         shutil.copy(source_path, cached_path)
+        perf_stats.incr("cache_write")
         logger.debug(f"Cached file -> {cached_path.name}")
         self._clean_cache()  # ファイル追加後にクリーンアップを実行
         return cached_path
@@ -490,6 +540,7 @@ class CacheManager:
                 logger.info(
                     f"Cache disabled: Reusing existing ephemeral output for key {cache_key[:8]} -> {temp_output_path.name}"
                 )
+                perf_stats.incr("cache_hit")
                 return temp_output_path
             # タスクの二重生成防止
             async with self._inflight_lock:
@@ -498,6 +549,7 @@ class CacheManager:
                     logger.info(
                         f"Cache disabled. Generating temporary file: (Ephemeral) {temp_output_path}"
                     )
+                    perf_stats.incr("cache_miss")
 
                     async def _create() -> Path:
                         try:
@@ -530,6 +582,7 @@ class CacheManager:
             logger.info(
                 f"Cache HIT for {file_name}.{extension} (key: {cache_key[:8]}) -> {cached_path.name}"
             )
+            perf_stats.incr("cache_hit")
             return cached_path
 
         task_key = f"cache:{cache_key}"
@@ -539,6 +592,7 @@ class CacheManager:
                 logger.info(
                     f"Cache MISS. Calling creator_func to generate file for {file_name}.{extension} (key: {cache_key[:8]}) to cache: {cached_path.name}"
                 )
+                perf_stats.incr("cache_miss")
 
                 async def _create_cached() -> Path:
                     try:
@@ -551,6 +605,7 @@ class CacheManager:
                             shutil.copy(generated_path, cached_path)
                             generated_path.unlink()  # 元の一時ファイルを削除
                         logger.debug(f"Generated and cached file -> {cached_path.name}")
+                        perf_stats.incr("cache_write")
                         self._clean_cache()  # ファイル生成後にクリーンアップを実行
                         return cached_path
                     except Exception as e:

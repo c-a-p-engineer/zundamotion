@@ -83,6 +83,146 @@
 | scene-unit filter graph | 却下 | 巨大 filter graph 化で debug 性と保守性が落ちる |
 | GPU overlay / CUDA overlay | 却下 | smoke test 失敗。CPU/GPU 往復のリスクが高い |
 | transition suffix stream copy | 却下 | next scene 冒頭音声が再出現する場合がある |
+| Performance summary instrumentation | 採用 | FFmpeg/ffprobe/cache/字幕PNG/中間ファイル/VideoPhase内訳を既存経路を変えずに記録できる |
+| VOICEVOX content-addressed speech cache | 採用 | 同一テキスト・同一話者・同一パラメータを scene/line をまたいで再利用できる |
+| ffprobe 種別 PerfSummary | 採用 | duration/stream/other の内訳で probe 削減対象を判断できる |
+| media probe in-flight dedupe | 採用 | 同一実行内の同一 duration/media-info probe 多重起動を避けられる |
+
+## 2026-05-20 P0-1 Performance 計測ログ拡張
+
+判定:
+
+- 採用
+
+追加ログ:
+
+```text
+[PerfSummary] ffmpeg_calls=14 ffprobe_calls=10 intermediate_files=19 intermediate_size_mb=1.2
+[PerfSummary] line_clips=3 subtitle_chunks=1 subtitle_png=6
+[PerfSummary] cache_hit=3 cache_miss=15 cache_write=9
+[PerfSummary] video_line_clip_ms=996.2 subtitle_burn_ms=445.5 face_precache_ms=5.7 scene_concat_ms=93.1
+[PerfSummary] json=/workspace/vendor/zundamotion/output/perf/perf_summary.json
+```
+
+JSON 出力:
+
+- 既定: `output/perf/perf_summary.json`
+- 変更可能: `system.performance.summary_json`
+
+実装方針:
+
+- FFmpeg/ffprobe 呼び出し回数は `run_ffmpeg_async()` で集計する。
+- cache hit/miss/write は `CacheManager` の取得・生成・保存経路で集計する。
+- `line_clips` と `video_line_clip_ms` は既存 line clip 生成単位で集計する。
+- `subtitle_png` は PNG レンダラ呼び出し単位で集計する。
+- `subtitle_chunks` と `subtitle_burn_ms` は字幕焼き込み経路で集計する。
+- `intermediate_files` と `intermediate_size_mb` はレンダリング終了直前に一時ディレクトリを走査して集計する。
+
+スモーク台本:
+
+- `scripts/benchmark_perf_summary.yaml`
+
+スモーク実測:
+
+| metric | value |
+|---|---:|
+| total | 8.55s |
+| AudioPhase | 0.47s |
+| VideoPhase | 6.16s |
+| FinalizePhase | 0.20s |
+| ffmpeg_calls | 14 |
+| ffprobe_calls | 10 |
+| line_clips | 3 |
+| subtitle_chunks | 1 |
+| subtitle_png | 6 |
+| intermediate_files | 19 |
+| intermediate_size_mb | 1.2 |
+
+採用理由:
+
+- 既存のレンダリング経路、PNG字幕、口パク、YAML DSL には影響しない。
+- 今後の P0-2/P0-3 で必要な「何が減ったか」をログと JSON で比較できる。
+- 通常ログは `[PerfSummary]` の短い数行に留まる。
+
+## 2026-05-20 P1-1 VOICEVOX content-addressed cache / ffprobe 削減
+
+判定:
+
+- 採用
+
+実装:
+
+- VOICEVOX 音声 cache の出力名を line_id 依存の `<line_id>_speech_<hash>.wav` から `voice_speech_<hash>.wav` に変更。
+- cache key には `text`, `speaker`, `speed`, `pitch`, `intonation`, `volume`, `pre_phoneme_length`, `post_phoneme_length`, VOICEVOX engine version, dictionary hash, audio params, `voicevox_url` を含める。
+- plain VOICEVOX 音声は line_id ごとの再保存を避け、content-addressed cache path を直接使う。
+- `get_audio_duration()` 直呼びを `CacheManager.get_or_create_media_duration()` 経由へ寄せた。
+- media duration / media info cache に in-flight dedupe を追加し、同一実行内の同一 probe 多重起動を抑制。
+- PerfSummary に ffprobe 種別を追加。
+
+```text
+[PerfSummary] ffprobe_duration_calls=19 ffprobe_stream_calls=0 ffprobe_other_calls=0
+```
+
+短尺ベンチ:
+
+```bash
+ZUNDAMOTION_PROJECT_ROOT=/workspace/vendor/zundamotion \
+zundamotion scripts/benchmark_voice_cache_reuse.yaml \
+  --no-cache \
+  -o output/benchmark_voice_cache_reuse.mp4 \
+  --hw-encoder cpu --quality speed --jobs 0 --debug-log --log-kv
+```
+
+- 6 発話中、実際の VOICEVOX 生成は 2 種類のテキスト分だけ。
+- 同一テキストは `Cache disabled: Reusing existing ephemeral output` で再利用された。
+- media probe in-flight dedupe 前:
+  - `AudioPhase: 2.24s`
+  - `ffprobe_calls=14`
+  - `ffprobe_duration_calls=9`
+- media probe in-flight dedupe 後:
+  - `AudioPhase: 1.30s`
+  - `ffprobe_calls=12`
+  - `ffprobe_duration_calls=7`
+
+実動画 warm-cache 確認:
+
+```bash
+zundamotion scripts/copipetan-dev-room/030_cert_aws-saa-00_overview.yaml \
+  -o output/copipetan-dev-room/030_cert_aws-saa-00_overview.p1-check2.mp4 \
+  --hw-encoder cpu --quality speed --jobs 0 --log-kv
+```
+
+変更前参考:
+
+- `logs/20260520_122336_620.log`
+- `Total execution time: 38.10s`
+- `AudioPhase: 29.57s`
+- `VideoPhase: 3.30s`
+- `FinalizePhase: 1.26s`
+- `ffprobe_calls=101`
+
+変更後 warm-cache:
+
+- `Total execution time: 13.54s`
+- `AudioPhase: 4.64s`
+- `VideoPhase: 2.76s`
+- `FinalizePhase: 3.16s`
+- `ffprobe_calls=19`
+- `ffprobe_duration_calls=19`
+- `ffprobe_stream_calls=0`
+- `ffprobe_other_calls=0`
+
+注意:
+
+- cache key に VOICEVOX engine version と dictionary hash を含めたため、初回は旧音声 cache と互換せず cold run になる。
+- cold run では `030_cert_aws-saa-00_overview.p1-check.mp4` が `AudioPhase: 75.73s` になった。これは旧 key から新 key への移行コストで、2 回目以降は warm-cache の値を見る。
+- duration cache hit のログはまだ多いが、実 ffprobe 起動数は `ffprobe_duration_calls` を見る。
+
+採用理由:
+
+- 同一テキストを scene/line をまたいで再利用できることを短尺ベンチで確認した。
+- 実動画 warm-cache で `AudioPhase` が `29.57s -> 4.64s` に短縮した。
+- `ffprobe_calls` が `101 -> 19` に減り、内訳も duration probe に限定されていることを確認できた。
 
 ## 台本設計でキャッシュを効かせる
 

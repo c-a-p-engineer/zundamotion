@@ -20,6 +20,7 @@ from .plugins.manager import initialize_plugins
 from .utils.ffmpeg_params import AudioParams, VideoParams
 from .utils.ffmpeg_probe import get_media_duration
 from .utils.logger import KVLogger, logger, time_log
+from .utils import perf_stats
 
 
 class GenerationPipeline:
@@ -72,7 +73,7 @@ class GenerationPipeline:
         except Exception:
             pass
         self.cache_manager = CacheManager(
-            cache_dir=Path(self.config.get("system", {}).get("cache_dir", "cache")),
+            cache_dir=Path(self.config.get("system", {}).get("cache_dir", ".cache/zundamotion")),
             no_cache=self.no_cache,
             cache_refresh=self.cache_refresh,
         )
@@ -102,6 +103,9 @@ class GenerationPipeline:
         end_time = time.time()
         duration = end_time - start_time
         self.stats["phases"][phase_name] = {"duration": duration}
+        current_perf = perf_stats.current_perf_stats()
+        if current_perf is not None:
+            current_perf.set_phase_ms(phase_name, duration * 1000.0)
 
         if isinstance(logger, KVLogger):
             logger.kv_info(
@@ -126,6 +130,7 @@ class GenerationPipeline:
             output_path: 最終出力する動画ファイルのパス。
         """
         pipeline_start_time = time.time()
+        perf = perf_stats.start_perf_stats()
         # Prefer RAM disk (/dev/shm) when available and large enough, controlled by USE_RAMDISK env (default: 1)
         use_ramdisk = True
         try:
@@ -392,9 +397,12 @@ class GenerationPipeline:
 
             pipeline_end_time = time.time()
             self.stats["total_duration"] = pipeline_end_time - pipeline_start_time
+            perf.scan_intermediates(temp_dir)
+            self.stats["perf_summary"] = perf.to_dict()
 
             # Output final summary
             self._log_final_summary()
+            self._write_perf_summary_json(Path(output_path), perf)
 
             if isinstance(logger, KVLogger):
                 logger.kv_info(
@@ -521,6 +529,57 @@ class GenerationPipeline:
                     bool(subtitle_stats.get("layer_video_used")),
                 )
             logger.info("------------------------")
+        perf_summary = self.stats.get("perf_summary") or {}
+        if isinstance(perf_summary, dict):
+            logger.info(
+                "[PerfSummary] ffmpeg_calls=%s ffprobe_calls=%s intermediate_files=%s intermediate_size_mb=%.1f",
+                perf_summary.get("ffmpeg_calls", 0),
+                perf_summary.get("ffprobe_calls", 0),
+                perf_summary.get("intermediate_files", 0),
+                float(perf_summary.get("intermediate_size_mb", 0.0) or 0.0),
+            )
+            logger.info(
+                "[PerfSummary] ffprobe_duration_calls=%s ffprobe_stream_calls=%s ffprobe_other_calls=%s",
+                perf_summary.get("ffprobe_duration_calls", 0),
+                perf_summary.get("ffprobe_stream_calls", 0),
+                perf_summary.get("ffprobe_other_calls", 0),
+            )
+            logger.info(
+                "[PerfSummary] line_clips=%s subtitle_chunks=%s subtitle_png=%s",
+                perf_summary.get("line_clips", 0),
+                perf_summary.get("subtitle_chunks", 0),
+                perf_summary.get("subtitle_png", 0),
+            )
+            logger.info(
+                "[PerfSummary] cache_hit=%s cache_miss=%s cache_write=%s",
+                perf_summary.get("cache_hit", 0),
+                perf_summary.get("cache_miss", 0),
+                perf_summary.get("cache_write", 0),
+            )
+            logger.info(
+                "[PerfSummary] video_line_clip_ms=%.1f subtitle_burn_ms=%.1f face_precache_ms=%.1f scene_concat_ms=%.1f",
+                float(perf_summary.get("video_line_clip_ms", 0.0) or 0.0),
+                float(perf_summary.get("subtitle_burn_ms", 0.0) or 0.0),
+                float(perf_summary.get("face_precache_ms", 0.0) or 0.0),
+                float(perf_summary.get("scene_concat_ms", 0.0) or 0.0),
+            )
+
+    def _write_perf_summary_json(self, output_path: Path, perf: perf_stats.PerfStats) -> None:
+        configured = (
+            (self.config.get("system", {}) or {})
+            .get("performance", {})
+            if isinstance((self.config.get("system", {}) or {}).get("performance", {}), dict)
+            else {}
+        )
+        raw_path = configured.get("summary_json", "output/perf/perf_summary.json")
+        summary_path = Path(raw_path)
+        if not summary_path.is_absolute():
+            summary_path = Path.cwd() / summary_path
+        try:
+            perf.write_json(summary_path)
+            logger.info("[PerfSummary] json=%s", summary_path)
+        except Exception as err:
+            logger.warning("[PerfSummary] failed to write json summary: %s", err)
 
     @staticmethod
     def _derive_no_subtitle_clips(all_clips: list[Path]) -> list[Path]:

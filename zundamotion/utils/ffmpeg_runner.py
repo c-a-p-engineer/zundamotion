@@ -12,6 +12,16 @@ import time
 from typing import List, Optional
 
 from .logger import logger
+from . import perf_stats
+
+
+def _classify_ffprobe_call(args: List[str]) -> str:
+    joined = " ".join(str(token) for token in args)
+    if "format=duration" in joined:
+        return "ffprobe_duration_calls"
+    if "show_streams" in joined or "stream=" in joined:
+        return "ffprobe_stream_calls"
+    return "ffprobe_other_calls"
 
 
 def _guess_ffmpeg_output_path(args: List[str]) -> Optional[Path]:
@@ -193,6 +203,11 @@ async def run_ffmpeg_async(
     try:
         exe = str(args[0]) if args else "ffmpeg"
         base = os.path.basename(exe)
+        if base.startswith("ffprobe"):
+            perf_stats.incr("ffprobe_calls")
+            perf_stats.incr(_classify_ffprobe_call(args))
+        elif base.startswith("ffmpeg"):
+            perf_stats.incr("ffmpeg_calls")
         if timeout is None and base.startswith("ffmpeg"):
             try:
                 env_to = float(os.getenv("FFMPEG_RUN_TIMEOUT_SEC", "0") or 0)

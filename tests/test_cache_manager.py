@@ -44,6 +44,15 @@ def test_cache_manager_creates_nested_cache_dir(tmp_path: Path) -> None:
     assert cache_dir.is_dir()
 
 
+def test_cache_manager_accepts_existing_cache_dir(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    CacheManager(cache_dir)
+
+    assert cache_dir.is_dir()
+
+
 def test_cache_refresh_deduplicates_parallel_generation(tmp_path: Path) -> None:
     async def _run() -> None:
         cache = CacheManager(tmp_path / "cache", cache_refresh=True)

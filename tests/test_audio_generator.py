@@ -10,6 +10,9 @@ from zundamotion.utils.ffmpeg_params import AudioParams
 
 
 class StubCacheManager:
+    async def get_or_create_media_duration(self, _path: Path) -> float:
+        return 1.23
+
     async def get_or_create(self, *, key_data, file_name, extension, creator_func):
         return await creator_func(Path(f"/tmp/{file_name}.{extension}"))
 
@@ -34,6 +37,23 @@ class StubWrappingCacheManager(StubSilentCacheManager):
             )
 
 
+class ReusingCacheManager(StubCacheManager):
+    def __init__(self, base_dir: Path) -> None:
+        self.base_dir = base_dir
+        self.created = 0
+        self._cache = {}
+
+    async def get_or_create(self, *, key_data, file_name, extension, creator_func):
+        key = (repr(sorted(key_data.items())), file_name, extension)
+        if key in self._cache:
+            return self._cache[key]
+        self.created += 1
+        out_path = self.base_dir / f"{file_name}_{self.created}.{extension}"
+        result = await creator_func(out_path)
+        self._cache[key] = result
+        return result
+
+
 def test_generate_audio_raises_clear_error_for_unknown_voicevox_speaker(monkeypatch, tmp_path):
     async def _run() -> None:
         generator = AudioGenerator(
@@ -43,7 +63,7 @@ def test_generate_audio_raises_clear_error_for_unknown_voicevox_speaker(monkeypa
             cache_manager=StubCacheManager(),
         )
 
-        async def fake_get_speakers_info(_url):
+        async def fake_get_speakers_info(_url, **_kwargs):
             return {
                 1: {"speaker_name": "ずんだもん", "name": "ノーマル"},
                 2: {"speaker_name": "四国めたん", "name": "ノーマル"},
@@ -90,7 +110,7 @@ def test_generate_audio_falls_back_to_silence_when_voicevox_synthesis_fails(
             cache_manager=cache_manager,
         )
 
-        async def fake_get_speakers_info(_url):
+        async def fake_get_speakers_info(_url, **_kwargs):
             return {
                 3: {"speaker_name": "ずんだもん", "name": "ノーマル"},
             }
@@ -164,7 +184,7 @@ def test_generate_audio_falls_back_to_silence_when_cache_wraps_voicevox_error(
             cache_manager=cache_manager,
         )
 
-        async def fake_get_speakers_info(_url):
+        async def fake_get_speakers_info(_url, **_kwargs):
             return {
                 3: {"speaker_name": "ずんだもん", "name": "ノーマル"},
             }
@@ -214,5 +234,55 @@ def test_generate_audio_falls_back_to_silence_when_cache_wraps_voicevox_error(
         assert voice_usage == []
         assert layer_segments == []
         assert fake_create_silent_audio.calls
+
+    asyncio.run(_run())
+
+
+def test_voice_cache_reuses_same_text_across_output_names(monkeypatch, tmp_path):
+    async def _run() -> None:
+        cache_manager = ReusingCacheManager(tmp_path)
+        generator = AudioGenerator(
+            config={"voice": {"enabled": True, "url": "http://voicevox:50021"}},
+            temp_dir=tmp_path,
+            audio_params=AudioParams(),
+            cache_manager=cache_manager,
+        )
+
+        async def fake_get_speakers_info(_url, **_kwargs):
+            return {3: {"speaker_name": "ずんだもん", "name": "ノーマル"}}
+
+        async def fake_get_engine_version(*_args, **_kwargs):
+            return "test-engine"
+
+        async def fake_generate_voice(**kwargs):
+            Path(kwargs["filepath"]).write_bytes(b"RIFF")
+
+        monkeypatch.setattr(
+            "zundamotion.components.audio.generator.get_speakers_info",
+            fake_get_speakers_info,
+        )
+        monkeypatch.setattr(
+            "zundamotion.components.audio.generator.get_engine_version",
+            fake_get_engine_version,
+        )
+        monkeypatch.setattr(
+            "zundamotion.components.audio.generator.generate_voice",
+            fake_generate_voice,
+        )
+
+        first, _, _ = await generator.generate_audio(
+            "同じ文章です",
+            {"speaker_id": 3, "speaker_name": "copetan", "speed": 1.0, "pitch": 0.0},
+            "scene_a_1",
+        )
+        second, _, _ = await generator.generate_audio(
+            "同じ文章です",
+            {"speaker_id": 3, "speaker_name": "copetan", "speed": 1.0, "pitch": 0.0},
+            "scene_b_9",
+        )
+
+        assert first == second
+        assert first.name.startswith("voice_speech_")
+        assert cache_manager.created == 1
 
     asyncio.run(_run())
