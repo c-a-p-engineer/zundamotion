@@ -399,17 +399,62 @@ fg_overlays:
     src: assets/overlay/logo.png
     mode: overlay                 # overlay | blend | chroma
     opacity: 0.9
+    blink: {interval: 0.2, duty: 0.5, min_opacity: 0.0, max_opacity: 1.0}
     position: {x: 16, y: 16}
     scale: {w: 512, h: 256, keep_aspect: true}
     timing: {start: 0.0, duration: 5.0, loop: true}
 ```
 
+主なキー:
+
+| キー | 必須 | 意味 | 例 |
+|---|---:|---|---|
+| `id` | 任意 | オーバーレイを識別する名前。ログや台本上の見通し用。未指定でも合成は可能。 | `warning_blink` |
+| `src` | 必須 | 重ねる素材のパス。PNG/JPG/WebPなどの静止画、またはMP4などの動画を指定。 | `assets/overlay/warning.png` |
+| `mode` | 任意 | 合成方式。通常は `overlay`。光素材は `blend`、単色背景を抜く場合は `chroma`。 | `overlay` |
+| `opacity` | 任意 | 全体の透明度。`1.0` が不透明、`0.0` が完全透明。`blink` と併用すると、この透明度をかけた後に点滅する。 | `0.8` |
+| `position.x` | 任意 | 左上基準の横位置(px)。0なら画面左端。 | `420` |
+| `position.y` | 任意 | 左上基準の縦位置(px)。0なら画面上端。 | `250` |
+| `scale.w` | 任意 | リサイズ後の幅(px)。 | `1080` |
+| `scale.h` | 任意 | リサイズ後の高さ(px)。 | `360` |
+| `scale.keep_aspect` | 任意 | `true` の場合、縦横比を維持して `w` x `h` の枠内に収める。余白は透過で埋める。 | `true` |
+| `fps` | 任意 | 静止画を動画入力化するときのFPS。点滅や揺れなどフレーム単位の効果を安定させたい場合に指定。 | `30` |
+| `timing.start` | 任意 | overlay を表示し始める時刻。シーンまたは行クリップの先頭からの秒数。 | `0.0` |
+| `timing.duration` | 任意 | overlay を表示する秒数。省略すると `start` 以降、対象クリップの終わりまで表示。 | `2.0` |
+| `timing.loop` | 任意 | 動画素材をループ入力する。静止画像は自動的に必要尺まで伸ばされるため通常不要。 | `true` |
+| `blink.interval` | 任意 | 点滅1周期の秒数。小さいほど速く点滅する。`0.2` なら0.2秒で1周期。 | `0.2` |
+| `blink.duty` | 任意 | 1周期のうち `max_opacity` で表示する割合。`0.5` なら半分点灯、半分消灯。 | `0.5` |
+| `blink.min_opacity` | 任意 | 消灯側の透明度倍率。`0.0` なら完全に消える。`0.3` なら薄く残る。 | `0.0` |
+| `blink.max_opacity` | 任意 | 点灯側の透明度倍率。通常は `1.0`。 | `1.0` |
+| `effects` | 任意 | overlay 素材だけにかける見た目の効果。`shake` などを指定できる。背景や字幕は揺れない。 | `[{type: shake}]` |
+
 - 行レベルの `fg_overlays` はその行のみ、シーンレベルはベース映像へ適用。
 - `mode: blend` のときは `blend_mode: screen|add|multiply|lighten` を指定。
 - `mode: chroma` のときは `chroma: {key_color, similarity, blend}` を設定。
 - 静止画オーバーレイでも `fps` を指定するとフレーム補間され、アニメ的な動きを加えられます。
+- `blink` は静止画/動画オーバーレイの alpha だけを周期的に変化させます。省略時は点滅しません。`interval <= 0` は無視され、`duty` は `0.0 < duty <= 1.0`、`min_opacity` / `max_opacity` は `0.0–1.0` に丸められます。`opacity` と `effects` は併用できます。
 - `effects` チェーンで `blur` / `eq` / `rotate` などのポストエフェクトを順番に適用可能。`timing` の `loop` や `start` で再生タイミングを制御できます。詳しくは [`sample_effects.yaml`](./sample_effects.yaml), [`sample.yaml`](./sample.yaml)。
 - オーバーレイのレジストリ化と字幕効果の同時スモークテスト: [`sample_registry_smoke.yaml`](./sample_registry_smoke.yaml)。
+
+点滅例:
+
+```yaml
+fg_overlays:
+  - id: warning
+    src: assets/overlay/warning.png
+    mode: overlay
+    opacity: 1.0
+    position: {x: 300, y: 200}
+    scale: {w: 900, h: 300, keep_aspect: true}
+    blink:
+      interval: 0.2     # 1周期の秒数
+      duty: 0.5         # 周期内で max_opacity になる割合
+      min_opacity: 0.0  # 0.0なら完全に消える
+      max_opacity: 1.0
+    timing: {start: 0.0, duration: 3.0}
+```
+
+サンプル: [`sample_overlay_static_image_effect.yaml`](./sample_overlay_static_image_effect.yaml), [`sample_overlay_blink.yaml`](./sample_overlay_blink.yaml)。
 
 ## BGM と音声チューニング
 

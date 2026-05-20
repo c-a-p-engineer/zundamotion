@@ -45,10 +45,69 @@ def test_overlay_chain_keeps_alpha_mask_when_effects_present():
     assert processed == "[ov0]"
     # First leg ensures split into color/alpha with format before effects
     assert any("split[ov0_c_in][ov0_a_in]" in part for part in filters)
-    # Alpha leg must apply opacity scaling only on alpha channel
-    assert any("lut=a='val*0.850000'" in part for part in filters)
+    # Alpha leg must extract and scale the alpha mask only.
+    assert any("alphaextract,lut=y='val*0.850000'" in part for part in filters)
     # Final merge should recombine color and preserved alpha
     assert any("alphamerge[ov0]" in part for part in filters)
+
+
+def test_overlay_blink_is_applied_to_alpha_chain_only():
+    dummy = _DummyOverlay()
+
+    filters, _ = dummy._build_overlay_filter_parts(  # type: ignore[attr-defined]
+        "[1:v]",
+        0,
+        {
+            "opacity": 0.5,
+            "blink": {
+                "interval": 0.2,
+                "duty": 0.5,
+                "min_opacity": 0.0,
+                "max_opacity": 1.0,
+            },
+            "effects": [{"type": "blur", "sigma": 2.0}],
+        },
+    )
+
+    alpha_filters = [part for part in filters if "[ov0_a_in]" in part]
+    color_filters = [part for part in filters if part.startswith("[ov0_c_in]")]
+
+    assert any("lut=y='val*0.500000'" in part for part in alpha_filters)
+    assert any("geq=lum=lum(X\\,Y)*if(lt(mod(N\\,6)\\,3)\\,1.000000\\,0.000000)" in part for part in alpha_filters)
+    assert not any("mod(N\\," in part for part in color_filters)
+
+
+def test_overlay_blink_clamps_duty_and_opacity_values():
+    dummy = _DummyOverlay()
+
+    filters, _ = dummy._build_overlay_filter_parts(  # type: ignore[attr-defined]
+        "[1:v]",
+        0,
+        {
+            "blink": {
+                "interval": 0.25,
+                "duty": 2.0,
+                "min_opacity": -1.0,
+                "max_opacity": 3.0,
+            },
+        },
+    )
+
+    alpha_filter = next(part for part in filters if part.startswith("[ov0_a_in]"))
+    assert "if(lt(mod(N\\,8)\\,8)\\,1.000000\\,0.000000)" in alpha_filter
+
+
+def test_overlay_blink_ignores_invalid_interval():
+    dummy = _DummyOverlay()
+
+    filters, _ = dummy._build_overlay_filter_parts(  # type: ignore[attr-defined]
+        "[1:v]",
+        0,
+        {"blink": {"interval": 0, "duty": 0.5}},
+    )
+
+    alpha_filter = next(part for part in filters if part.startswith("[ov0_a_in]"))
+    assert "mod(N\\," not in alpha_filter
 
 
 def test_subtitle_png_chunks_split_continuous_ranges_by_count():

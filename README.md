@@ -590,6 +590,7 @@ fg_overlays:
     src: path/to/asset  # 必須（画像/動画）
     mode: overlay       # overlay | blend | chroma（既定 overlay）
     opacity: 1.0        # 0.0–1.0（省略可）
+    blink: null         # 省略可。alphaだけを周期的に点滅
     fps: 30             # 整数（省略可）
     position: {x: 0, y: 0}
     scale: {w: 1920, h: 1080, keep_aspect: false}
@@ -623,6 +624,14 @@ lines:
     fg_overlays:
       - src: assets/overlay/effect.mp4
         timing: {start: 0.0, duration: 2.0}
+
+# 5) WARNING画像を点滅させる
+fg_overlays:
+  - src: assets/overlay/warning.png
+    position: {x: 300, y: 200}
+    scale: {w: 900, h: 300, keep_aspect: true}
+    blink: {interval: 0.2, duty: 0.5, min_opacity: 0.0, max_opacity: 1.0}
+    timing: {start: 0.0, duration: 3.0}
 ```
 
 デフォルトと制約（検証ルール）
@@ -631,6 +640,7 @@ lines:
 - blend_mode: `screen|add|multiply|lighten`（mode=blend時 必須）
 - chroma: `key_color("#RRGGBB")`, `similarity 0.0–1.0(既定0.1)`, `blend 0.0–1.0(既定0.0)`
 - opacity: `0.0–1.0`、省略時 1.0
+- blink: 省略時なし。`interval` は 1周期の秒数、`duty` は点灯割合、`min_opacity` / `max_opacity` は alpha の倍率です。`interval <= 0` は無視、`duty` は `0.0 < duty <= 1.0`、opacity系は `0.0–1.0` に丸められます。`opacity` と併用した場合は `opacity` 適用後の alpha が点滅します。
 - position.x/y: 数値（px）、省略時 0
 - scale.w/h: 正の数、`keep_aspect` は bool（省略可）
 - timing.start: 0 以上（既定 0.0）
@@ -644,6 +654,23 @@ lines:
 - 行レベルの `fg_overlays` はその行クリップだけに適用。シーンレベルはシーン連結後にまとめて適用されます。
 - 字幕は全オーバーレイ適用後に最前面で合成されます。
 - `loop: true` を指定しても出力尺はベース動画長に自動で揃います。
+- 静止PNGの揺れ/点滅確認は `scripts/sample_overlay_static_image_effect.yaml` と `scripts/sample_overlay_blink.yaml` を参照してください。
+
+主要キーの意味
+
+| キー | 意味 |
+|---|---|
+| `id` | オーバーレイの識別名。任意。 |
+| `src` | 重ねる画像/動画素材のパス。必須。 |
+| `mode` | 合成方式。通常は `overlay`、光素材は `blend`、単色背景抜きは `chroma`。 |
+| `position` | 素材の左上を置く座標(px)。`x` は横、`y` は縦。 |
+| `scale` | 表示サイズ。`keep_aspect: true` で縦横比を保って指定枠内に収める。 |
+| `timing.start` | 表示開始秒。対象クリップ先頭から数える。 |
+| `timing.duration` | 表示秒数。省略時は `start` 以降、対象クリップの終わりまで表示。 |
+| `blink.interval` | 点滅1周期の秒数。小さいほど速い。 |
+| `blink.duty` | 1周期内で点灯している割合。 |
+| `blink.min_opacity` | 消灯側の透明度倍率。`0.0` なら完全に消える。 |
+| `blink.max_opacity` | 点灯側の透明度倍率。通常は `1.0`。 |
 
 ---
 

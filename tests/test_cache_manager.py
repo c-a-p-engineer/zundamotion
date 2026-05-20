@@ -36,6 +36,14 @@ def test_cache_refresh_invalidates_each_key_only_once(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_cache_manager_creates_nested_cache_dir(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "missing" / "nested" / "cache"
+
+    CacheManager(cache_dir)
+
+    assert cache_dir.is_dir()
+
+
 def test_cache_refresh_deduplicates_parallel_generation(tmp_path: Path) -> None:
     async def _run() -> None:
         cache = CacheManager(tmp_path / "cache", cache_refresh=True)

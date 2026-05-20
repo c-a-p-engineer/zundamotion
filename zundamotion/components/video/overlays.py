@@ -373,6 +373,36 @@ class OverlayMixin:
 
         return resolve_overlay_effects(effects)
 
+    @staticmethod
+    def _clamp_float(value: Any, default: float, min_value: float, max_value: float) -> float:
+        try:
+            number = float(value)
+        except Exception:
+            number = default
+        return max(min_value, min(max_value, number))
+
+    @classmethod
+    def _build_blink_alpha_filters(cls, blink: Any, fps: Any) -> List[str]:
+        """Build alpha-only blink filters for fg_overlays[*].blink."""
+
+        if not isinstance(blink, dict):
+            return []
+        interval = cls._clamp_float(blink.get("interval"), 0.0, 0.0, float("inf"))
+        if interval <= 0:
+            logger.warning("[Overlay] Ignoring blink because interval must be > 0: %s", blink)
+            return []
+        duty = cls._clamp_float(blink.get("duty"), 0.5, 0.000001, 1.0)
+        min_opacity = cls._clamp_float(blink.get("min_opacity"), 0.0, 0.0, 1.0)
+        max_opacity = cls._clamp_float(blink.get("max_opacity"), 1.0, 0.0, 1.0)
+        frame_rate = cls._clamp_float(fps, 30.0, 1.0, float("inf"))
+        period_frames = max(1, int(round(interval * frame_rate)))
+        on_frames = max(1, min(period_frames, int(round(period_frames * duty))))
+        opacity_expr = (
+            f"if(lt(mod(N\\,{period_frames})\\,{on_frames})\\,"
+            f"{max_opacity:.6f}\\,{min_opacity:.6f})"
+        )
+        return [f"geq=lum=lum(X\\,Y)*{opacity_expr}"]
+
     def _build_overlay_filter_parts(
         self, in_stream: str, idx: int, ov: Dict[str, Any]
     ) -> tuple[list[str], str]:
@@ -455,8 +485,9 @@ class OverlayMixin:
 
         # Base decode and optional fps/scale/chroma transforms
         steps.insert(0, "format=rgba")
+        steps.insert(1, "setpts=PTS-STARTPTS")
         if force_opaque:
-            steps.insert(1, "colorchannelmixer=aa=1")
+            steps.insert(2, "colorchannelmixer=aa=1")
         filter_parts.append(f"{in_stream}{','.join(steps)},split{color_in}{alpha_in}")
 
         color_steps: list[str] = []
@@ -466,9 +497,15 @@ class OverlayMixin:
             color_steps.extend(get_video_filter_chain(str(video_filter)))
         filter_parts.append(f"{color_in}{','.join(color_steps or ['null'])}{color_out}")
 
-        alpha_steps = ["format=ya8"]
+        alpha_steps = ["alphaextract"]
         if opacity is not None:
-            alpha_steps.append(f"lut=a='val*{float(opacity):.6f}'")
+            alpha_steps.append(f"lut=y='val*{float(opacity):.6f}'")
+        alpha_steps.extend(
+            self._build_blink_alpha_filters(
+                ov.get("blink"),
+                ov.get("fps") or getattr(self.video_params, "fps", 30),
+            )
+        )
         filter_parts.append(f"{alpha_in}{','.join(alpha_steps)}{alpha_out}")
 
         filter_parts.append(f"{color_out}{alpha_out}alphamerge{processed}")

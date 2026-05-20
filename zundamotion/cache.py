@@ -80,7 +80,7 @@ class CacheManager:
         self._refreshed_keys: set[str] = set()
 
         try:
-            self.cache_dir.mkdir(exist_ok=True)
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Cache directory initialized: {self.cache_dir.resolve()}")
             self._clean_cache()  # キャッシュ初期化時にクリーンアップを実行
         except Exception as e:
