@@ -27,6 +27,9 @@ async def _run_ffmpeg(cmd: List[str]) -> None:
     await video_module._run_ffmpeg_async(cmd)
 
 
+MIN_EXACT_SEGMENT_DURATION = 0.05
+
+
 class OverlayMixin:
     """FFmpegを用いたオーバーレイ合成機能のMixinクラス。"""
 
@@ -330,7 +333,9 @@ class OverlayMixin:
         start: float,
         duration: float,
     ) -> Optional[Path]:
-        if duration <= 0.02:
+        # 1フレーム級の極短断片は、ffmpeg trim/atrim が丸め誤差で失敗しやすい。
+        # 字幕ギャップ補完では見た目への影響がほぼないため、ここでは生成しない。
+        if duration <= MIN_EXACT_SEGMENT_DURATION:
             return None
         cmd = [
             self.ffmpeg_path,
@@ -860,7 +865,7 @@ class OverlayMixin:
                     segment_paths.append(burned)
                     cursor = end
 
-                if float(base_dur) > cursor + 0.02:
+                if float(base_dur) > cursor + MIN_EXACT_SEGMENT_DURATION:
                     gap_duration = float(base_dur) - cursor
                     logger.info(
                         "[SubtitleGap] start=%.3f end=%.3f duration=%.3f mode=exact",

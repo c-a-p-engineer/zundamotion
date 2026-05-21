@@ -215,3 +215,26 @@ def test_subtitle_segment_cut_uses_exact_trim_not_stream_copy(monkeypatch, tmp_p
     assert "-c" not in cmd
     assert "copy" not in cmd
     assert str(tmp_path / "segment.mp4") == cmd[-1]
+
+
+def test_subtitle_segment_cut_skips_tiny_segments(monkeypatch, tmp_path):
+    dummy = _DummyOverlay()
+    called = False
+
+    async def fake_run_ffmpeg(cmd):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(overlays_module, "_run_ffmpeg", fake_run_ffmpeg)
+
+    result = asyncio.run(
+        dummy._cut_video_segment_exact(
+            tmp_path / "base.mp4",
+            tmp_path / "segment.mp4",
+            start=40.04,
+            duration=0.03,
+        )
+    )
+
+    assert result is None
+    assert called is False
