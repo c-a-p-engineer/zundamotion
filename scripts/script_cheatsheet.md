@@ -17,6 +17,7 @@
 - [キャラクター表示](#キャラクター表示)
   - [立ち絵アニメーション](#立ち絵アニメーション)
 - [字幕エフェクト (`subtitle.effects`)](#字幕エフェクト-subtitleeffects)
+- [テキストバッジ (`badge`)](#テキストバッジ-badge)
 - [画面全体エフェクト (`screen_effects`)](#画面全体エフェクト-screen_effects)
 - [背景エフェクト (`background_effects`)](#背景エフェクト-background_effects)
 - [画像・動画の挿入 (`insert`)](#画像動画の挿入-insert)
@@ -333,6 +334,56 @@ lines:
 
 - `text:bounce_text`: `abs(sin)` ベースの常時バウンド。設定は `amplitude`（px）だけで、値が大きいほど跳ね上がりが大きくなります。サンプル: [`sample_text_bounce.yaml`](./sample_text_bounce.yaml)。
 - オーバーレイと字幕エフェクトのレジストリ挙動を同時に確認するスモーク: [`sample_registry_smoke.yaml`](./sample_registry_smoke.yaml)。
+
+## テキストバッジ (`badge`)
+
+「頻出」「重要」「暗記」「注意」のような短いラベルを、動画上部の固定サイズバッジとして表示します。再利用したい定義は `scenes` の外に top-level `badges` として置けます。
+
+```yaml
+badges:
+  - id: important-top
+    text: "重要"
+    position: "top-right"
+    visible: false
+
+scenes:
+  - id: topic
+    bg: assets/bg/room.png
+    lines:
+      - id: intro
+        text: "シーン全体にバッジを出します。"
+        badges:
+          - id: important-top
+            visible: true
+      - text: "この行だけ複数バッジも出せます。"
+        badges:
+          - text: "長い文でも自動で幅が伸びる注意バッジ"
+            position: "top-left"
+            timing: {start: 0.3, end: 1.2}
+          - text: "補足"
+            position: "top-right"
+            timing: {start: 0.1, end: 1.0}
+      - id: summary
+        text: "ここで scene バッジを閉じます。"
+        badges:
+          - id: important-top
+            visible: false
+```
+
+- top-level `badges` は共有定義です。全 scene で再利用でき、scene ごとに同じ定義を書き直す必要がありません。
+- `badges` はシーンレベルと行レベルでも使えます。複数バッジを並べたい場合の基本形です。
+- `badges` を scene に置くと、その scene 専用の持続バッジ定義、または共有定義と同じ `id` の scene 上書きを並べられます。各要素は `id` 必須、`visible` 既定 `false` です。
+- `line.badges` で `{id: "...", visible: true/false}` を指定すると、character に近い感覚でその発話以降の表示状態を切り替えられます。必要なら text/style の上書きも可能です。
+- `line.badges` には `id` なしの完全なバッジ定義も書けます。その場合はその行だけに複数バッジを直接表示します。
+- `text` は必須の短い文字列です。
+- `position` は必須で、`top-left` / `top-center` / `top-right` / `bottom-left` / `bottom-center` / `bottom-right` を指定します。
+- `font_size` / `font_color` / `stroke_color` / `stroke_width` / `background` を指定できます。`background` は字幕と同じく `show`, `color`, `opacity`, `radius`, `border_color`, `border_width`, `border_opacity`, `padding` を使えます。
+- バッジ幅は文字数と padding に応じて自動で伸びます。`min_width` / `max_width` で下限と上限も指定できます。
+- `timing.start` / `timing.end` は秒指定です。`end` を省略すると、そのシーンまたは行の終わりまで表示します。
+- scene-level の持続バッジは `timing.show_on_line` / `timing.hide_on_line` でも制御できます。値は 1-based 行番号または `line.id` です。`hide_on_line` はその行の開始時刻で非表示になります。
+- 既存互換として単体の `badge` も使えますが、新規では `badges` を推奨します。
+- バッジは内部で角丸 PNG を生成して `fg_overlays` と同じ経路で合成します。既存動画に `badge` が無ければ挙動は変わりません。
+- サンプル: [`sample_badge.yaml`](./sample_badge.yaml)。
 
 ## 画面全体エフェクト (`screen_effects`)
 

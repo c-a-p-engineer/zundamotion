@@ -56,6 +56,7 @@ def load_script_and_config(
                 final_config.get(top_key, {}), script_data[top_key]
             )
 
+    _expand_global_badges(final_config)
     _normalize_scene_items(final_config)
 
     # Extract defaults for easier access
@@ -190,6 +191,71 @@ def _normalize_scene_items(config: Dict[str, Any]) -> None:
             scene["lines"] = _lines_from_items(items)
         elif isinstance(lines, list):
             scene["items"] = _items_from_lines(lines)
+
+
+def _expand_global_badges(config: Dict[str, Any]) -> None:
+    script = config.get("script", {}) or {}
+    global_badges = script.get("badges")
+    if not isinstance(global_badges, list) or not global_badges:
+        return
+
+    for scene in script.get("scenes", []) or []:
+        if not isinstance(scene, dict):
+            continue
+        scene_badges = scene.get("badges")
+        if not isinstance(scene_badges, list):
+            scene["badges"] = [deepcopy(item) for item in global_badges]
+            continue
+        scene["badges"] = _merge_badge_lists(global_badges, scene_badges)
+
+
+def _merge_badge_lists(
+    global_badges: Iterable[Dict[str, Any]],
+    scene_badges: Iterable[Dict[str, Any]],
+) -> list[dict[str, Any]]:
+    scene_by_id: Dict[str, Dict[str, Any]] = {}
+    ordered_scene_locals: list[dict[str, Any]] = []
+
+    for item in scene_badges:
+        if not isinstance(item, dict):
+            continue
+        badge_id = item.get("id")
+        if isinstance(badge_id, str) and badge_id.strip():
+            scene_by_id[badge_id.strip()] = item
+        else:
+            ordered_scene_locals.append(item)
+
+    merged: list[dict[str, Any]] = []
+    used_scene_ids: Set[str] = set()
+    for item in global_badges:
+        if not isinstance(item, dict):
+            continue
+        badge_id = item.get("id")
+        if isinstance(badge_id, str) and badge_id.strip() in scene_by_id:
+            resolved = merge_configs(item, scene_by_id[badge_id.strip()])
+            merged.append(deepcopy(resolved))
+            used_scene_ids.add(badge_id.strip())
+        else:
+            merged.append(deepcopy(item))
+
+    for item in scene_badges:
+        if not isinstance(item, dict):
+            continue
+        badge_id = item.get("id")
+        if isinstance(badge_id, str) and badge_id.strip():
+            normalized_id = badge_id.strip()
+            if normalized_id in used_scene_ids:
+                continue
+            if any(
+                isinstance(global_item, dict) and global_item.get("id") == normalized_id
+                for global_item in global_badges
+            ):
+                continue
+            merged.append(deepcopy(item))
+            used_scene_ids.add(normalized_id)
+            continue
+        merged.append(deepcopy(item))
+    return merged
 
 
 def _collect_overlay_effect_types(overlays: Iterable[Dict[str, Any]] | None) -> Set[str]:

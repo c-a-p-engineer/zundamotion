@@ -238,3 +238,26 @@ def test_subtitle_segment_cut_skips_tiny_segments(monkeypatch, tmp_path):
 
     assert result is None
     assert called is False
+
+
+def test_subtitle_segment_cut_skips_sub_two_frame_segments_at_30fps(monkeypatch, tmp_path):
+    dummy = _DummyOverlay()
+    called = False
+
+    async def fake_run_ffmpeg(cmd):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(overlays_module, "_run_ffmpeg", fake_run_ffmpeg)
+
+    result = asyncio.run(
+        dummy._cut_video_segment_exact(
+            tmp_path / "base.mp4",
+            tmp_path / "segment.mp4",
+            start=35.35,
+            duration=0.06,
+        )
+    )
+
+    assert result is None
+    assert called is False

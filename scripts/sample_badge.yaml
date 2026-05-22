@@ -1,0 +1,311 @@
+meta:
+  title: テキストバッジ表示サンプル
+  version: 3
+
+video:
+  fps: 30
+
+subtitle:
+  font_path: /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf
+  size: 48
+  color: white
+  outline: black
+  wrap_mode: chars
+  max_chars_per_line: 28
+
+defaults:
+  characters:
+    copetan:
+      speaker_id: 3
+      subtitle:
+        font_color: "#90EE90"
+        stroke_color: white
+
+# 共有バッジ定義: scenes の外に置いて複数シーンで再利用できます
+badges:
+  - id: important-top
+    text: "重要"
+    position: "top-right"
+    visible: false
+    font_size: 42
+    font_color: "#FFFFFF"
+    stroke_color: "#202020"
+    background:
+      show: true
+      color: "#111111"
+      opacity: 0.72
+      radius: 24
+      border_color: "#FFFFFF"
+      border_width: 3
+      border_opacity: 0.65
+      padding: {left: 48, right: 48, top: 18, bottom: 18}
+  - id: memo-top-center
+    text: "暗記"
+    position: "top-center"
+    visible: false
+    min_width: 220
+    font_size: 38
+    font_color: "#FFFFFF"
+    stroke_color: "#202020"
+    background:
+      show: true
+      color: "#065F46"
+      opacity: 0.82
+      radius: 24
+      border_color: "#A7F3D0"
+      border_width: 3
+      border_opacity: 0.75
+      padding: {left: 34, right: 34, top: 16, bottom: 16}
+  - id: caution-left
+    text: "注意"
+    position: "top-left"
+    visible: false
+    font_size: 38
+    background:
+      show: true
+      color: "#7C2D12"
+      opacity: 0.82
+      radius: 22
+      border_color: "#FED7AA"
+      border_width: 3
+      border_opacity: 0.72
+      padding: {left: 28, right: 28, top: 14, bottom: 14}
+    timing:
+      show_on_line: timing_show
+      hide_on_line: timing_hide
+  - id: timed-right
+    text: "秒指定サンプル"
+    position: "top-right"
+    font_size: 34
+    min_width: 240
+    background:
+      show: true
+      color: "#334155"
+      opacity: 0.8
+      radius: 20
+      border_color: "#CBD5E1"
+      border_width: 2
+      border_opacity: 0.7
+      padding: {left: 26, right: 26, top: 12, bottom: 12}
+    timing:
+      start: 0.4
+      end: 1.2
+
+scenes:
+  # 1. 共有 badges を line.badges から visible 切り替えで使う例
+  - id: badge_scene
+    bg: assets/bg/room.png
+    lines:
+      - id: intro_badge
+        text: "シーン全体に重要バッジを表示するサンプルです。"
+        speaker_name: copetan
+        badges:
+          - id: important-top
+            visible: true
+        characters:
+          - name: copetan
+            expression: default
+            visible: true
+            anchor: bottom_left
+            position: {x: 40, y: 0}
+            scale: 0.82
+      - id: memo_on
+        text: "別の持続バッジを上中央で重ねて表示できます。"
+        speaker_name: copetan
+        badges:
+          - id: memo-top-center
+            visible: true
+      - id: style_override
+        text: "持続バッジは表示だけでなく見た目も途中で上書きできます。"
+        speaker_name: copetan
+        badges:
+          - id: important-top
+            visible: true
+            text: "最重要"
+            min_width: 280
+            background:
+              show: true
+              color: "#991B1B"
+              opacity: 0.84
+              radius: 24
+              border_color: "#FECACA"
+              border_width: 3
+              border_opacity: 0.75
+              padding: {left: 40, right: 40, top: 18, bottom: 18}
+      - id: local_badge
+        text: "この行だけの単発バッジを複数並べることもできます。"
+        speaker_name: copetan
+        badges:
+          - text: "この行だけ表示される少し長い注意バッジです"
+            position: "top-left"
+            font_size: 36
+            font_color: "#FFFFFF"
+            stroke_color: "#202020"
+            background:
+              show: true
+              color: "#7F1D1D"
+              opacity: 0.82
+              radius: 24
+              border_color: "#FCA5A5"
+              border_width: 3
+              border_opacity: 0.75
+              padding: {left: 36, right: 36, top: 16, bottom: 16}
+            timing:
+              start: 0.4
+              end: 1.9
+          - text: "補足"
+            position: "top-right"
+            min_width: 180
+            font_size: 32
+            background:
+              show: true
+              color: "#3F3F46"
+              opacity: 0.78
+              radius: 20
+              border_color: "#E4E4E7"
+              border_width: 2
+              border_opacity: 0.7
+              padding: {left: 24, right: 24, top: 12, bottom: 12}
+            timing:
+              start: 0.2
+              end: 1.2
+      - id: memo_change
+        text: "持続バッジの文言や色も途中で切り替えられます。"
+        speaker_name: copetan
+        badges:
+          - id: memo-top-center
+            visible: true
+            text: "頻出"
+            background:
+              show: true
+              color: "#1D4ED8"
+              opacity: 0.82
+              radius: 24
+              border_color: "#BFDBFE"
+              border_width: 3
+              border_opacity: 0.75
+              padding: {left: 34, right: 34, top: 16, bottom: 16}
+      - id: auto_width
+        text: "文字数が増えると横幅が自動で伸びる例もここで確認できます。"
+        speaker_name: copetan
+        badges:
+          - text: "用語の定義と例外条件もまとめて覚えるポイント"
+            position: "top-center"
+            font_size: 32
+            max_width: 760
+            background:
+              show: true
+              color: "#0F766E"
+              opacity: 0.84
+              radius: 24
+              border_color: "#99F6E4"
+              border_width: 3
+              border_opacity: 0.72
+              padding: {left: 34, right: 34, top: 16, bottom: 16}
+            timing:
+              start: 0.1
+              end: 1.6
+      - id: hide_badge
+        text: "ここで持続バッジをまとめて非表示にします。"
+        speaker_name: copetan
+        badges:
+          - id: important-top
+            visible: false
+          - id: memo-top-center
+            visible: false
+      - wait: 0.8
+
+  # 2. 共有 badges の timing.show_on_line / hide_on_line と秒指定 timing を試す例
+  - id: badge_timing_variants
+    bg: assets/bg/room.png
+    lines:
+      - id: timing_intro
+        text: "このシーンでは line id を使った表示開始と終了を確認します。"
+        speaker_name: copetan
+        characters:
+          - name: copetan
+            expression: default
+            visible: true
+            anchor: bottom_left
+            position: {x: 40, y: 0}
+            scale: 0.82
+      - id: timing_show
+        text: "この発言が始まる瞬間に左上の注意バッジを表示します。"
+        speaker_name: copetan
+      - id: timing_hold
+        text: "次の発言まで表示を維持させることもできます。"
+        speaker_name: copetan
+      - id: timing_hide
+        text: "この発言が始まる瞬間に左上の注意バッジを消します。"
+        speaker_name: copetan
+      - wait: 0.6
+
+  # 3. 旧来の単数 badge 構文もそのまま使える互換サンプル
+  - id: badge_corner_variants
+    bg: assets/bg/room.png
+    badge:
+      text: "頻出"
+      position: "bottom-right"
+      min_width: 280
+      font_size: 40
+      font_color: "#FFFFFF"
+      stroke_color: "#202020"
+      background:
+        show: true
+        color: "#1D4ED8"
+        opacity: 0.82
+        radius: 24
+        border_color: "#BFDBFE"
+        border_width: 3
+        border_opacity: 0.75
+        padding: {left: 36, right: 36, top: 16, bottom: 16}
+      timing:
+        start: 0.2
+        end: 1.2
+    lines:
+      - text: "字幕を避けるため、下側は中央ではなく右下で確認します。"
+        speaker_name: copetan
+        characters:
+          - name: copetan
+            expression: default
+            visible: true
+            anchor: bottom_left
+            position: {x: 40, y: 0}
+            scale: 0.82
+      - text: "この行では line.badges に完全定義を二つ書く例を見せています。"
+        speaker_name: copetan
+        badges:
+          - text: "補足"
+            position: "top-right"
+            min_width: 180
+            font_size: 34
+            background:
+              show: true
+              color: "#3F3F46"
+              opacity: 0.78
+              radius: 20
+              border_color: "#E4E4E7"
+              border_width: 2
+              border_opacity: 0.7
+              padding: {left: 24, right: 24, top: 12, bottom: 12}
+            timing:
+              start: 0.1
+              end: 1.0
+          - text: "暗記"
+            position: "top-center"
+            min_width: 180
+            font_size: 34
+            background:
+              show: true
+              color: "#92400E"
+              opacity: 0.8
+              radius: 20
+              border_color: "#FDE68A"
+              border_width: 2
+              border_opacity: 0.72
+              padding: {left: 24, right: 24, top: 12, bottom: 12}
+            timing:
+              start: 0.0
+              end: 1.0
+      - text: "下左も試したい場合は position を bottom-left に変えるだけです。"
+        speaker_name: copetan

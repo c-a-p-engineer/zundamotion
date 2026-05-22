@@ -268,6 +268,8 @@ class VideoPhase:
             "items": scene.get("items", []),
             "bg": scene.get("bg"),
             "video_filter": scene.get("video_filter"),
+            "badge": scene.get("badge"),
+            "badges": scene.get("badges"),
             "fg_overlays": scene.get("fg_overlays"),
             "voice_config": self.config.get("voice", {}),
             "video_config": self.config.get("video", {}),

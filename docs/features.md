@@ -9,6 +9,7 @@
 | キャラ配置 | アンカー＋座標＋スケール配置、揺れ系エフェクト | shake/bob/swayをoverlay式で表現、enter/leave余白計算あり | components/video/clip/effects/resolve.py |
 | 背景/画面効果 | 背景揺れ・画面揺れ | pad+crop方式でシェイク | components/video/clip/effects/resolve.py |
 | オーバーレイ | 画像レイヤー・前景オーバーレイ・PiP | image_layers/fg_overlays/insertでロゴ・挿入映像を重畳 | components/video/renderer.py, components/pipeline_phases/video_phase/scene_renderer.py |
+| オーバーレイ | テキストバッジ | `badge` / `badges` から固定サイズPNGを生成し、scene/line 単位や top-level 共有定義の重要ラベルを動画上部へ重畳 | components/video/badge_overlay_cache.py, components/pipeline_phases/video_phase/scene_renderer.py, components/script/loader.py |
 | 字幕 | PNG字幕焼き込み＋SRT/ASS出力、バウンス効果 | SubtitlePNGRendererでスタイル適用、text:bounce_text効果あり | components/subtitles, plugins/builtin/subtitle_text/plugin.py, main.py CLI `--subtitle-file` |
 | トランジション | xfade＋音声acrossfade（scene.transition） | fade/dissolve/wipe/zoom等のxfade typeを指定可能 | utils/ffmpeg_ops.apply_transition, components/pipeline_phases/finalize_phase.py |
 | BGM/SE | BGMミックス（音量・フェード・ディレイ）＋複数SE合成 | amixでBGMと映像音声を混合、fade in/out・delay対応 | utils/ffmpeg_audio.add_bgm_to_video, mix_audio_tracks, components/pipeline_phases/bgm_phase.py |

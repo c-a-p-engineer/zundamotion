@@ -33,6 +33,13 @@ MIN_EXACT_SEGMENT_DURATION = 0.05
 class OverlayMixin:
     """FFmpegを用いたオーバーレイ合成機能のMixinクラス。"""
 
+    def _min_exact_segment_duration(self) -> float:
+        """極短断片を exact cut しないための安全しきい値を返す。"""
+        fps = max(1, int(getattr(getattr(self, "video_params", None), "fps", 30) or 30))
+        # 1〜2フレーム級の断片は trim/atrim の丸め誤差で失敗しやすい。
+        # 字幕ギャップの見た目への影響は小さいため、最低でも 2 フレーム分を要求する。
+        return max(MIN_EXACT_SEGMENT_DURATION, 2.0 / float(fps))
+
     def _max_cuda_subtitle_overlays(self) -> int:
         video_cfg = getattr(self, "video_config", {}) or {}
         try:
@@ -335,7 +342,7 @@ class OverlayMixin:
     ) -> Optional[Path]:
         # 1フレーム級の極短断片は、ffmpeg trim/atrim が丸め誤差で失敗しやすい。
         # 字幕ギャップ補完では見た目への影響がほぼないため、ここでは生成しない。
-        if duration <= MIN_EXACT_SEGMENT_DURATION:
+        if duration <= self._min_exact_segment_duration():
             return None
         cmd = [
             self.ffmpeg_path,
@@ -865,7 +872,7 @@ class OverlayMixin:
                     segment_paths.append(burned)
                     cursor = end
 
-                if float(base_dur) > cursor + MIN_EXACT_SEGMENT_DURATION:
+                if float(base_dur) > cursor + self._min_exact_segment_duration():
                     gap_duration = float(base_dur) - cursor
                     logger.info(
                         "[SubtitleGap] start=%.3f end=%.3f duration=%.3f mode=exact",

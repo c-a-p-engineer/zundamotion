@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -8,6 +9,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from zundamotion.components.script.loader import load_script_and_config
+from zundamotion.exceptions import ValidationError
 
 
 def test_voice_layers_inherit_character_defaults(tmp_path):
@@ -144,6 +146,109 @@ def test_top_level_transitions_override_default_config(tmp_path):
     assert config["transitions"]["wait_padding_seconds"] == 0.0
 
 
+def test_top_level_badges_are_inherited_by_each_scene(tmp_path):
+    root = Path.cwd()
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump({"script": {"scenes": []}, "defaults": {}}),
+        encoding="utf-8",
+    )
+
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "global badges", "version": 3},
+                "badges": [
+                    {
+                        "id": "important-top",
+                        "text": "重要",
+                        "position": "top-right",
+                        "visible": False,
+                    }
+                ],
+                "scenes": [
+                    {
+                        "id": "s1",
+                        "bg": str((root / "assets" / "bg" / "room.png").resolve()),
+                        "lines": [
+                            {
+                                "text": "共有バッジを表示",
+                                "badges": [{"id": "important-top", "visible": True}],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "s2",
+                        "bg": str((root / "assets" / "bg" / "room.png").resolve()),
+                        "lines": [{"text": "別シーンでも使えます"}],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_script_and_config(str(script_path), str(default_config_path))
+
+    first_scene_badges = config["script"]["scenes"][0]["badges"]
+    second_scene_badges = config["script"]["scenes"][1]["badges"]
+    assert first_scene_badges[0]["id"] == "important-top"
+    assert second_scene_badges[0]["id"] == "important-top"
+    assert first_scene_badges[0]["visible"] is False
+    assert second_scene_badges[0]["visible"] is False
+
+
+def test_scene_badges_override_top_level_badges_by_id(tmp_path):
+    root = Path.cwd()
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump({"script": {"scenes": []}, "defaults": {}}),
+        encoding="utf-8",
+    )
+
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "badge override", "version": 3},
+                "badges": [
+                    {
+                        "id": "important-top",
+                        "text": "重要",
+                        "position": "top-right",
+                        "visible": False,
+                        "background": {"show": True, "color": "#111111"},
+                    }
+                ],
+                "scenes": [
+                    {
+                        "id": "s1",
+                        "bg": str((root / "assets" / "bg" / "room.png").resolve()),
+                        "badges": [
+                            {
+                                "id": "important-top",
+                                "text": "最重要",
+                                "background": {"show": True, "color": "#991B1B"},
+                            }
+                        ],
+                        "lines": [{"text": "上書きテスト"}],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_script_and_config(str(script_path), str(default_config_path))
+    badge = config["script"]["scenes"][0]["badges"][0]
+
+    assert badge["id"] == "important-top"
+    assert badge["text"] == "最重要"
+    assert badge["position"] == "top-right"
+    assert badge["background"]["color"] == "#991B1B"
+
+
 def test_auto_sound_effect_injected_from_overlay_preset(tmp_path):
     root = Path.cwd()
     default_config_path = tmp_path / "default.yaml"
@@ -266,6 +371,225 @@ def test_image_layers_show_hide_supported(tmp_path):
 
     assert "image_layers" in line0
     assert "image_layers" in line1
+
+
+def test_badge_config_supported_on_scene_and_line(tmp_path):
+    root = Path.cwd()
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump({"script": {"scenes": []}, "defaults": {}}),
+        encoding="utf-8",
+    )
+
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "badge", "version": 3},
+                "scenes": [
+                    {
+                        "id": "s1",
+                        "bg": str((root / "assets" / "bg" / "room.png").resolve()),
+                        "badges": [
+                            {
+                                "id": "important-top",
+                                "text": "重要",
+                                "position": "top-right",
+                                "visible": False,
+                                "font_size": 42,
+                                "font_color": "#FFFFFF",
+                                "stroke_color": "#202020",
+                                "background": {
+                                    "show": True,
+                                    "color": "#111111",
+                                    "opacity": 0.72,
+                                    "radius": 24,
+                                    "border_color": "#FFFFFF",
+                                    "border_width": 3,
+                                    "border_opacity": 0.65,
+                                    "padding": {
+                                        "left": 48,
+                                        "right": 48,
+                                        "top": 18,
+                                        "bottom": 18,
+                                    },
+                                },
+                            }
+                        ],
+                        "lines": [
+                            {
+                                "text": "scene badge",
+                                "badges": [{"id": "important-top", "visible": True}],
+                            },
+                            {
+                                "id": "line_end",
+                                "text": "line badge",
+                                "badges": [{"id": "important-top", "visible": False}],
+                                "badge": {
+                                    "text": "注意",
+                                    "position": "top-left",
+                                    "timing": {"start": 0.25, "end": 1.0},
+                                },
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_script_and_config(str(script_path), str(default_config_path))
+    scene = config["script"]["scenes"][0]
+
+    assert scene["badges"][0]["id"] == "important-top"
+    assert scene["badges"][0]["visible"] is False
+    assert scene["lines"][0]["badges"] == [{"id": "important-top", "visible": True}]
+    assert scene["lines"][1]["badges"] == [{"id": "important-top", "visible": False}]
+    assert scene["lines"][1]["badge"] == {
+        "text": "注意",
+        "position": "top-left",
+        "timing": {"start": 0.25, "end": 1.0},
+    }
+
+
+def test_invalid_badge_position_rejected(tmp_path):
+    root = Path.cwd()
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump({"script": {"scenes": []}, "defaults": {}}),
+        encoding="utf-8",
+    )
+
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "badge", "version": 3},
+                "scenes": [
+                    {
+                        "id": "s1",
+                        "bg": str((root / "assets" / "bg" / "room.png").resolve()),
+                        "badge": {"text": "重要", "position": "middle-right"},
+                        "lines": [{"text": "invalid"}],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError):
+        load_script_and_config(str(script_path), str(default_config_path))
+
+
+def test_invalid_badge_end_rejected(tmp_path):
+    root = Path.cwd()
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump({"script": {"scenes": []}, "defaults": {}}),
+        encoding="utf-8",
+    )
+
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "badge", "version": 3},
+                "scenes": [
+                    {
+                        "id": "s1",
+                        "bg": str((root / "assets" / "bg" / "room.png").resolve()),
+                        "badge": {
+                            "text": "重要",
+                            "position": "top-right",
+                            "timing": {"start": 1.0, "end": 1.0},
+                        },
+                        "lines": [{"text": "invalid"}],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError):
+        load_script_and_config(str(script_path), str(default_config_path))
+
+
+def test_invalid_badge_show_on_line_rejected(tmp_path):
+    root = Path.cwd()
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump({"script": {"scenes": []}, "defaults": {}}),
+        encoding="utf-8",
+    )
+
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "badge", "version": 3},
+                "scenes": [
+                    {
+                        "id": "s1",
+                        "bg": str((root / "assets" / "bg" / "room.png").resolve()),
+                        "badge": {
+                            "text": "重要",
+                            "position": "top-right",
+                            "timing": {"show_on_line": 0},
+                        },
+                        "lines": [{"text": "invalid"}],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError):
+        load_script_and_config(str(script_path), str(default_config_path))
+
+
+def test_invalid_line_badge_visible_rejected(tmp_path):
+    root = Path.cwd()
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump({"script": {"scenes": []}, "defaults": {}}),
+        encoding="utf-8",
+    )
+
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "badge", "version": 3},
+                "scenes": [
+                    {
+                        "id": "s1",
+                        "bg": str((root / "assets" / "bg" / "room.png").resolve()),
+                        "badges": [
+                            {
+                                "id": "important-top",
+                                "text": "重要",
+                                "position": "top-right",
+                            }
+                        ],
+                        "lines": [
+                            {
+                                "text": "invalid",
+                                "badges": [{"id": "important-top", "visible": "yes"}],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError):
+        load_script_and_config(str(script_path), str(default_config_path))
 
 
 def test_load_script_and_config_supports_markdown_input(tmp_path):

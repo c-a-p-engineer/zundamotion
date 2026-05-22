@@ -28,6 +28,7 @@ from ....utils import perf_stats
 from ....utils.subtitle_text import is_effective_subtitle_text
 from ...video.clip.face import _enable_expr, _resolve_face_asset
 from ...video.clip.characters import is_horizontal_flip_enabled, is_vertical_flip_enabled
+from .badge_tracker import BadgeTracker
 
 
 def _to_offset_expr(value: Any) -> str:
@@ -141,6 +142,83 @@ class SceneRenderer:
             if line_bg_path:
                 return str(line_bg_path)
         return scene_bg_default
+
+    async def _resolve_visual_overlays(
+        self,
+        container: Dict[str, Any],
+        *,
+        scope_id: str,
+        line_markers: Optional[Dict[str, float]] = None,
+    ) -> List[Dict[str, Any]]:
+        overlays = list(container.get("fg_overlays") or [])
+        badge_cache = getattr(self.video_renderer, "badge_cache", None)
+        direct_badges = container.get("badges") or []
+        if badge_cache is not None and isinstance(direct_badges, list):
+            for idx, badge_cfg in enumerate(direct_badges, start=1):
+                if (
+                    isinstance(badge_cfg, dict)
+                    and badge_cfg.get("text")
+                    and badge_cfg.get("position")
+                    and badge_cfg.get("visible", True) is not False
+                ):
+                    font_path = str(
+                        (self.config.get("subtitle", {}) or {}).get("font_path") or ""
+                    )
+                    badge_overlay = await badge_cache.get_badge_overlay(
+                        badge_cfg,
+                        video_width=int(self.video_params.width),
+                        video_height=int(self.video_params.height),
+                        font_path=font_path,
+                        line_markers=line_markers,
+                    )
+                    badge_overlay["id"] = f"{scope_id}_badges_{idx}"
+                    overlays.append(badge_overlay)
+        for idx, badge_state in enumerate(container.get("_resolved_badges") or [], start=1):
+            if not isinstance(badge_state, dict):
+                continue
+            if badge_cache is None:
+                continue
+            font_path = str(
+                (self.config.get("subtitle", {}) or {}).get("font_path") or ""
+            )
+            badge_overlay = await badge_cache.get_badge_overlay(
+                badge_state,
+                video_width=int(self.video_params.width),
+                video_height=int(self.video_params.height),
+                font_path=font_path,
+            )
+            badge_overlay["id"] = f"{scope_id}_badge_{idx}"
+            overlays.append(badge_overlay)
+        badge_cfg = container.get("badge")
+        badge_cache = getattr(self.video_renderer, "badge_cache", None)
+        if isinstance(badge_cfg, dict) and badge_cache is not None:
+            font_path = str(
+                (self.config.get("subtitle", {}) or {}).get("font_path") or ""
+            )
+            badge_overlay = await badge_cache.get_badge_overlay(
+                badge_cfg,
+                video_width=int(self.video_params.width),
+                video_height=int(self.video_params.height),
+                font_path=font_path,
+                line_markers=line_markers,
+            )
+            badge_overlay["id"] = f"{scope_id}_badge"
+            overlays.append(badge_overlay)
+        return overlays
+
+    def _build_badge_line_markers(
+        self,
+        *,
+        start_time_by_idx: Dict[int, float],
+    ) -> Dict[str, float]:
+        markers: Dict[str, float] = {}
+        for idx, line in enumerate(self.scene.get("lines", []) or [], start=1):
+            start = float(start_time_by_idx.get(idx, 0.0))
+            markers[str(idx)] = start
+            line_id = line.get("id")
+            if isinstance(line_id, str) and line_id.strip():
+                markers[line_id.strip()] = start
+        return markers
 
     async def _precache_face_overlays(
         self,
@@ -1192,6 +1270,39 @@ class SceneRenderer:
                 self.config.get("defaults", {}).get("characters_persist", False),
             )
         )
+        badge_defs = scene.get("badges")
+        if isinstance(badge_defs, list) and badge_defs:
+            badge_tracker = BadgeTracker()
+            badge_tracker.prime(
+                [
+                    item
+                    for item in badge_defs
+                    if isinstance(item, dict) and item.get("id")
+                ]
+            )
+            for line in scene.get("lines", []):
+                badge_updates = line.get("badges") or []
+                persistent_updates = []
+                transient_badges = []
+                for item in badge_updates:
+                    if not isinstance(item, dict):
+                        continue
+                    badge_id = item.get("id")
+                    if isinstance(badge_id, str) and badge_tracker.has(badge_id):
+                        persistent_updates.append(item)
+                    elif (
+                        item.get("text")
+                        and item.get("position")
+                        and item.get("visible", True) is not False
+                    ):
+                        transient_badges.append(item)
+                if persistent_updates:
+                    badge_tracker.apply(persistent_updates)
+                snapshot = badge_tracker.snapshot() + transient_badges
+                if snapshot:
+                    line["_resolved_badges"] = snapshot
+                else:
+                    line.pop("_resolved_badges", None)
         tracker = None
         if scene_cp:
             from .character_tracker import CharacterTracker
@@ -1365,6 +1476,9 @@ class SceneRenderer:
             d = line_data_map[line_id2]["duration"]
             start_time_by_idx[idx] = t_acc
             t_acc += d
+        badge_line_markers = self._build_badge_line_markers(
+            start_time_by_idx=start_time_by_idx,
+        )
         subtitle_entries = self._build_subtitle_entries(scene_id, start_time_by_idx)
 
         if cache_scene_base_video:
@@ -2068,7 +2182,10 @@ class SceneRenderer:
                         extension="mp4",
                         creator_func=wait_creator_func,
                     )
-                    fg_overlays = line.get("fg_overlays")
+                    fg_overlays = await self._resolve_visual_overlays(
+                        line,
+                        scope_id=line_id,
+                    )
                     if fg_overlays:
                         clip_path = await self.video_renderer.apply_foreground_overlays(
                             clip_path, fg_overlays
@@ -2210,7 +2327,10 @@ class SceneRenderer:
                     extension="mp4",
                     creator_func=clip_creator_func,
                 )
-                fg_overlays = line.get("fg_overlays")
+                fg_overlays = await self._resolve_visual_overlays(
+                    line,
+                    scope_id=line_id,
+                )
                 if fg_overlays:
                     clip_path = await self.video_renderer.apply_foreground_overlays(
                         clip_path, fg_overlays
@@ -2376,7 +2496,11 @@ class SceneRenderer:
             perf_stats.add_ms("scene_concat_ms", (_time.time() - concat_started) * 1000.0)
             logger.info(f"Concatenated scene clips -> {scene_output_path.name}")
 
-            fg_overlays = scene.get("fg_overlays") or []
+            fg_overlays = await self._resolve_visual_overlays(
+                scene,
+                scope_id=scene_id,
+                line_markers=badge_line_markers,
+            )
             scene_output_no_sub_path = scene_output_path
             if fg_overlays:
                 scene_output_no_sub_path = await self.video_renderer.apply_foreground_overlays(
