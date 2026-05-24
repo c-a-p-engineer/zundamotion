@@ -52,3 +52,9 @@
 - YAMLスキーマ草案: `docs/design/yaml_schema_draft.md`
 - FFmpegフィルタ対応表: `docs/design/ffmpeg_filter_mapping.md`
 - パーサ＆filter_complex骨組み: `docs/design/parser_and_builder.md`
+
+## 採用見送りメモ
+
+- 歌唱機能 (`song`)
+  - 2026-05-24 時点で不採用。
+  - 理由と再検討条件は `docs/guides/song_mode_rejected.md` を参照。
