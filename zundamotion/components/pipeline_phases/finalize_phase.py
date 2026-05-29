@@ -23,6 +23,7 @@ from zundamotion.utils.ffmpeg_ops import (
     compare_media_params,
     concat_videos_copy,
 )
+from zundamotion.utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from zundamotion.utils.logger import logger, time_log
 
 
@@ -96,7 +97,10 @@ class FinalizePhase:
         # 1) シーン間トランジションの適用（先行シーンの transition を次シーンとの境界に適用）
         processed_paths: List[Path] = list(scene_video_paths)
 
-        duration_tasks = [get_media_duration(str(p)) for p in processed_paths]
+        duration_tasks = [
+            get_media_duration(str(p), caller="finalize_scene_duration")
+            for p in processed_paths
+        ]
         scene_durations: List[float] = []
         if duration_tasks:
             duration_results = await asyncio.gather(*duration_tasks, return_exceptions=True)
@@ -179,6 +183,12 @@ class FinalizePhase:
                             wait_padding=self.transition_wait_padding,
                             hw_encoder=self.hw_encoder,
                             consume_next_head=consume_next_head,
+                            context={
+                                "phase": "FinalizePhase",
+                                "operation": "transition_boundary",
+                                "scene_id": str(scene.get("id", f"scene_{i}")),
+                                "transition_index": i,
+                            },
                         )
                         return cache_output_path
 
@@ -258,7 +268,10 @@ class FinalizePhase:
         else:
             await final_concat_creator(output_video_path)
 
-        final_video_duration = await get_media_duration(str(output_video_path))
+        final_video_duration = await get_media_duration(
+            str(output_video_path),
+            caller="finalize_output_duration",
+        )
         logger.info(
             f"FinalizePhase: Final video '{output_video_path.name}' actual duration: {final_video_duration:.2f}s"
         )
@@ -280,7 +293,14 @@ class FinalizePhase:
             try:
                 # Final output should be faststart-enabled for better streaming
                 await concat_videos_copy(
-                    input_video_str_paths, str(output_video_path), movflags_faststart=True
+                    input_video_str_paths,
+                    str(output_video_path),
+                    movflags_faststart=True,
+                    context={
+                        "phase": "FinalizePhase",
+                        "operation": "final_concat",
+                        "output_path": str(output_video_path),
+                    },
                 )
                 logger.info(
                     f"FinalizePhase: Successfully concatenated videos using -c copy to {output_video_path}"
@@ -300,13 +320,19 @@ class FinalizePhase:
             logger.warning("FinalizePhase: Video parameters mismatch.")
             base_info = None
             if input_video_str_paths:
-                base_info = await get_media_info(input_video_str_paths[0])
+                base_info = await get_media_info(
+                    input_video_str_paths[0],
+                    caller="finalize_compare_media_params",
+                )
                 logger.warning(
                     f"  Base video parameters ({input_video_str_paths[0]}): {json.dumps(base_info, indent=2)}"
                 )
 
             for i, path in enumerate(input_video_str_paths[1:], start=1):
-                current_info = await get_media_info(path)
+                current_info = await get_media_info(
+                    path,
+                    caller="finalize_compare_media_params",
+                )
                 logger.warning(
                     f"  Mismatch detected with {path}: {json.dumps(current_info, indent=2)}"
                 )
@@ -365,7 +391,14 @@ class FinalizePhase:
         logger.info(f"FinalizePhase: FFmpeg re-encode concat command: {' '.join(cmd)}")
 
         try:
-            proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            proc = await _run_ffmpeg_async(
+                cmd,
+                context={
+                    "phase": "FinalizePhase",
+                    "operation": "final_concat_reencode",
+                    "output_path": str(output_video_path),
+                },
+            )
             logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
             logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
             logger.info(

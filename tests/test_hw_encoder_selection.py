@@ -61,10 +61,10 @@ def test_get_hw_encoder_kind_for_video_params_gpu_falls_back_to_cpu(monkeypatch)
     assert result is None
 
 
-def test_video_phase_auto_nvenc_uses_cpu_when_filters_are_cpu():
+def test_video_phase_auto_nvenc_keeps_nvenc_when_filters_are_cpu():
     result = VideoPhase._resolve_effective_hw_kind("auto", "nvenc", "cpu")
 
-    assert result is None
+    assert result == "nvenc"
 
 
 def test_video_phase_gpu_nvenc_keeps_nvenc_when_filters_are_cpu():

@@ -1499,6 +1499,7 @@ class SceneRenderer:
                     scene_output_path = await self.video_renderer.apply_subtitle_overlays(
                         cached_base_scene_path,
                         subtitle_entries,
+                        scene_id=scene_id,
                     )
                     logger.info(
                         "[SceneCache] scene=%s layer=sub MISS -> burned subtitles from cached base (%d subtitles)",
@@ -2524,7 +2525,7 @@ class SceneRenderer:
                 )
             if subtitle_entries:
                 scene_output_path = await self.video_renderer.apply_subtitle_overlays(
-                    scene_output_no_sub_path, subtitle_entries
+                    scene_output_no_sub_path, subtitle_entries, scene_id=scene_id
                 )
                 logger.info(f"Applied subtitles -> {scene_output_path.name}")
                 self.cache_manager.cache_file(

@@ -10,6 +10,7 @@ from contextlib import suppress
 from datetime import datetime
 from functools import wraps
 from logging.handlers import QueueHandler, QueueListener
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from tqdm import tqdm
@@ -149,11 +150,32 @@ def setup_logging(
     console_handler.setFormatter(console_formatter)
 
     # File handler
-    log_dir = "./logs"
-    os.makedirs(log_dir, exist_ok=True)
+    log_dir_candidates = [Path("./logs"), Path(__file__).resolve().parents[2] / "logs"]
+    log_dir = None
+    for candidate in log_dir_candidates:
+        if candidate.exists() and not candidate.is_dir():
+            message = f"[LoggerError] log path exists but is not a directory: {candidate}"
+            print(message, file=sys.stderr)
+            raise NotADirectoryError(message)
+        for attempt in range(5):
+            try:
+                os.makedirs(candidate, exist_ok=True)
+                log_dir = candidate
+                break
+            except FileExistsError:
+                if candidate.is_dir():
+                    log_dir = candidate
+                    break
+                if attempt == 4:
+                    break
+                time.sleep(0.05)
+        if log_dir is not None:
+            break
+    if log_dir is None:
+        raise FileExistsError("failed to initialize any log directory candidate")
     log_filename = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3] + ".log"
     file_handler = logging.FileHandler(
-        os.path.join(log_dir, log_filename), encoding="utf-8"
+        os.path.join(str(log_dir), log_filename), encoding="utf-8"
     )
     file_handler.setFormatter(file_formatter)
 

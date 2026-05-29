@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import inspect
 import json
 import os
 import shutil
@@ -267,8 +268,19 @@ class CacheManager:
         base_dir = self.ephemeral_dir if self.no_cache and self.ephemeral_dir else self.cache_dir
         return base_dir / f"{prefix}_{cache_key}.json"
 
-    async def get_or_create_media_info(self, file_path: Path) -> MediaInfo:
+    @staticmethod
+    def _infer_probe_caller() -> str:
+        for frame in inspect.stack()[2:]:
+            module = inspect.getmodule(frame.frame)
+            module_name = getattr(module, "__name__", "")
+            if module_name.endswith(".cache") or module_name.endswith(".ffmpeg_probe"):
+                continue
+            return str(frame.function)
+        return "unknown"
+
+    async def get_or_create_media_info(self, file_path: Path, caller: Optional[str] = None) -> MediaInfo:
         """メディアのメタ情報を取得しキャッシュする。"""
+        resolved_caller = str(caller or self._infer_probe_caller())
         key_data = self._media_probe_cache_key_data(file_path, "media_info")
         cache_key = self._generate_hash(key_data)
         cached_meta_path = self._probe_meta_path("info", cache_key)
@@ -288,6 +300,15 @@ class CacheManager:
                     f"Cache HIT for media info of {file_path.name} (key: {cache_key[:8]})"
                 )
                 perf_stats.incr("cache_hit")
+                perf = perf_stats.current_perf_stats()
+                if perf is not None:
+                    perf.record_ffprobe_call(
+                        kind="stream",
+                        caller=resolved_caller,
+                        path=str(file_path),
+                        elapsed_ms=0.0,
+                        cache_hit=True,
+                    )
                 return info
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning(
@@ -310,8 +331,17 @@ class CacheManager:
                             with open(cached_meta_path, "r", encoding="utf-8") as f:
                                 meta = json.load(f)
                             perf_stats.incr("cache_hit")
+                            perf = perf_stats.current_perf_stats()
+                            if perf is not None:
+                                perf.record_ffprobe_call(
+                                    kind="stream",
+                                    caller=resolved_caller,
+                                    path=str(file_path),
+                                    elapsed_ms=0.0,
+                                    cache_hit=True,
+                                )
                             return meta["media_info"]
-                        info = await get_media_info(str(file_path))
+                        info = await get_media_info(str(file_path), caller=resolved_caller)
                         with open(cached_meta_path, "w", encoding="utf-8") as f:
                             json.dump({"media_info": info, "created_at": time.time()}, f)
                         perf_stats.incr("cache_write")
@@ -332,8 +362,9 @@ class CacheManager:
             else:
                 task = existing
         return await task
-    async def get_or_create_media_duration(self, file_path: Path) -> float:
+    async def get_or_create_media_duration(self, file_path: Path, caller: Optional[str] = None) -> float:
         """メディアの再生時間を取得しキャッシュする。"""
+        resolved_caller = str(caller or self._infer_probe_caller())
         key_data = self._media_probe_cache_key_data(file_path, "media_duration")
         cache_key = self._generate_hash(key_data)
         cached_meta_path = self._probe_meta_path("duration", cache_key)
@@ -353,6 +384,15 @@ class CacheManager:
                     f"Cache HIT for duration of {file_path.name} (key: {cache_key[:8]}) -> {duration:.2f}s"
                 )
                 perf_stats.incr("cache_hit")
+                perf = perf_stats.current_perf_stats()
+                if perf is not None:
+                    perf.record_ffprobe_call(
+                        kind="duration",
+                        caller=resolved_caller,
+                        path=str(file_path),
+                        elapsed_ms=0.0,
+                        cache_hit=True,
+                    )
                 return duration
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning(
@@ -375,8 +415,17 @@ class CacheManager:
                             with open(cached_meta_path, "r", encoding="utf-8") as f:
                                 meta = json.load(f)
                             perf_stats.incr("cache_hit")
+                            perf = perf_stats.current_perf_stats()
+                            if perf is not None:
+                                perf.record_ffprobe_call(
+                                    kind="duration",
+                                    caller=resolved_caller,
+                                    path=str(file_path),
+                                    elapsed_ms=0.0,
+                                    cache_hit=True,
+                                )
                             return float(meta["duration"])
-                        duration = await get_media_duration(str(file_path))
+                        duration = await get_media_duration(str(file_path), caller=resolved_caller)
                         with open(cached_meta_path, "w", encoding="utf-8") as f:
                             json.dump({"duration": duration, "created_at": time.time()}, f)
                         perf_stats.incr("cache_write")

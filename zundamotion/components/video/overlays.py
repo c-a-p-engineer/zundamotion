@@ -21,10 +21,10 @@ from .overlay_effects import resolve_overlay_effects
 from .threading import build_ffmpeg_thread_flags
 
 
-async def _run_ffmpeg(cmd: List[str]) -> None:
+async def _run_ffmpeg(cmd: List[str], context: Optional[Dict[str, Any]] = None) -> None:
     """videoモジュール経由でffmpegを実行するラッパー。"""
     video_module = import_module("zundamotion.components.video")
-    await video_module._run_ffmpeg_async(cmd)
+    await video_module._run_ffmpeg_async(cmd, context=context)
 
 
 MIN_EXACT_SEGMENT_DURATION = 0.05
@@ -712,13 +712,14 @@ class OverlayMixin:
         return output_path
 
     async def apply_subtitle_overlays(
-        self, base_video: Path, subtitles: List[Dict[str, Any]]
+        self, base_video: Path, subtitles: List[Dict[str, Any]], *, scene_id: Optional[str] = None
     ) -> Path:
         """字幕PNGのみを順次焼き込む。"""
         if not subtitles:
             return base_video
 
         output_path = self.temp_dir / f"{base_video.stem}_sub.mp4"
+        resolved_scene_id = str(scene_id or base_video.stem)
         subtitle_mode = self._subtitle_render_mode(subtitles)
         self.subtitle_overlay_stats = {
             "mode": subtitle_mode,
@@ -730,7 +731,7 @@ class OverlayMixin:
             "layer_video_used": False,
         }
         try:
-            base_dur = await get_media_duration(str(base_video))
+            base_dur = await get_media_duration(str(base_video), caller="subtitle_base_duration")
         except Exception:
             base_dur = None
         self.subtitle_overlay_stats["base_duration"] = base_dur
@@ -857,9 +858,25 @@ class OverlayMixin:
                         seg_base,
                         adjusted,
                         self.temp_dir / f"{base_video.stem}_sub_burn_{seg_idx:03d}.mp4",
+                        scene_id=resolved_scene_id,
+                        chunk_index=seg_idx,
                     )
                     chunk_ms = (time.perf_counter() - chunk_started) * 1000.0
                     perf_stats.add_ms("subtitle_burn_ms", chunk_ms)
+                    current_perf = perf_stats.current_perf_stats()
+                    if current_perf is not None:
+                        current_perf.record_subtitle_burn_chunk(
+                            scene_id=resolved_scene_id,
+                            chunk_index=seg_idx,
+                            chunk_count=len(ranges),
+                            subtitle_count=len(adjusted),
+                            input_video_duration=end - start,
+                            burn_duration_ms=chunk_ms,
+                            output_path=str(burned),
+                            ffmpeg_call_count=1,
+                            start_time=start,
+                            end_time=end,
+                        )
                     slowest_chunk_ms = max(slowest_chunk_ms, chunk_ms)
                     logger.info(
                         "[SubtitleChunk] index=%d subtitles=%d duration=%.3f gap_copy_before=%.3f ffmpeg_ms=%.1f",
@@ -907,6 +924,12 @@ class OverlayMixin:
                         [str(path.resolve()) for path in segment_paths],
                         str(output_path),
                         self.ffmpeg_path,
+                        context={
+                            "phase": "VideoPhase",
+                            "operation": "subtitle_scene_concat",
+                            "scene_id": resolved_scene_id,
+                            "output_path": str(output_path),
+                        },
                     )
                     self.subtitle_overlay_stats_history.append(
                         dict(self.subtitle_overlay_stats)
@@ -921,8 +944,29 @@ class OverlayMixin:
         self.subtitle_overlay_stats["chunks"] = 1
         perf_stats.incr("subtitle_chunks", 1)
         burn_started = time.perf_counter()
-        result = await self._apply_subtitle_overlays_full(base_video, subtitles, output_path)
-        perf_stats.add_ms("subtitle_burn_ms", (time.perf_counter() - burn_started) * 1000.0)
+        result = await self._apply_subtitle_overlays_full(
+            base_video,
+            subtitles,
+            output_path,
+            scene_id=resolved_scene_id,
+            chunk_index=0,
+        )
+        chunk_ms = (time.perf_counter() - burn_started) * 1000.0
+        perf_stats.add_ms("subtitle_burn_ms", chunk_ms)
+        current_perf = perf_stats.current_perf_stats()
+        if current_perf is not None:
+            current_perf.record_subtitle_burn_chunk(
+                scene_id=resolved_scene_id,
+                chunk_index=0,
+                chunk_count=1,
+                subtitle_count=len(subtitles),
+                input_video_duration=float(base_dur or 0.0),
+                burn_duration_ms=chunk_ms,
+                output_path=str(result),
+                ffmpeg_call_count=1,
+                start_time=0.0,
+                end_time=float(base_dur or 0.0),
+            )
         self.subtitle_overlay_stats_history.append(dict(self.subtitle_overlay_stats))
         return result
 
@@ -1019,10 +1063,13 @@ class OverlayMixin:
         base_video: Path,
         subtitles: List[Dict[str, Any]],
         output_path: Path,
+        *,
+        scene_id: Optional[str] = None,
+        chunk_index: Optional[int] = None,
     ) -> Path:
         subtitle_mode = self._subtitle_render_mode(subtitles)
         try:
-            base_dur = await get_media_duration(str(base_video))
+            base_dur = await get_media_duration(str(base_video), caller="subtitle_chunk_duration")
         except Exception:
             base_dur = None
         cmd: List[str] = [self.ffmpeg_path, "-y", "-nostdin", "-i", str(base_video)]
@@ -1094,7 +1141,17 @@ class OverlayMixin:
         cmd.append(str(output_path))
 
         ffmpeg_started = time.perf_counter()
-        await _run_ffmpeg(cmd)
+        await _run_ffmpeg(
+            cmd,
+            context={
+                "phase": "VideoPhase",
+                "operation": "subtitle_burn",
+                "scene_id": scene_id,
+                "chunk_index": chunk_index,
+                "input_paths": [str(base_video)],
+                "output_path": str(output_path),
+            },
+        )
         logger.info(
             "[FilterGraph] target=%s ffmpeg_ms=%.1f",
             output_path.stem,

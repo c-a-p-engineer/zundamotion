@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from .logger import logger
 from . import perf_stats
@@ -38,6 +38,47 @@ def _guess_ffmpeg_output_path(args: List[str]) -> Optional[Path]:
             return None
         return Path(value)
     return None
+
+
+def _guess_ffmpeg_input_paths(args: List[str]) -> list[str]:
+    inputs: list[str] = []
+    for index, token in enumerate(args[:-1]):
+        if str(token) != "-i":
+            continue
+        value = str(args[index + 1])
+        if value not in {"pipe:0", "pipe:1", "pipe:2", "-", "NUL", "/dev/null"}:
+            inputs.append(value)
+    return inputs
+
+
+def _normalize_warning_type(line: str) -> Optional[str]:
+    lower = line.lower()
+    if "queue input is backward in time" in lower:
+        return "queue_input_backward"
+    if "non-monotonic dts" in lower:
+        return "non_monotonic_dts"
+    if "past duration" in lower:
+        return "past_duration"
+    if "invalid dropping" in lower:
+        return "invalid_dropping"
+    if " dts" in lower or lower.startswith("dts"):
+        return "dts_warning"
+    if " pts" in lower or lower.startswith("pts"):
+        return "pts_warning"
+    return None
+
+
+def _extract_av_warning_items(stderr_text: str) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    for raw_line in stderr_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        warning_type = _normalize_warning_type(line)
+        if not warning_type:
+            continue
+        items.append({"type": warning_type, "message": line})
+    return items
 
 
 def _format_progress_size(path: Optional[Path]) -> str:
@@ -192,7 +233,11 @@ async def _log_ffmpeg_heartbeat(
 
 
 async def run_ffmpeg_async(
-    args: List[str], *, timeout: Optional[float] = None, error_log_level: int | None = logging.ERROR
+    args: List[str],
+    *,
+    timeout: Optional[float] = None,
+    error_log_level: int | None = logging.ERROR,
+    context: Optional[Dict[str, Any]] = None,
 ) -> subprocess.CompletedProcess:
     """
     FFmpeg/ffprobe を非同期で起動し、ログとタイムアウトを管理する。
@@ -203,6 +248,9 @@ async def run_ffmpeg_async(
     try:
         exe = str(args[0]) if args else "ffmpeg"
         base = os.path.basename(exe)
+        ff_context: Dict[str, Any] = dict(context or {})
+        ff_context.setdefault("input_paths", _guess_ffmpeg_input_paths(args))
+        ff_context.setdefault("output_path", str(_guess_ffmpeg_output_path(args) or ""))
         if base.startswith("ffprobe"):
             perf_stats.incr("ffprobe_calls")
             perf_stats.incr(_classify_ffprobe_call(args))
@@ -316,6 +364,58 @@ async def run_ffmpeg_async(
         rc = process.returncode if process.returncode is not None else 0
         dt = time.monotonic() - t0
         logger.debug(f"Command finished rc={rc} in {dt:.2f}s (PID={process.pid})")
+        if base.startswith("ffprobe"):
+            kind_counter = _classify_ffprobe_call(args)
+            kind = kind_counter.removeprefix("ffprobe_").removesuffix("_calls")
+            path = str(ff_context.get("path") or "")
+            if not path:
+                input_paths = ff_context.get("input_paths") or []
+                if input_paths:
+                    path = str(input_paths[-1])
+            perf = perf_stats.current_perf_stats()
+            if perf is not None:
+                perf.record_ffprobe_call(
+                    kind=kind,
+                    caller=str(ff_context.get("caller") or "unknown"),
+                    path=path,
+                    elapsed_ms=dt * 1000.0,
+                    cache_hit=False,
+                )
+
+        if stderr_str:
+            av_items = _extract_av_warning_items(stderr_str)
+            if av_items:
+                perf = perf_stats.current_perf_stats()
+                for item in av_items:
+                    warning_item = {
+                        "run_id": getattr(perf, "run_id", None),
+                        "phase": str(ff_context.get("phase") or "unknown"),
+                        "operation": str(ff_context.get("operation") or base),
+                        "scene_id": ff_context.get("scene_id"),
+                        "line_id": ff_context.get("line_id"),
+                        "chunk_index": ff_context.get("chunk_index"),
+                        "transition_index": ff_context.get("transition_index"),
+                        "type": item["type"],
+                        "input_paths": list(ff_context.get("input_paths") or []),
+                        "output_path": ff_context.get("output_path"),
+                        "message": item["message"],
+                    }
+                    if perf is not None:
+                        perf.record_av_warning(warning_item)
+                    logger.warning(
+                        "[AVWarning] run_id=%s phase=%s operation=%s scene_id=%s line_id=%s chunk_index=%s transition_index=%s type=%s input=%s output=%s message=%r",
+                        warning_item.get("run_id") or "-",
+                        warning_item.get("phase") or "-",
+                        warning_item.get("operation") or "-",
+                        warning_item.get("scene_id") or "-",
+                        warning_item.get("line_id") or "-",
+                        warning_item.get("chunk_index") if warning_item.get("chunk_index") is not None else "-",
+                        warning_item.get("transition_index") if warning_item.get("transition_index") is not None else "-",
+                        warning_item.get("type") or "-",
+                        ",".join(str(path) for path in warning_item.get("input_paths") or []) or "-",
+                        warning_item.get("output_path") or "-",
+                        warning_item.get("message") or "",
+                    )
 
         if rc != 0:
             if error_log_level is not None:

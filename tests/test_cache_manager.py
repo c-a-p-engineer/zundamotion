@@ -143,7 +143,7 @@ def test_no_cache_reuses_duration_within_ephemeral_dir(tmp_path: Path, monkeypat
         cache.set_ephemeral_dir(tmp_path / "ephemeral")
         calls = 0
 
-        async def fake_get_media_duration(_path: str) -> float:
+        async def fake_get_media_duration(_path: str, caller: str | None = None) -> float:
             nonlocal calls
             calls += 1
             return 12.34

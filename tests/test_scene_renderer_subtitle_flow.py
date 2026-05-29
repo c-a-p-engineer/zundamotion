@@ -131,7 +131,7 @@ class _DummyVideoRenderer:
         out.write_bytes(b"scene")
         return out
 
-    async def apply_subtitle_overlays(self, _base_video: Path, subtitles):
+    async def apply_subtitle_overlays(self, _base_video: Path, subtitles, *, scene_id=None):
         self.apply_subtitle_calls.append(subtitles)
         output_path = self.temp_dir / "scene_output_demo_sub.mp4"
         output_path.write_bytes(b"scene-sub")

@@ -2,16 +2,29 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import subprocess
 from pathlib import Path
-from typing import Dict, Optional, TypedDict
+from typing import Any, Dict, Optional, TypedDict
 
 from .ffmpeg_runner import run_ffmpeg_async
 from .logger import logger
 
 _media_info_memo: Dict[tuple, "MediaInfo"] = {}
 _duration_memo: Dict[tuple, float] = {}
+
+
+def _resolve_probe_caller(caller: Optional[str]) -> str:
+    if caller:
+        return str(caller)
+    for frame in inspect.stack()[2:]:
+        module = inspect.getmodule(frame.frame)
+        module_name = getattr(module, "__name__", "")
+        if module_name.endswith(".ffmpeg_probe"):
+            continue
+        return str(frame.function)
+    return "unknown"
 
 
 class VideoInfo(TypedDict, total=False):
@@ -41,9 +54,10 @@ class MediaInfo(TypedDict, total=False):
     audio: Optional[AudioInfo]
 
 
-async def get_media_info(file_path: str) -> MediaInfo:
+async def get_media_info(file_path: str, caller: Optional[str] = None) -> MediaInfo:
     """動画/音声ファイルのメタ情報を取得する。"""
     try:
+        resolved_caller = _resolve_probe_caller(caller)
         p = Path(file_path)
         st = p.stat()
         key = (str(p.resolve()), int(st.st_mtime), st.st_size)
@@ -58,7 +72,15 @@ async def get_media_info(file_path: str) -> MediaInfo:
             "json",
             file_path,
         ]
-        result = await run_ffmpeg_async(cmd)
+        result = await run_ffmpeg_async(
+            cmd,
+            context={
+                "phase": "Probe",
+                "operation": "media_info",
+                "caller": resolved_caller,
+                "path": file_path,
+            },
+        )
         info = json.loads(result.stdout)
 
         media_info: MediaInfo = {"video": None, "audio": None}
@@ -99,7 +121,7 @@ async def get_media_info(file_path: str) -> MediaInfo:
 async def probe_media_params_async(path: Path) -> Dict[str, Any]:
     """ffprobe で幅やFPSなど最小限の情報を取得する。"""
     try:
-        media_info = await get_media_info(str(path))
+        media_info = await get_media_info(str(path), caller="probe_media_params_async")
         result: Dict[str, Any] = {}
         video_info = media_info.get("video")
         if video_info:
@@ -117,9 +139,10 @@ async def probe_media_params_async(path: Path) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error probing media params for {path}: {e}")
         return {}
-async def get_audio_duration(file_path: str) -> float:
+async def get_audio_duration(file_path: str, caller: Optional[str] = None) -> float:
     """音声ファイルの長さ(秒)を返す。"""
     try:
+        resolved_caller = _resolve_probe_caller(caller)
         p = Path(file_path)
         st = p.stat()
         key = ("aud", str(p.resolve()), int(st.st_mtime), st.st_size)
@@ -135,7 +158,15 @@ async def get_audio_duration(file_path: str) -> float:
             "json",
             file_path,
         ]
-        result = await run_ffmpeg_async(cmd)
+        result = await run_ffmpeg_async(
+            cmd,
+            context={
+                "phase": "Probe",
+                "operation": "audio_duration",
+                "caller": resolved_caller,
+                "path": file_path,
+            },
+        )
         info = json.loads(result.stdout)
         duration = float(info["format"]["duration"])
         duration = round(duration, 2)
@@ -146,9 +177,10 @@ async def get_audio_duration(file_path: str) -> float:
         raise
 
 
-async def get_media_duration(file_path: str) -> float:
+async def get_media_duration(file_path: str, caller: Optional[str] = None) -> float:
     """動画/音声ファイルの長さ(秒)を返す。"""
     try:
+        resolved_caller = _resolve_probe_caller(caller)
         p = Path(file_path)
         st = p.stat()
         key = ("med", str(p.resolve()), int(st.st_mtime), st.st_size)
@@ -164,7 +196,15 @@ async def get_media_duration(file_path: str) -> float:
             "json",
             file_path,
         ]
-        result = await run_ffmpeg_async(cmd)
+        result = await run_ffmpeg_async(
+            cmd,
+            context={
+                "phase": "Probe",
+                "operation": "media_duration",
+                "caller": resolved_caller,
+                "path": file_path,
+            },
+        )
         info = json.loads(result.stdout)
         duration = float(info["format"]["duration"])
         duration = round(duration, 2)

@@ -232,7 +232,9 @@ async def compare_media_params(file_paths: List[str]) -> bool:
         return True  # ファイルがない場合は一致とみなす
 
     try:
-        infos = await asyncio.gather(*(get_media_info(p) for p in file_paths))
+        infos = await asyncio.gather(
+            *(get_media_info(p, caller="compare_media_params") for p in file_paths)
+        )
     except Exception as e:
         logger.error(f"Error gathering media info: {e}")
         return False
@@ -292,6 +294,7 @@ async def concat_videos_copy(
     output_path: str,
     ffmpeg_path: str = "ffmpeg",
     movflags_faststart: bool = False,
+    context: Optional[Dict[str, Any]] = None,
 ):
     """
     -f concat -c copy を使用して動画を再エンコードなしで結合する。
@@ -338,7 +341,7 @@ async def concat_videos_copy(
     # 実行時間を計測
     t0 = time.time()
     try:
-        proc = await _run_ffmpeg_async(cmd)  # await を追加
+        proc = await _run_ffmpeg_async(cmd, context=context)  # await を追加
         logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
         logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
         elapsed = time.time() - t0
@@ -369,6 +372,7 @@ async def _copy_segment(
     start: float,
     duration: float,
     ffmpeg_path: str = "ffmpeg",
+    context: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     if duration <= 0.02:
         return None
@@ -390,7 +394,7 @@ async def _copy_segment(
         "make_zero",
         output_path,
     ]
-    await _run_ffmpeg_async(cmd)
+    await _run_ffmpeg_async(cmd, context=context)
     return output_path
 
 
@@ -404,6 +408,7 @@ async def _encode_segment(
     audio_params: AudioParams,
     ffmpeg_path: str = "ffmpeg",
     hw_encoder: str = "auto",
+    context: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     if duration <= 0.02:
         return None
@@ -449,7 +454,7 @@ async def _encode_segment(
     if has_audio:
         cmd.extend(audio_params.to_ffmpeg_opts())
     cmd.append(output_path)
-    await _run_ffmpeg_async(cmd)
+    await _run_ffmpeg_async(cmd, context=context)
     return output_path
 
 
@@ -464,6 +469,7 @@ async def _create_freeze_tail(
     ffmpeg_path: str = "ffmpeg",
     hw_encoder: str = "auto",
     source_time: Optional[float] = None,
+    context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Create a silent still-video clip from a frame of input_path."""
     freeze_duration = max(0.02, float(freeze_duration))
@@ -505,7 +511,7 @@ async def _create_freeze_tail(
     cmd.extend(video_params.to_ffmpeg_opts(hw_kind))
     cmd.extend(audio_params.to_ffmpeg_opts())
     cmd.extend([output_path])
-    await _run_ffmpeg_async(cmd)
+    await _run_ffmpeg_async(cmd, context=context)
     return output_path
 
 
@@ -522,6 +528,7 @@ async def apply_transition_local(
     wait_padding: float = 0.0,
     hw_encoder: str = "auto",
     consume_next_head: bool = False,
+    context: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Apply a scene transition by re-encoding only the boundary window.
 
@@ -532,8 +539,9 @@ async def apply_transition_local(
     scene.  consume_next_head skips the next-scene head already used in that
     boundary to avoid visually or audibly repeating it.
     """
-    dur1 = float(await get_media_duration(input_video1_path))
-    dur2 = float(await get_media_duration(input_video2_path))
+    context = dict(context or {})
+    dur1 = float(await get_media_duration(input_video1_path, caller="transition_input_probe"))
+    dur2 = float(await get_media_duration(input_video2_path, caller="transition_input_probe"))
     offset = max(0.0, min(float(offset), dur1))
     duration = max(0.001, float(duration))
     wait_padding = max(0.0, float(wait_padding))
@@ -555,6 +563,7 @@ async def apply_transition_local(
             start=0.0,
             duration=dur1,
             ffmpeg_path=ffmpeg_path,
+            context={**context, "operation": "transition_prefix_copy"},
         )
         if prefix_path:
             parts.append(prefix_path)
@@ -567,6 +576,7 @@ async def apply_transition_local(
             audio_params=audio_params,
             ffmpeg_path=ffmpeg_path,
             hw_encoder=hw_encoder,
+            context={**context, "operation": "transition_freeze_tail"},
         )
         await _encode_segment(
             input_video2_path,
@@ -577,6 +587,7 @@ async def apply_transition_local(
             audio_params=audio_params,
             ffmpeg_path=ffmpeg_path,
             hw_encoder=hw_encoder,
+            context={**context, "operation": "transition_head_encode"},
         )
         suffix_start = second_head if consume_next_head else 0.0
         boundary_offset = 0.0
@@ -587,6 +598,7 @@ async def apply_transition_local(
             start=0.0,
             duration=offset,
             ffmpeg_path=ffmpeg_path,
+            context={**context, "operation": "transition_prefix_copy"},
         )
         if prefix_path:
             parts.append(prefix_path)
@@ -596,6 +608,7 @@ async def apply_transition_local(
             start=offset,
             duration=max(0.02, dur1 - offset),
             ffmpeg_path=ffmpeg_path,
+            context={**context, "operation": "transition_tail_copy"},
         )
         await _copy_segment(
             input_video2_path,
@@ -603,6 +616,7 @@ async def apply_transition_local(
             start=0.0,
             duration=max(0.02, second_head),
             ffmpeg_path=ffmpeg_path,
+            context={**context, "operation": "transition_head_copy"},
         )
         suffix_start = second_head
         boundary_offset = 0.0
@@ -619,6 +633,7 @@ async def apply_transition_local(
         ffmpeg_path=ffmpeg_path,
         wait_padding=wait_padding,
         hw_encoder=hw_encoder,
+        context={**context, "operation": "transition_boundary"},
     )
     parts.append(boundary)
 
@@ -638,6 +653,7 @@ async def apply_transition_local(
             audio_params=audio_params,
             ffmpeg_path=ffmpeg_path,
             hw_encoder=hw_encoder,
+            context={**context, "operation": "transition_suffix_encode"},
         )
         suffix_was_reencoded = bool(suffix_path)
     else:
@@ -647,6 +663,7 @@ async def apply_transition_local(
             start=suffix_start,
             duration=max(0.0, dur2 - suffix_start),
             ffmpeg_path=ffmpeg_path,
+            context={**context, "operation": "transition_suffix_copy"},
         )
     if suffix_path:
         parts.append(suffix_path)
@@ -660,7 +677,12 @@ async def apply_transition_local(
         transition_note = " (freeze-before-transition)"
 
     try:
-        await concat_videos_copy(parts, output_path, ffmpeg_path)
+        await concat_videos_copy(
+            parts,
+            output_path,
+            ffmpeg_path,
+            context={**context, "operation": "transition_parts_concat"},
+        )
         logger.info(
             "Applied local '%s' transition: copied %d part(s), re-encoded boundary %.2fs%s -> %s",
             transition_type,
@@ -685,12 +707,18 @@ async def apply_transition_local(
                 audio_params=audio_params,
                 ffmpeg_path=ffmpeg_path,
                 hw_encoder=hw_encoder,
+                context={**context, "operation": "transition_suffix_encode_retry"},
             )
             if encoded_suffix_path:
                 retry_parts = list(parts)
                 retry_parts[-1] = encoded_suffix_path
                 try:
-                    await concat_videos_copy(retry_parts, output_path, ffmpeg_path)
+                    await concat_videos_copy(
+                        retry_parts,
+                        output_path,
+                        ffmpeg_path,
+                        context={**context, "operation": "transition_parts_concat_retry"},
+                    )
                     logger.info(
                         "Applied local '%s' transition: copied %d part(s), re-encoded boundary %.2fs (freeze-before-transition, consume-next-head, suffix re-encoded after copy retry) -> %s",
                         transition_type,
@@ -714,10 +742,11 @@ async def apply_transition_local(
             offset,
             video_params,
             audio_params,
-            ffmpeg_path=ffmpeg_path,
-            wait_padding=wait_padding,
-            hw_encoder=hw_encoder,
-        )
+        ffmpeg_path=ffmpeg_path,
+        wait_padding=wait_padding,
+        hw_encoder=hw_encoder,
+        context={**context, "operation": "transition_full_fallback"},
+    )
 
 
 async def apply_transition(
@@ -732,6 +761,7 @@ async def apply_transition(
     ffmpeg_path: str = "ffmpeg",
     wait_padding: float = 0.0,
     hw_encoder: str = "auto",
+    context: Optional[Dict[str, Any]] = None,
 ):
     """
     映像: xfade、音声: acrossfade でクロスフェード。
@@ -816,7 +846,14 @@ async def apply_transition(
     cmd.extend([output_path])
 
     try:
-        proc = await _run_ffmpeg_async(cmd)
+        proc = await _run_ffmpeg_async(
+            cmd,
+            context={
+                **dict(context or {}),
+                "input_paths": [input_video1_path, input_video2_path],
+                "output_path": output_path,
+            },
+        )
         logger.debug("FFmpeg stdout:\n%s", proc.stdout)
         logger.debug("FFmpeg stderr:\n%s", proc.stderr)
         logger.info(

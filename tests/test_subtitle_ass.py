@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from zundamotion.components.subtitles.generator import SubtitleGenerator
+import zundamotion.components.video.overlays as overlays_module
 from zundamotion.components.video.overlays import OverlayMixin
 from zundamotion.utils.ffmpeg_params import VideoParams
 
@@ -41,6 +42,7 @@ class DummyOverlayRenderer(OverlayMixin):
             },
             StubCacheManager(cache_dir),
         )
+        self.subtitle_overlay_stats_history = []
 
     def _thread_flags(self):
         return []
@@ -176,7 +178,7 @@ def test_build_ass_subtitle_file_maps_background_visibility_and_opacity(tmp_path
     assert style_without_bg.borderstyle == 1
 
 
-def test_apply_subtitle_overlays_ass_renders_output(tmp_path):
+def test_apply_subtitle_overlays_ass_renders_output(tmp_path, monkeypatch):
     base_video = tmp_path / "base.mp4"
     subprocess.run(
         [
@@ -196,6 +198,18 @@ def test_apply_subtitle_overlays_ass_renders_output(tmp_path):
         capture_output=True,
         text=True,
     )
+
+    async def fake_run_ffmpeg(command, context=None):
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            raise RuntimeError(stderr.decode("utf-8", errors="replace"))
+
+    monkeypatch.setattr(overlays_module, "_run_ffmpeg", fake_run_ffmpeg)
 
     renderer = DummyOverlayRenderer(tmp_path, tmp_path / "cache")
     out_path = asyncio.run(

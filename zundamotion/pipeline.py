@@ -90,6 +90,9 @@ class GenerationPipeline:
     async def _run_phase(self, phase_name: str, func, *args, **kwargs):
         """各フェーズを実行し処理時間を記録する。"""
         start_time = time.time()
+        current_perf = perf_stats.current_perf_stats()
+        run_id = current_perf.run_id if current_perf is not None else "-"
+        logger.info("[Phase] run_id=%s name=%s status=start", run_id, phase_name)
         if isinstance(logger, KVLogger):
             logger.kv_info(
                 f"--- Starting Phase: {phase_name} ---",
@@ -106,6 +109,13 @@ class GenerationPipeline:
         current_perf = perf_stats.current_perf_stats()
         if current_perf is not None:
             current_perf.set_phase_ms(phase_name, duration * 1000.0)
+            run_id = current_perf.run_id
+        logger.info(
+            "[Phase] run_id=%s name=%s status=end duration_ms=%.1f",
+            run_id,
+            phase_name,
+            duration * 1000.0,
+        )
 
         if isinstance(logger, KVLogger):
             logger.kv_info(
@@ -131,6 +141,11 @@ class GenerationPipeline:
         """
         pipeline_start_time = time.time()
         perf = perf_stats.start_perf_stats()
+        logger.info(
+            "[Render] run_id=%s start output=%s",
+            perf.run_id,
+            output_path,
+        )
         # Prefer RAM disk (/dev/shm) when available and large enough, controlled by USE_RAMDISK env (default: 1)
         use_ramdisk = True
         try:
@@ -217,7 +232,10 @@ class GenerationPipeline:
             # all_clips が Path オブジェクトのリストであると仮定し、get_media_duration を使用して duration を取得
             # get_media_duration は非同期関数なので、asyncio.gather を使って並行して duration を取得
             clip_durations_tasks = [
-                self.cache_manager.get_or_create_media_duration(clip)
+                self.cache_manager.get_or_create_media_duration(
+                    clip,
+                    caller="pipeline_clip_duration",
+                )
                 for clip in all_clips
             ]
             self.stats["clip_durations"] = await asyncio.gather(*clip_durations_tasks)
@@ -374,7 +392,10 @@ class GenerationPipeline:
                     logger.info(f"Chapters saved to {chapters_output_path}")
 
                 try:
-                    video_duration = await get_media_duration(str(final_video_path))
+                    video_duration = await get_media_duration(
+                        str(final_video_path),
+                        caller="timeline_ffmetadata_duration",
+                    )
                     ffmetadata_output_path = output_path_base.with_suffix(".ffmetadata")
                     with open(ffmetadata_output_path, "w", encoding="utf-8") as f:
                         f.write(";FFMETADATA1\n")
@@ -531,6 +552,7 @@ class GenerationPipeline:
             logger.info("------------------------")
         perf_summary = self.stats.get("perf_summary") or {}
         if isinstance(perf_summary, dict):
+            logger.info("[PerfSummary] run_id=%s", perf_summary.get("run_id", "-"))
             logger.info(
                 "[PerfSummary] ffmpeg_calls=%s ffprobe_calls=%s intermediate_files=%s intermediate_size_mb=%.1f",
                 perf_summary.get("ffmpeg_calls", 0),
@@ -563,6 +585,35 @@ class GenerationPipeline:
                 float(perf_summary.get("face_precache_ms", 0.0) or 0.0),
                 float(perf_summary.get("scene_concat_ms", 0.0) or 0.0),
             )
+            av_warnings = perf_summary.get("av_warnings") or {}
+            logger.info(
+                "[PerfSummary] av_warnings_total=%s",
+                av_warnings.get("total", 0),
+            )
+            subtitle_burn = perf_summary.get("subtitle_burn") or {}
+            for item in (subtitle_burn.get("top_chunks") or [])[:5]:
+                logger.info(
+                    "[PerfSummary] subtitle_burn_top scene_id=%s chunk=%s subtitles=%s burn_ms=%.1f",
+                    item.get("scene_id", "-"),
+                    item.get("chunk_index", 0),
+                    item.get("subtitle_count", 0),
+                    float(item.get("burn_duration_ms", 0.0) or 0.0),
+                )
+            ffprobe_summary = perf_summary.get("ffprobe") or {}
+            for item in (ffprobe_summary.get("top_callers") or [])[:5]:
+                logger.info(
+                    "[PerfSummary] ffprobe_top_caller caller=%s calls=%s elapsed_ms=%.1f",
+                    item.get("caller", "-"),
+                    item.get("calls", 0),
+                    float(item.get("elapsed_ms", 0.0) or 0.0),
+                )
+            for item in (ffprobe_summary.get("top_paths") or [])[:5]:
+                logger.info(
+                    "[PerfSummary] ffprobe_top_path calls=%s kind=%s path=%s",
+                    item.get("calls", 0),
+                    item.get("kind", "-"),
+                    item.get("path", "-"),
+                )
 
     def _write_perf_summary_json(self, output_path: Path, perf: perf_stats.PerfStats) -> None:
         configured = (
@@ -578,6 +629,11 @@ class GenerationPipeline:
         try:
             perf.write_json(summary_path)
             logger.info("[PerfSummary] json=%s", summary_path)
+            history_path = summary_path.with_name(
+                f"{summary_path.stem}.{perf.run_id}{summary_path.suffix}"
+            )
+            perf.write_json(history_path)
+            logger.info("[PerfSummary] history_json=%s", history_path)
         except Exception as err:
             logger.warning("[PerfSummary] failed to write json summary: %s", err)
 

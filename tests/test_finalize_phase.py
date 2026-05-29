@@ -6,12 +6,13 @@ from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
 
 
 class DummyCacheManager:
-    pass
+    async def get_or_create(self, *, file_name: str, extension: str, creator_func, **_kwargs):
+        return await creator_func(Path(f"{file_name}.{extension}"))
 
 
 def test_finalize_phase_uses_distinct_output_paths(monkeypatch, tmp_path: Path) -> None:
     async def _run() -> None:
-        async def fake_get_media_duration(_path: str) -> float:
+        async def fake_get_media_duration(_path: str, caller: str | None = None) -> float:
             return 1.0
 
         async def fake_compare_media_params(_paths: list[str]) -> bool:
@@ -21,6 +22,7 @@ def test_finalize_phase_uses_distinct_output_paths(monkeypatch, tmp_path: Path) 
             _inputs: list[str],
             output_path: str,
             movflags_faststart: bool = True,
+            context=None,
         ) -> None:
             Path(output_path).write_bytes(b"mp4")
 
@@ -38,7 +40,7 @@ def test_finalize_phase_uses_distinct_output_paths(monkeypatch, tmp_path: Path) 
         )
 
         phase = FinalizePhase(
-            config={},
+            config={"system": {"finalize_cache": False}},
             temp_dir=tmp_path,
             cache_manager=DummyCacheManager(),
             video_params=VideoParams(),

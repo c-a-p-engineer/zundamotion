@@ -7,10 +7,18 @@ from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
 def test_apply_transition_local_copies_consumed_next_suffix(monkeypatch, tmp_path):
     calls = {"copy": [], "encode": [], "concat": []}
 
-    async def fake_get_media_duration(path: str) -> float:
+    async def fake_get_media_duration(path: str, caller: str | None = None) -> float:
         return 10.0 if path == "first.mp4" else 20.0
 
-    async def fake_copy_segment(input_path: str, output_path: str, *, start: float, duration: float, ffmpeg_path: str):
+    async def fake_copy_segment(
+        input_path: str,
+        output_path: str,
+        *,
+        start: float,
+        duration: float,
+        ffmpeg_path: str,
+        context=None,
+    ):
         calls["copy"].append((input_path, output_path, start, duration))
         return output_path
 
@@ -24,6 +32,7 @@ def test_apply_transition_local_copies_consumed_next_suffix(monkeypatch, tmp_pat
         audio_params: AudioParams,
         ffmpeg_path: str,
         hw_encoder: str,
+        context=None,
     ):
         calls["encode"].append((input_path, output_path, start, duration))
         return output_path
@@ -34,7 +43,13 @@ def test_apply_transition_local_copies_consumed_next_suffix(monkeypatch, tmp_pat
     async def fake_apply_transition(*args, **kwargs):
         return None
 
-    async def fake_concat_videos_copy(input_paths, output_path, ffmpeg_path="ffmpeg", movflags_faststart=True):
+    async def fake_concat_videos_copy(
+        input_paths,
+        output_path,
+        ffmpeg_path="ffmpeg",
+        movflags_faststart=True,
+        context=None,
+    ):
         calls["concat"].append(list(input_paths))
 
     monkeypatch.setattr(ffmpeg_ops, "get_media_duration", fake_get_media_duration)
