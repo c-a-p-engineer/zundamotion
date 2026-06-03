@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import subprocess
@@ -12,6 +13,7 @@ from .ffmpeg_runner import run_ffmpeg_async
 from .logger import logger
 
 _media_info_memo: Dict[tuple, "MediaInfo"] = {}
+_media_info_inflight: Dict[tuple, "asyncio.Task[MediaInfo]"] = {}
 _duration_memo: Dict[tuple, float] = {}
 
 
@@ -63,52 +65,65 @@ async def get_media_info(file_path: str, caller: Optional[str] = None) -> MediaI
         key = (str(p.resolve()), int(st.st_mtime), st.st_size)
         if key in _media_info_memo:
             return _media_info_memo[key]
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_streams",
-            "-of",
-            "json",
-            file_path,
-        ]
-        result = await run_ffmpeg_async(
-            cmd,
-            context={
-                "phase": "Probe",
-                "operation": "media_info",
-                "caller": resolved_caller,
-                "path": file_path,
-            },
-        )
-        info = json.loads(result.stdout)
+        existing = _media_info_inflight.get(key)
+        if existing is not None:
+            return await existing
 
-        media_info: MediaInfo = {"video": None, "audio": None}
-        for s in info.get("streams", []):
-            if s.get("codec_type") == "video" and media_info["video"] is None:
-                r_rate = s.get("r_frame_rate", "0/0")
-                try:
-                    num, den = map(int, r_rate.split("/"))
-                    fps = float(num) / float(den) if den else 0.0
-                except Exception:
-                    fps = 0.0
-                media_info["video"] = {
-                    "codec_name": s.get("codec_name"),
-                    "width": int(s.get("width", 0)),
-                    "height": int(s.get("height", 0)),
-                    "pix_fmt": s.get("pix_fmt"),
-                    "r_frame_rate": r_rate,
-                    "fps": fps,
-                }
-            elif s.get("codec_type") == "audio" and media_info["audio"] is None:
-                media_info["audio"] = {
-                    "codec_name": s.get("codec_name"),
-                    "sample_rate": int(s.get("sample_rate", 0)) if s.get("sample_rate") else 0,
-                    "channels": int(s.get("channels", 0)) if s.get("channels") else 0,
-                    "channel_layout": s.get("channel_layout"),
-                }
-        _media_info_memo[key] = media_info
-        return media_info
+        async def _probe() -> MediaInfo:
+            cmd = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_streams",
+                "-of",
+                "json",
+                file_path,
+            ]
+            result = await run_ffmpeg_async(
+                cmd,
+                context={
+                    "phase": "Probe",
+                    "operation": "media_info",
+                    "caller": resolved_caller,
+                    "path": file_path,
+                },
+            )
+            info = json.loads(result.stdout)
+
+            media_info: MediaInfo = {"video": None, "audio": None}
+            for s in info.get("streams", []):
+                if s.get("codec_type") == "video" and media_info["video"] is None:
+                    r_rate = s.get("r_frame_rate", "0/0")
+                    try:
+                        num, den = map(int, r_rate.split("/"))
+                        fps = float(num) / float(den) if den else 0.0
+                    except Exception:
+                        fps = 0.0
+                    media_info["video"] = {
+                        "codec_name": s.get("codec_name"),
+                        "width": int(s.get("width", 0)),
+                        "height": int(s.get("height", 0)),
+                        "pix_fmt": s.get("pix_fmt"),
+                        "r_frame_rate": r_rate,
+                        "fps": fps,
+                    }
+                elif s.get("codec_type") == "audio" and media_info["audio"] is None:
+                    media_info["audio"] = {
+                        "codec_name": s.get("codec_name"),
+                        "sample_rate": int(s.get("sample_rate", 0)) if s.get("sample_rate") else 0,
+                        "channels": int(s.get("channels", 0)) if s.get("channels") else 0,
+                        "channel_layout": s.get("channel_layout"),
+                    }
+            _media_info_memo[key] = media_info
+            return media_info
+
+        task = asyncio.create_task(_probe())
+        _media_info_inflight[key] = task
+        try:
+            return await task
+        finally:
+            if _media_info_inflight.get(key) is task:
+                _media_info_inflight.pop(key, None)
     except subprocess.CalledProcessError as e:
         logger.error(f"Error running ffprobe for {file_path}: {e.stderr}")
         raise

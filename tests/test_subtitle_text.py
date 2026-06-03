@@ -10,6 +10,9 @@ from zundamotion.timeline import Timeline
 from zundamotion.utils.subtitle_text import (
     is_effective_subtitle_text,
     normalize_subtitle_text,
+    subtitle_char_display_width,
+    subtitle_display_width,
+    wrap_subtitle_text_by_display_width,
 )
 
 
@@ -42,3 +45,30 @@ def test_timeline_save_subtitles_preserves_newlines_for_srt(tmp_path):
     # Normalize Windows-style newline variations before assertion
     normalized = re.sub(r"\r\n?", "\n", content)
     assert "一行\n二行" in normalized
+
+
+def test_subtitle_char_display_width_counts_fullwidth_and_halfwidth():
+    assert subtitle_char_display_width("あ") == 1.0
+    assert subtitle_char_display_width("A") == 0.5
+    assert subtitle_char_display_width(" ") == 0.5
+    assert subtitle_char_display_width("　") == 1.0
+    assert subtitle_char_display_width("\n") == 0.0
+
+
+def test_subtitle_display_width_counts_ascii_as_halfwidth():
+    assert subtitle_display_width("これは字幕テストです") == 10.0
+    assert subtitle_display_width("GitHubActions") == 6.5
+    assert subtitle_display_width("GitHubでCIを確認") == 8.0
+    assert subtitle_display_width("npm install zundamotion") == 11.5
+
+
+def test_wrap_subtitle_text_by_display_width_preserves_explicit_newlines():
+    wrapped = wrap_subtitle_text_by_display_width("GitHub Actions\n失敗しました", 6)
+
+    assert wrapped == "GitHub Actio\nns\n失敗しました"
+
+
+def test_wrap_subtitle_text_by_display_width_handles_mixed_ascii_naturally():
+    wrapped = wrap_subtitle_text_by_display_width("GitHubActionsでCIを確認します", 10)
+
+    assert wrapped == "GitHubActionsでCIを\n確認します"

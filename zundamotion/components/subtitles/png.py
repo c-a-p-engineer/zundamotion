@@ -14,6 +14,7 @@ from PIL import Image, ImageColor, ImageDraw, ImageFont
 
 from ...cache import CacheManager
 from ...utils import perf_stats
+from ...utils.subtitle_text import wrap_subtitle_text_by_display_width
 
 logger = logging.getLogger(__name__)
 
@@ -663,19 +664,7 @@ class SubtitlePNGRenderer:
         """
         Wrap text by a fixed number of characters per line.
         """
-        if not max_chars or max_chars <= 0:
-            return text
-        lines = []
-        for paragraph in text.replace("\\n", "\n").split("\n"):
-            if not paragraph:
-                lines.append("")
-                continue
-            cur = paragraph
-            while len(cur) > max_chars:
-                lines.append(cur[:max_chars])
-                cur = cur[max_chars:]
-            lines.append(cur)
-        return "\n".join(lines)
+        return wrap_subtitle_text_by_display_width(text, max_chars)
 
         # static counterparts for use inside ProcessPoolExecutor
     @staticmethod
@@ -706,19 +695,7 @@ class SubtitlePNGRenderer:
 
     @staticmethod
     def _wrap_text_by_chars_static(text: str, max_chars: int) -> str:
-        if not max_chars or max_chars <= 0:
-            return text
-        lines = []
-        for paragraph in text.replace("\\n", "\n").split("\n"):
-            if not paragraph:
-                lines.append("")
-                continue
-            cur = paragraph
-            while len(cur) > max_chars:
-                lines.append(cur[:max_chars])
-                cur = cur[max_chars:]
-            lines.append(cur)
-        return "\n".join(lines)
+        return wrap_subtitle_text_by_display_width(text, max_chars)
 
 
 # NOTE:
@@ -782,20 +759,18 @@ def _render_subtitle_png(
     if wrap_mode == "chars" or (max_chars is not None and wrap_mode != "pixel"):
         if auto_char_wrap:
             max_chars_i = _estimate_auto_max_chars(text_, font, max_width_i)
-            wrapped_text = SubtitlePNGRenderer._wrap_text_by_chars_static(text_, max_chars_i)
+            wrapped_text = wrap_subtitle_text_by_display_width(text_, max_chars_i)
             while max_chars_i > 4 and not _fits_within_width(
                 wrapped_text, font, max_width_i
             ):
                 max_chars_i -= 1
-                wrapped_text = SubtitlePNGRenderer._wrap_text_by_chars_static(
-                    text_, max_chars_i
-                )
+                wrapped_text = wrap_subtitle_text_by_display_width(text_, max_chars_i)
         else:
             try:
                 max_chars_i = int(max_chars) if max_chars is not None else 0
             except (TypeError, ValueError):
                 max_chars_i = 0
-            wrapped_text = SubtitlePNGRenderer._wrap_text_by_chars_static(text_, max_chars_i)
+            wrapped_text = wrap_subtitle_text_by_display_width(text_, max_chars_i)
     else:
         wrapped_text = SubtitlePNGRenderer._wrap_text_by_pixel_static(text_, font, max_width_i)
     lines = wrapped_text.split("\n")

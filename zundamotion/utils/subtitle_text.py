@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Optional
 
 _BR_TAG_PATTERN = re.compile(r"<br\s*/?>", re.IGNORECASE)
@@ -55,3 +56,61 @@ def is_effective_subtitle_text(text: Optional[str]) -> bool:
             return False
 
     return True
+
+
+def subtitle_char_display_width(ch: str) -> float:
+    """Return the approximate subtitle display width for a single character."""
+
+    if not ch or ch == "\n":
+        return 0.0
+
+    if ord(ch) < 128:
+        return 0.5
+
+    east_asian_width = unicodedata.east_asian_width(ch)
+    if east_asian_width in {"F", "W"}:
+        return 1.0
+    if east_asian_width in {"H", "Na"}:
+        return 0.5
+    return 1.0
+
+
+def subtitle_display_width(text: str | None) -> float:
+    """Return the approximate subtitle display width for a string."""
+
+    if text is None:
+        return 0.0
+    return sum(subtitle_char_display_width(ch) for ch in str(text) if ch != "\n")
+
+
+def wrap_subtitle_text_by_display_width(text: str | None, max_width: float) -> str:
+    """Wrap subtitle text by approximate display width while preserving explicit newlines."""
+
+    if text is None:
+        return ""
+
+    value = str(text).replace("\\n", "\n")
+    if max_width <= 0:
+        return value
+
+    lines: list[str] = []
+    for paragraph in value.split("\n"):
+        if not paragraph:
+            lines.append("")
+            continue
+
+        current_line_chars: list[str] = []
+        current_width = 0.0
+        for ch in paragraph:
+            ch_width = subtitle_char_display_width(ch)
+            if current_line_chars and current_width + ch_width > max_width:
+                lines.append("".join(current_line_chars))
+                current_line_chars = [ch]
+                current_width = ch_width
+                continue
+            current_line_chars.append(ch)
+            current_width += ch_width
+
+        lines.append("".join(current_line_chars))
+
+    return "\n".join(lines)

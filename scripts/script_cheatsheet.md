@@ -189,6 +189,7 @@ subtitle:
 ```
 
 - ルート `subtitle` でフォントパスや文字数制御など全体の既定値をまとめます。例: [`sample.yaml`](./sample.yaml)。
+- `subtitle.max_chars_per_line` は字幕折り返しの最大表示幅として扱います。全角は `1.0`、ASCII 英数字や半角記号や半角スペースは `0.5` 相当で数えます。
 - `max_chars_per_line: auto` を使うと、実際のフォント幅と `max_pixel_width` から字幕ごとに折り返し文字数を推定します。空白のない日本語字幕向けです。
 - `subtitle.background.show: false` で字幕ボックスを非表示にできます。`color` と `opacity` で色と透過率を調整します。
 - `subtitle.render_mode` で動画への字幕焼き込み方式を指定できます。既定は `png` です。

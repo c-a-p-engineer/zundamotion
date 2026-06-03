@@ -12,7 +12,7 @@ from ...cache import CacheManager
 from ...utils.ffmpeg_capabilities import has_cuda_filters, is_nvenc_available
 from ...utils.ffmpeg_hw import get_hw_filter_mode
 from ...utils.logger import logger
-from ...utils.subtitle_text import normalize_subtitle_text
+from ...utils.subtitle_text import normalize_subtitle_text, wrap_subtitle_text_by_display_width
 from .effects import resolve_subtitle_effects
 from .png import (
     SubtitlePNGRenderer,
@@ -79,20 +79,18 @@ class SubtitleGenerator:
         if wrap_mode == "chars" or (max_chars is not None and wrap_mode != "pixel"):
             if auto_char_wrap:
                 max_chars_i = _estimate_auto_max_chars(text, font, max_width)
-                wrapped_text = SubtitlePNGRenderer._wrap_text_by_chars_static(text, max_chars_i)
+                wrapped_text = wrap_subtitle_text_by_display_width(text, max_chars_i)
                 while max_chars_i > 4 and not _fits_within_width(
                     wrapped_text, font, max_width
                 ):
                     max_chars_i -= 1
-                    wrapped_text = SubtitlePNGRenderer._wrap_text_by_chars_static(
-                        text, max_chars_i
-                    )
+                    wrapped_text = wrap_subtitle_text_by_display_width(text, max_chars_i)
             else:
                 try:
                     max_chars_i = int(max_chars) if max_chars is not None else 0
                 except Exception:
                     max_chars_i = 0
-                wrapped_text = SubtitlePNGRenderer._wrap_text_by_chars_static(text, max_chars_i)
+                wrapped_text = wrap_subtitle_text_by_display_width(text, max_chars_i)
         else:
             wrapped_text = SubtitlePNGRenderer._wrap_text_by_pixel_static(text, font, max_width)
 
