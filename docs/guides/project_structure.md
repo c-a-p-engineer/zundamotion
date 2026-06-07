@@ -6,6 +6,8 @@
 
 - [docs 入口](../README.md)
 - [README](../../README.md)
+- [AI 向け低トークン規約](./ai_coding_rules.md)
+- [Python コード規約](./python_coding_rules.md)
 - [セットアップと実行](./setup_and_runtime.md)
 - [台本チートシート](../../scripts/script_cheatsheet.md)
 
