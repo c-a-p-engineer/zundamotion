@@ -33,6 +33,13 @@ subtitle:
   wrap_mode: chars
   max_chars_per_line: 28
   reading_display: paren
+system:
+  timeline:
+    enabled: true
+    format: md
+  subtitle_file:
+    enabled: true
+    format: srt
 scenes:
 - id: subtitle_copetan
   bg: assets/bg/room.png
@@ -79,6 +86,7 @@ scenes:
       start: 0.0
       duration: 5.0
   items:
+  - topic: 字幕とキャラクターデフォルト
   - say:
       text: こんにちは！こぴぺたんです。この字幕はキャラクターデフォルト色なのだ。
       speaker_name: copetan
@@ -120,6 +128,7 @@ scenes:
 - id: voice_copetan
   bg: assets/bg/room.png
   items:
+  - topic: 音声と前景オーバーレイ
   - say:
       text: こんにちは！こぴぺたんです。これは桜の前景とデフォルト設定で話しているのだ。
       speaker_name: copetan
@@ -189,6 +198,7 @@ scenes:
     type: fade
     duration: 1.0
   items:
+  - topic: 背景動画イントロ
   - bgm:
       id: intro
       action: start
@@ -244,6 +254,7 @@ scenes:
 - id: topic
   bg: assets/bg/street.png
   items:
+  - topic: エンジー紹介
   - bgm:
       id: street
       action: start
@@ -288,6 +299,7 @@ scenes:
     type: dissolve
     duration: 0.8
   items:
+  - topic: 読み表示デモ
   - say:
       speaker_name: copetan
       text: それ[本気|ホンキ]？[本気|マジ]？ 本気{マジ}でいく？
@@ -316,6 +328,7 @@ scenes:
 - id: outro
   bg: assets/bg/sunset.png
   items:
+  - topic: アウトロ
   - bgm:
       id: sunset
       action: start

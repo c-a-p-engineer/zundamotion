@@ -18,6 +18,8 @@ AI / Codex 向けの常時ルールはリポジトリ直下の `AGENTS.md`、低
 - [`guides/setup_and_runtime.md`](./guides/setup_and_runtime.md): セットアップ、CLI 実行、ログ形式、GPU/NVENC 確認
 - [`guides/project_structure.md`](./guides/project_structure.md): 技術スタックとリポジトリ構成
 - [`guides/python_coding_rules.md`](./guides/python_coding_rules.md): Python コード規約と AI 向け分割基準
+- [`guides/source_refactoring_plan.md`](./guides/source_refactoring_plan.md): 既存 Python ソースを段階的に分割する計画
+- [`guides/refactoring_check.md`](./guides/refactoring_check.md): リファクタリング後のテスト、台本ロード、動画生成確認
 - [`guides/performance_tuning.md`](./guides/performance_tuning.md): 高速化オプションと上級者向け運用メモ
 - [`guides/submodule.md`](./guides/submodule.md): 利用側プロジェクトへ git submodule として取り込む手順
 - [`guides/song_mode_rejected.md`](./guides/song_mode_rejected.md): 歌唱機能 (`song`) の検証結果と不採用判断の記録

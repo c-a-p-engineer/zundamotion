@@ -1,0 +1,74 @@
+meta:
+  title: "リファクタリング後の設定検証チェック"
+  version: 1
+
+video:
+  width: 1280
+  height: 720
+  fps: 30
+  background_fit: cover
+
+defaults:
+  speed: 1.0
+  pause: 0.1
+
+transitions:
+  wait_padding_seconds: 0.2
+
+scenes:
+  - id: validation_features
+    bg: assets/bg/room.png
+    badge:
+      text: "CHECK"
+      position: top-right
+      font_color: "#FFFFFF"
+      background:
+        color: "#1D4ED8"
+        opacity: 0.8
+        radius: 16
+      timing:
+        start: 0.0
+        end: 2.5
+    fg_overlays:
+      - id: warning
+        src: assets/overlay/warning.png
+        mode: overlay
+        opacity: 0.35
+        position: {x: 420, y: 40}
+        scale: {w: 440, keep_aspect: true}
+        timing: {start: 0.2, duration: 1.5}
+    lines:
+      - text: "設定検証の分割後チェックを開始します。"
+        speaker_name: copetan
+        image_layers:
+          - show:
+              id: street_thumb
+              path: assets/bg/street.png
+              scale: 0.28
+              anchor: bottom_right
+              position: {x: -24, y: -24}
+              transition:
+                in: {type: fade, duration: 0.3}
+                out: {type: fade, duration: 0.3}
+      - wait: 0.5
+      - text: "画像レイヤーを非表示にして次のシーンへ進みます。"
+        speaker_name: copetan
+        image_layers:
+          - hide:
+              id: street_thumb
+              transition:
+                out: {type: fade, duration: 0.3}
+    transition:
+      type: dissolve
+      duration: 0.3
+
+  - id: validation_background
+    background:
+      path: assets/bg/sunset.png
+      fit: contain
+      fill_color: "#111827"
+      anchor: middle_center
+    lines:
+      - text: "背景設定とシーン遷移を確認して終了します。"
+        speaker_name: copetan
+      - wait: 0.5

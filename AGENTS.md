@@ -31,6 +31,8 @@
   - `docs/design/ffmpeg_filter_mapping.md`
 - pipeline や設計分割を触るとき
   - `docs/guides/project_structure.md`
+  - `docs/guides/source_refactoring_plan.md`
+  - `docs/guides/refactoring_check.md`
   - `docs/design/parser_and_builder.md`
   - 必要に応じて `docs/design/` の関連資料
 - 立ち絵や素材前提を触るとき

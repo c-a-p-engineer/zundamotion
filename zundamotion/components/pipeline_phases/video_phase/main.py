@@ -540,4 +540,12 @@ class VideoPhase:
         except Exception:
             pass
 
+        try:
+            timeline.resync_with_scene_durations(scenes, line_data_map)
+        except Exception as exc:
+            logger.warning(
+                "VideoPhase: failed to resync timeline with rendered durations: %s",
+                exc,
+            )
+
         return all_clips

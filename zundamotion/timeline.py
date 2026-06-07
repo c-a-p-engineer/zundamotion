@@ -91,6 +91,29 @@ class Timeline:
         return list(self.topics)
 
     @staticmethod
+    def _derive_scene_items(scene: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """AudioPhase と同じ規則で scene から処理順の items を取り出す。"""
+        items = scene.get("items")
+        if isinstance(items, list):
+            return items
+
+        lines = scene.get("lines")
+        if not isinstance(lines, list):
+            return []
+
+        derived_items: List[Dict[str, Any]] = []
+        for line in lines:
+            if not isinstance(line, dict):
+                continue
+            if "wait" in line:
+                derived_items.append({"wait": line})
+            elif "text" in line or line.get("image_layers") is None:
+                derived_items.append({"say": line})
+            else:
+                derived_items.append({"image_layers": line})
+        return derived_items
+
+    @staticmethod
     def format_chapter_timestamp(seconds: float) -> str:
         """YouTubeチャプター向けの時刻表現に変換する。"""
         total = max(0, int(seconds))
@@ -106,6 +129,86 @@ class Timeline:
             for topic in self.topics:
                 stamp = self.format_chapter_timestamp(topic["time"])
                 f.write(f"{stamp} {topic['title']}\n")
+
+    def resync_with_scene_durations(
+        self,
+        scenes: List[Dict[str, Any]],
+        line_data_map: Dict[str, Dict[str, Any]],
+    ) -> None:
+        """最終レンダー尺に合わせてイベント、トピック、BGM時刻を再同期する。"""
+        timed_events = [
+            event for event in self.events if event.get("type") != "scene_change"
+        ]
+        scene_change_events = {
+            str(event.get("scene_id")): event
+            for event in self.events
+            if event.get("type") == "scene_change" and event.get("scene_id") is not None
+        }
+        event_idx = 0
+        bgm_idx = 0
+        topic_idx = 0
+        cursor = 0.0
+
+        for scene in scenes:
+            scene_id = str(scene.get("id", ""))
+            scene_change = scene_change_events.get(scene_id)
+            if scene_change is not None:
+                scene_change["start_time"] = cursor
+
+            line_idx = 0
+            for item in self._derive_scene_items(scene):
+                if not isinstance(item, dict):
+                    continue
+
+                if "bgm" in item:
+                    if bgm_idx < len(self.bgm_events):
+                        self.bgm_events[bgm_idx]["time"] = cursor
+                    bgm_idx += 1
+                    continue
+
+                if "topic" in item:
+                    if topic_idx < len(self.topics):
+                        self.topics[topic_idx]["time"] = cursor
+                    topic_idx += 1
+                    continue
+
+                if "say" in item:
+                    line = item.get("say")
+                    if not isinstance(line, dict):
+                        line = {"text": str(line or "")}
+                elif "wait" in item:
+                    line = item.get("wait")
+                    if isinstance(line, dict) and "wait" in line:
+                        line = line
+                    else:
+                        line = {"wait": line}
+                elif "image_layers" in item:
+                    line = item.get("image_layers")
+                    if not isinstance(line, dict):
+                        line = {"image_layers": line}
+                else:
+                    continue
+
+                line_idx += 1
+                line_id = f"{scene_id}_{line_idx}"
+                line_data = line_data_map.get(line_id)
+                if line_data is None or event_idx >= len(timed_events):
+                    continue
+
+                duration = float(line_data.get("duration", 0.0) or 0.0)
+                pre_duration = float(line_data.get("pre_duration", 0.0) or 0.0)
+                post_duration = float(line_data.get("post_duration", 0.0) or 0.0)
+                timed_events[event_idx]["start_time"] = cursor
+                timed_events[event_idx]["duration"] = duration
+                timed_events[event_idx]["subtitle_start_time"] = cursor + pre_duration
+                timed_events[event_idx]["subtitle_end_time"] = max(
+                    cursor + pre_duration,
+                    cursor + duration - post_duration,
+                )
+                cursor += duration
+                event_idx += 1
+
+        self.current_time = cursor
 
     def insert_gap(
         self,
@@ -222,10 +325,19 @@ class Timeline:
             text = event.get("text")
             if not is_effective_subtitle_text(text):
                 continue
-            start_time = max(0, int(event["start_time"] * 1000) + offset_ms)
+            subtitle_start = float(
+                event.get("subtitle_start_time", event["start_time"])
+            )
+            subtitle_end = float(
+                event.get(
+                    "subtitle_end_time",
+                    float(event["start_time"]) + float(event["duration"]),
+                )
+            )
+            start_time = max(0, int(subtitle_start * 1000) + offset_ms)
             end_time = max(
                 start_time + 1,
-                int((event["start_time"] + event["duration"]) * 1000) + offset_ms,
+                int(subtitle_end * 1000) + offset_ms,
             )
             payload = normalize_subtitle_text(str(text))
             if target_format == "ass":
