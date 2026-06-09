@@ -123,8 +123,10 @@ async def apply_face_overlays(
                     "enter_effect": enter_effect,
                     "enter_duration": f"{enter_duration:.3f}",
                     "expression": str(character.get("expression", "default")),
+                    "asset_name": str(character.get("asset_name", target_name)),
                     "flip_x": is_horizontal_flip_enabled(character),
                     "flip_y": is_vertical_flip_enabled(character),
+                    "color_filter": character.get("color_filter"),
                     "dynamic_position": False,
                 }
                 break
@@ -155,7 +157,8 @@ async def apply_face_overlays(
     x_pos = placement.get("x_expr") if use_dynamic else x_fix
     y_pos = placement.get("y_expr") if use_dynamic else y_fix
 
-    base_dir = Path(f"assets/characters/{target_name}")
+    asset_name = str(placement.get("asset_name") or target_name)
+    base_dir = Path(f"assets/characters/{asset_name}")
     expression = str(placement.get("expression") or "default")
     flip_x_value = placement.get("flip_x", False)
     if isinstance(flip_x_value, str):
@@ -167,6 +170,7 @@ async def apply_face_overlays(
         flip_y = flip_y_value.lower() in {"1", "true", "yes", "on"}
     else:
         flip_y = bool(flip_y_value)
+    color_filter = placement.get("color_filter")
     mouth_close = _resolve_face_asset(base_dir, expression, "mouth", "close.png")
     mouth_half = _resolve_face_asset(base_dir, expression, "mouth", "half.png")
     mouth_open = _resolve_face_asset(base_dir, expression, "mouth", "open.png")
@@ -204,6 +208,10 @@ async def apply_face_overlays(
 
     async def _add_preprocessed_overlay(path: Path, scale_value: float) -> Optional[int]:
         try:
+            if color_filter is not None:
+                path = await renderer.image_color_filter_cache.filter_image(
+                    path, color_filter
+                )
             if os.environ.get("FACE_CACHE_DISABLE", "0") == "1":
                 idx = _add_image_input(path)
                 if idx is not None:

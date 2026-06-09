@@ -111,3 +111,48 @@ def test_validate_config_preserves_sound_effect_type_error(tmp_path: Path):
 
     with pytest.raises(ValidationError, match="must be a number, but got str"):
         validate_config(config)
+
+
+@pytest.mark.parametrize(
+    ("color_filter", "message"),
+    [
+        ({"hue": -1}, "hue.*between 0 and 360"),
+        ({"hue": 361}, "hue.*between 0 and 360"),
+        ({"saturation": -0.1}, "saturation.*0 or greater"),
+        ({"brightness": -0.1}, "brightness.*0 or greater"),
+        ({"hue": "blue"}, "hue.*must be a number"),
+    ],
+)
+def test_validate_config_rejects_invalid_character_color_filter(
+    color_filter: dict, message: str
+) -> None:
+    config = _config_with_line(
+        {
+            "text": "hello",
+            "characters": [
+                {"name": "hero", "visible": True, "color_filter": color_filter}
+            ],
+        }
+    )
+
+    with pytest.raises(ValidationError, match=message):
+        validate_config(config)
+
+
+def test_validate_config_accepts_character_color_filter_in_defaults() -> None:
+    validate_config(
+        {
+            "defaults": {
+                "characters": {
+                    "hero": {
+                        "color_filter": {
+                            "hue": 210,
+                            "saturation": 1.2,
+                            "brightness": 0.9,
+                        }
+                    }
+                }
+            },
+            "script": {"scenes": []},
+        }
+    )

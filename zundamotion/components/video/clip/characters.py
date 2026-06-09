@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ...utils.logger import logger
+from ..character_image_resolver import CharacterImageResolver
 from .effects import resolve_character_effects
 
 
@@ -94,34 +95,29 @@ async def collect_character_inputs(
     any_character_visible = False
     metadata: Dict[int, Dict[str, Any]] = {}
 
-    def _resolve_char_base_image(name: str, expr: str) -> Optional[Path]:
-        base_dir = Path(f"assets/characters/{name}")
-        candidates = [
-            base_dir / expr / "base.png",
-            base_dir / f"{expr}.png",
-            base_dir / "default" / "base.png",
-            base_dir / "default.png",
-        ]
-        for candidate in candidates:
-            try:
-                if candidate.exists():
-                    return candidate
-            except Exception:
-                continue
-        return None
-
     for i, char_config in enumerate(characters_config):
         if not char_config.get("visible", False):
             continue
 
         any_character_visible = True
         char_name = char_config.get("name")
+        asset_name = char_config.get("asset_name", char_name)
         char_expression = char_config.get("expression", "default")
         if not char_name:
             logger.warning("Skipping character with missing name.")
             continue
 
-        char_image_path = _resolve_char_base_image(str(char_name), str(char_expression))
+        color_filter = char_config.get("color_filter")
+        if color_filter is None:
+            char_image_path = CharacterImageResolver.resolve_base_image(
+                str(asset_name), str(char_expression)
+            )
+        else:
+            char_image_path = await renderer.character_image_resolver.resolve_image(
+                str(asset_name),
+                str(char_expression),
+                color_filter,
+            )
         if not char_image_path:
             logger.warning(
                 "Character image not found for %s/%s (and default). Skipping.",
@@ -175,6 +171,7 @@ async def collect_character_inputs(
         char_effective_scale[i] = float(effective_scale)
         metadata[i] = {
             "name": str(char_name),
+            "asset_name": str(asset_name),
             "expression": str(char_expression),
             "image_path": char_image_path,
             "preprocessed_flip_x": preprocessed_flip_x,
@@ -496,8 +493,10 @@ def _build_face_placement(
             "x_num": str(int(round(x_num))),
             "y_num": str(int(round(y_num))),
             "expression": str(char_config.get("expression", char_data.get("expression", "default"))),
+            "asset_name": str(char_config.get("asset_name", char_data.get("asset_name", name))),
             "flip_x": is_horizontal_flip_enabled(char_config),
             "flip_y": is_vertical_flip_enabled(char_config),
+            "color_filter": char_config.get("color_filter"),
             "dynamic_position": dynamic_position,
         }
 

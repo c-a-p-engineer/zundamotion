@@ -24,6 +24,8 @@ from ...utils.ffmpeg_capabilities import (
 from ..subtitles import SubtitleGenerator
 from .clip_renderer import render_clip as render_clip_task
 from .badge_overlay_cache import BadgeOverlayCache
+from .character_image_resolver import CharacterImageResolver
+from .image_color_filter_cache import ImageColorFilterCache
 from .scene_renderer import (
     render_scene_base as render_scene_base_task,
     render_scene_base_composited as render_scene_base_composited_task,
@@ -85,6 +87,8 @@ class VideoRenderer(OverlayMixin):
         # Subtitle generator (used to build overlay snippet and PNG input)
         self.subtitle_gen = SubtitleGenerator(self.config, self.cache_manager)
         self.badge_cache = BadgeOverlayCache(self.cache_manager)
+        self.image_color_filter_cache = ImageColorFilterCache(self.cache_manager)
+        self.character_image_resolver = CharacterImageResolver(self.image_color_filter_cache)
         # Face overlay preprocessor/cache
         self.face_cache = FaceOverlayCache(self.cache_manager)
         # Path usage counters for diagnostics

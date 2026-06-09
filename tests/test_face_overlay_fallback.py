@@ -21,6 +21,15 @@ class _StubRenderer:
         self.face_cache = _StubFaceCache()
 
 
+class _RecordingColorFilterCache:
+    def __init__(self) -> None:
+        self.paths: list[Path] = []
+
+    async def filter_image(self, path: Path, _color_filter: dict) -> Path:
+        self.paths.append(path)
+        return path
+
+
 def test_apply_face_overlays_uses_line_character_fallback_when_char_is_baked_into_base(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -74,6 +83,58 @@ def test_apply_face_overlays_uses_line_character_fallback_when_char_is_baked_int
         assert len(overlay_streams) == 2
         assert any("enable='between(t,0.400,0.450)'" in item for item in overlay_filters)
         assert any("enable='between(t,0.100,0.400)'" in item for item in overlay_filters)
+
+    asyncio.run(_run())
+
+
+def test_apply_face_overlays_filters_mouth_and_eye_parts(
+    monkeypatch, tmp_path: Path
+) -> None:
+    async def _run() -> None:
+        character_root = tmp_path / "assets" / "characters" / "hero" / "default"
+        mouth_dir = character_root / "mouth"
+        eyes_dir = character_root / "eyes"
+        mouth_dir.mkdir(parents=True)
+        eyes_dir.mkdir(parents=True)
+        (mouth_dir / "half.png").write_bytes(b"half")
+        (eyes_dir / "close.png").write_bytes(b"close")
+        monkeypatch.chdir(tmp_path)
+
+        renderer = _StubRenderer()
+        renderer.image_color_filter_cache = _RecordingColorFilterCache()
+        await apply_face_overlays(
+            renderer=renderer,
+            face_anim={
+                "target_name": "hero",
+                "mouth": [{"start": 0.0, "end": 0.3, "state": "half"}],
+                "eyes": [{"start": 0.4, "end": 0.45, "state": "close"}],
+            },
+            subtitle_line_config={
+                "characters": [
+                    {
+                        "name": "hero",
+                        "visible": True,
+                        "color_filter": {
+                            "hue": 210,
+                            "saturation": 1.2,
+                            "brightness": 1.0,
+                        },
+                    }
+                ]
+            },
+            char_overlay_placement={},
+            duration=1.0,
+            cmd=[],
+            input_layers=[],
+            filter_complex_parts=[],
+            overlay_streams=[],
+            overlay_filters=[],
+        )
+
+        assert {path.name for path in renderer.image_color_filter_cache.paths} == {
+            "half.png",
+            "close.png",
+        }
 
     asyncio.run(_run())
 

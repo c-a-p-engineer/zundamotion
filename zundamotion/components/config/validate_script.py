@@ -13,6 +13,7 @@ from .validate_badges import (
 )
 from .validate_layers import _validate_image_layers
 from .validate_overlays import _validate_fg_overlays
+from .validate_common import validate_character_color_filter
 
 
 def _line_from_item(scene_id: str, item: Dict[str, Any], idx: int) -> Dict[str, Any] | None:
@@ -162,6 +163,26 @@ def _validate_line_features(line: Dict[str, Any], scene_id: str, line_idx: int) 
     _validate_badge(line, container_id)
     _validate_line_badges(line.get("badges"), container_id)
     _validate_image_layers(line, container_id)
+    characters = line.get("characters")
+    if characters is not None:
+        if not isinstance(characters, list):
+            raise ValidationError(f"Characters for {container_id} must be a list.")
+        for char_idx, character in enumerate(characters):
+            if not isinstance(character, dict):
+                raise ValidationError(
+                    f"Character at {container_id}, index {char_idx} must be a dictionary."
+                )
+            asset_name = character.get("asset_name")
+            if asset_name is not None and (
+                not isinstance(asset_name, str) or not asset_name.strip()
+            ):
+                raise ValidationError(
+                    f"Character asset_name at {container_id}, index {char_idx} must be a non-empty string."
+                )
+            validate_character_color_filter(
+                character.get("color_filter"),
+                f"{container_id}, characters[{char_idx}].color_filter",
+            )
     reset_flag = line.get("reset_characters")
     if reset_flag is not None and not isinstance(reset_flag, bool):
         raise ValidationError(

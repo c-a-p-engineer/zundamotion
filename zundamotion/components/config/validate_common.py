@@ -1,8 +1,9 @@
 """Shared constants and value checks for configuration validation."""
 
 import re
+from typing import Any
 
-
+from ...exceptions import ValidationError
 
 BACKGROUND_FIT_CHOICES = {
     "stretch",
@@ -56,3 +57,27 @@ def is_valid_color_string(value: str) -> bool:
     if value.isalpha():
         return True
     return False
+
+
+def validate_character_color_filter(color_filter: Any, label: str) -> None:
+    """Validate a character color_filter mapping."""
+    if color_filter is None:
+        return
+    if not isinstance(color_filter, dict):
+        raise ValidationError(f"'{label}' must be a dictionary.")
+    for key, minimum, maximum in (
+        ("hue", 0.0, 360.0),
+        ("saturation", 0.0, None),
+        ("brightness", 0.0, None),
+    ):
+        value = color_filter.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValidationError(f"'{label}.{key}' must be a number.")
+        if value < minimum or (maximum is not None and value > maximum):
+            if maximum is None:
+                raise ValidationError(f"'{label}.{key}' must be 0 or greater.")
+            raise ValidationError(
+                f"'{label}.{key}' must be between {minimum:g} and {maximum:g}."
+            )

@@ -23,6 +23,7 @@ from .validate_common import (
     IMAGE_LAYER_TRANSITION_TYPES,
     RGB_COLOR_RE,
     is_valid_color_string as _is_valid_color_string,
+    validate_character_color_filter,
 )
 from .validate_layers import _validate_image_layer_transition, _validate_image_layers
 from .validate_overlays import _validate_fg_overlays
@@ -116,6 +117,26 @@ def _validate_defaults(config: Dict[str, Any]) -> None:
         value = defaults.get(key)
         if value is not None and not isinstance(value, bool):
             raise ValidationError(f"'defaults.{key}' must be a boolean.")
+    characters = defaults.get("characters")
+    if characters is not None:
+        if not isinstance(characters, dict):
+            raise ValidationError("'defaults.characters' must be a dictionary.")
+        for name, character in characters.items():
+            if not isinstance(character, dict):
+                raise ValidationError(
+                    f"'defaults.characters.{name}' must be a dictionary."
+                )
+            asset_name = character.get("asset_name")
+            if asset_name is not None and (
+                not isinstance(asset_name, str) or not asset_name.strip()
+            ):
+                raise ValidationError(
+                    f"'defaults.characters.{name}.asset_name' must be a non-empty string."
+                )
+            validate_character_color_filter(
+                character.get("color_filter"),
+                f"defaults.characters.{name}.color_filter",
+            )
 
 
 def _validate_transitions(config: Dict[str, Any]) -> None:

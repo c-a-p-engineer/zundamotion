@@ -273,9 +273,10 @@ class SceneRenderer:
                 except Exception:
                     scale = 1.0
                 expression = str(char_cfg.get("expression", "default"))
+                asset_name = str(char_cfg.get("asset_name") or target_name)
                 flip_x = is_horizontal_flip_enabled(char_cfg)
                 flip_y = is_vertical_flip_enabled(char_cfg)
-                base_dir = Path(f"assets/characters/{target_name}")
+                base_dir = Path(f"assets/characters/{asset_name}")
 
                 candidates: List[Path] = []
                 eyes_segments = face_anim.get("eyes") or []
@@ -605,6 +606,8 @@ class SceneRenderer:
         if len(visible) != 1:
             return None, "multiple_visible_characters"
         char = dict(visible[0])
+        if char.get("color_filter") is not None:
+            return None, "color_filter_requires_standard_renderer"
         name = char.get("name")
         if not name:
             return None, "missing_character_name"

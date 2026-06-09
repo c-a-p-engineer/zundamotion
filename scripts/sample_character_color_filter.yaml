@@ -1,0 +1,40 @@
+meta:
+  title: "キャラクター色替えフィルターサンプル"
+  version: 1
+
+video:
+  fps: 30
+
+defaults:
+  characters_persist: false
+  characters:
+    copetan:
+      speaker_id: 3
+      scale: 0.86
+      anchor: bottom_center
+      subtitle:
+        font_color: "#90EE90"
+        stroke_color: "#003300"
+
+scenes:
+  - id: character_color_filter_showcase
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "これは元画像の色なのだ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            visible: true
+            expression: "default"
+            position: {x: -420, y: -36}
+      - text: "同じ画像に色相、彩度、明度を指定すると色違いにできるのだ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            visible: true
+            expression: "default"
+            position: {x: 420, y: -36}
+            color_filter:
+              hue: 210
+              saturation: 1.2
+              brightness: 1.0
