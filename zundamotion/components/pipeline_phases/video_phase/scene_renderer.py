@@ -1308,15 +1308,24 @@ class SceneRenderer:
             from .character_tracker import CharacterTracker
 
             tracker = CharacterTracker(self.video_params.width, self.video_params.height)
-            for line in scene.get("lines", []):
+            for idx, line in enumerate(scene.get("lines", []), start=1):
                 if line.get("reset_characters"):
                     tracker.reset()
                 tracker.apply(line.get("characters", []) or [])
                 snap = tracker.snapshot()
+                line_id = f"{scene_id}_{idx}"
+                line_data = self.line_data_map.get(line_id)
+                line_config = None
+                if isinstance(line_data, dict):
+                    line_config = line_data.get("line_config")
                 if snap:
                     line["characters"] = snap
+                    if isinstance(line_config, dict):
+                        line_config["characters"] = copy.deepcopy(snap)
                 else:
                     line.pop("characters", None)
+                    if isinstance(line_config, dict):
+                        line_config.pop("characters", None)
 
         bg_persist = bool(
             scene.get(
