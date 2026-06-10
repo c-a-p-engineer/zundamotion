@@ -1,4 +1,5 @@
 import asyncio
+import os
 from pathlib import Path
 
 import zundamotion.cache as cache_module
@@ -114,6 +115,57 @@ def test_image_content_changes_cache_key_for_same_path(tmp_path: Path) -> None:
     image_path.write_bytes(b"new-image")
     second = cache.get_cache_path(
         {"kind": "scene", "background": {"path": str(image_path)}},
+        "scene_demo",
+        "mp4",
+    )
+
+    assert first != second
+
+
+def test_image_rewrite_with_same_content_keeps_cache_key(tmp_path: Path) -> None:
+    cache = CacheManager(tmp_path / "cache")
+    image_path = tmp_path / "slide.png"
+
+    image_path.write_bytes(b"same-image")
+    first = cache.get_cache_path(
+        {"kind": "scene", "background": {"path": str(image_path)}},
+        "scene_demo",
+        "mp4",
+    )
+
+    original_stat = image_path.stat()
+    image_path.write_bytes(b"same-image")
+    os.utime(
+        image_path,
+        ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns + 1_000_000_000),
+    )
+    second = cache.get_cache_path(
+        {"kind": "scene", "background": {"path": str(image_path)}},
+        "scene_demo",
+        "mp4",
+    )
+
+    assert first == second
+
+
+def test_non_image_rewrite_changes_cache_key_by_mtime(tmp_path: Path) -> None:
+    cache = CacheManager(tmp_path / "cache")
+    video_path = tmp_path / "clip.mp4"
+
+    video_path.write_bytes(b"same-video")
+    first = cache.get_cache_path(
+        {"kind": "scene", "insert": {"path": str(video_path)}},
+        "scene_demo",
+        "mp4",
+    )
+
+    original_stat = video_path.stat()
+    os.utime(
+        video_path,
+        ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns + 1_000_000_000),
+    )
+    second = cache.get_cache_path(
+        {"kind": "scene", "insert": {"path": str(video_path)}},
         "scene_demo",
         "mp4",
     )

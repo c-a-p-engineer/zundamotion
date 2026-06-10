@@ -170,7 +170,6 @@ class CacheManager:
         signature: Dict[str, Any] = {
             "path": str(file_path),
             "size": stat.st_size,
-            "mtime_ns": stat.st_mtime_ns,
         }
 
         if file_path.suffix.lower() in _IMAGE_CACHE_KEY_SUFFIXES:
@@ -179,6 +178,8 @@ class CacheManager:
                 for chunk in iter(lambda: f.read(1024 * 1024), b""):
                     digest.update(chunk)
             signature["sha256"] = digest.hexdigest()
+        else:
+            signature["mtime_ns"] = stat.st_mtime_ns
 
         return signature
 

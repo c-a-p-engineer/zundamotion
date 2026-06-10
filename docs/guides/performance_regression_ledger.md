@@ -57,7 +57,7 @@
 | PNG 字幕チャンクサイズ auto | 字幕密度、gap、最長連続字幕区間から chunk size を決める | 既知の中尺ケースで過剰な chunk 増加を避けられる | 採用 |
 | PNG 字幕 `compress_level=1` | PNG 圧縮レベルを軽くする | bounded bench で `compress_level=6` より速く、サイズ差も小さい | 採用 |
 | 顔 overlay 事前キャッシュ | 同一実行内の顔 overlay PNG を事前生成して再利用する | clip ごとの顔 overlay 再生成を抑制できる | 採用 |
-| 画像内容署名付き cache key | 既存ローカル画像パスの cache key に `sha256` を含める | 同名画像差し替え時に古い scene cache を誤用しない | 採用 |
+| 画像内容署名付き cache key | 既存ローカル画像パスの cache key は `sha256` を正とし、`mtime` は含めない | 同名画像差し替えを検知しつつ、同一内容の再出力で scene cache を無効化しない | 採用 |
 | Performance summary instrumentation | FFmpeg/ffprobe/cache/字幕PNG/中間ファイル/VideoPhase内訳を記録する | 既存経路を変えずに次の削減対象を判断できる | 採用 |
 | VOICEVOX content-addressed speech cache | 音声 cache を line_id 依存から内容署名ベースに変える | 同一テキスト・同一話者・同一パラメータを scene/line をまたいで再利用できる | 採用 |
 | ffprobe 種別 PerfSummary | ffprobe を duration/stream/other に分類して集計する | probe 削減対象を判断しやすくなる | 採用 |
@@ -73,6 +73,213 @@
 | scene-unit filter graph | scene 全体を 1 本の filter graph にまとめる案を検討した | 巨大 filter graph 化で debug 性と保守性が落ちる | 却下 |
 | GPU overlay / CUDA overlay | CUDA overlay を使う案を検証した | smoke test 失敗。CPU/GPU 往復のリスクが高い | 却下 |
 | transition suffix stream copy | next scene suffix を stream copy で切り出す案を試した | next scene 冒頭音声が再出現する場合がある | 却下 |
+
+## 2026-06-10 039_security_librahack 再生成ログ観察
+
+対象ログ:
+
+- `logs/20260610_172006_476.log`
+- `logs/20260610_180259_569.log`
+
+前提:
+
+- 1 本目は完走ログ。
+- 2 本目は `18:13:34` 付近で終わっており、`VideoPhase` 完了、`FinalizePhase`、`PerfSummary`、`Total execution time` は出ていない。
+- したがって、これは「完走時間の比較」ではなく「`police_hook` 変更がどこまで再計算を波及させたか」の観察メモとして扱う。
+
+### 事実
+
+1 本目の完走ログでは、全体の支配コストは `VideoPhase` と `FinalizePhase` だった。
+
+| metric | value |
+|---|---:|
+| AudioPhase | 74.73s |
+| VideoPhase | 919.62s |
+| FinalizePhase | 529.88s |
+| Total | 1538.50s |
+| ffmpeg_calls | 250 |
+| ffprobe_calls | 205 |
+| cache_hit | 852 |
+| cache_miss | 182 |
+| subtitle_burn_ms | 395511.3 |
+| face_precache_ms | 57222.2 |
+| scene_concat_ms | 22873.2 |
+| `has_audio_stream` ffprobe | 129 calls / 149598.7ms |
+
+同じ 1 本目で目立つ点:
+
+- `FinalizePhase` では `finalize_transition_*` が 21 本すべて `Cache MISS`。
+- `FinalizePhase` だけで約 8.8 分かかっている。
+- `subtitle_burn_ms` が約 395.5 秒あり、字幕焼き込みだけで約 6.6 分使っている。
+- `has_audio_stream` の ffprobe が 129 回、累計約 149.6 秒で、probe だけでも約 2.5 分使っている。
+
+2 本目の途中ログでは、`AudioPhase` は 77.34s で、ここは大差がない。
+
+一方で `SceneCache` の miss が `police_hook` だけに留まっていない。
+
+base/sub 両方が miss している scene:
+
+- `intro`
+- `police_hook`
+- `outline`
+- `shock_numbers`
+- `frame`
+- `timeline`
+- `timeline_start`
+- `timeline_trouble`
+- `timeline_arrest`
+- `timeline_statement`
+- `crawler`
+- `load_comparison`
+
+2 本目途中時点の集計:
+
+| metric | value |
+|---|---:|
+| SceneCache MISS | 24 |
+| SceneCache STORE | 20 |
+| SubtitleInput | 13 |
+| FilterGraph | 26 |
+| AVWarning | 18 |
+
+重要:
+
+- 2 本目では `finalize_transition_*` の再生成は 0 回。
+- `finalize_concat.mp4` の再生成も 0 回。
+- つまり今回遅かった主因は `FinalizePhase` ではなく、`SceneCache` が前半から中盤の多数シーンで外れ、`VideoPhase` が広く再実行されたこと。
+
+### 解釈
+
+`police_hook` だけを直したつもりでも、実際には少なくとも前半 12 scene が再レンダリングされている。
+
+ログ上の miss 理由は次の 2 段構えになっている。
+
+- subtitle layer: `reason=subtitle_config_or_timing_changed`
+- base layer: `reason=base_video_not_cached`
+
+調査で確認できたこと:
+
+- scene cache key に含まれるローカル画像署名が `path + size + mtime_ns + sha256` だった。
+- SlideForge が内容不変のスライド PNG を再出力すると `mtime_ns` だけが変わり、該当画像を使う base/sub scene cache が無効化されていた。
+- `police_hook` の変更そのものより、動画生成前のスライド一括再出力が多数 scene の再生成を引き起こしていた。
+
+特に不自然なのは `intro` まで miss している点。
+
+`intro` が無変更でも base/sub が両方 miss したのは、背景 PNG の内容ではなく更新時刻まで cache key に含めていたため。
+
+画像は既に `sha256` で内容変更を検知できるため、`mtime_ns` を加える必要はなかった。
+
+### 今回のボトルネック整理
+
+優先度順:
+
+1. 同一内容の画像再出力で scene cache invalidation が発生する
+2. subtitle burn の CPU コストが大きい
+3. `has_audio_stream` 系 ffprobe がまだ多い
+4. cold な `FinalizePhase` は依然として重い
+
+今回の `police_hook` 差分に限れば、最優先は 1。この問題は 2026-06-11 に対応済み。
+
+`FinalizePhase cache` は効いているが、その前段の `VideoPhase` が大量再実行されると体感差はまだ大きい。
+
+### 改善案
+
+#### P0: 画像 cache key を内容基準へ変更する
+
+対応:
+
+- 画像の cache key は `path + size + sha256` とする。
+- 動画・音声はハッシュ計算コストを避け、`path + size + mtime_ns` を維持する。
+- 同一画像再出力、画像内容変更、非画像 mtime 変更の回帰テストを追加する。
+
+#### P0: subtitle layer と base layer の責務をさらに分離する
+
+現状でも sub/base の 2 層はあるが、sub miss のあと base も未命中になっている。
+
+見直し候補:
+
+- base scene key から subtitle timing 由来の値が混入していないか確認する。
+- scene 内の audio duration だけで base が決まる構造なら、その依存を scene ローカルに閉じる。
+- chapter 時刻や後続シーン offset のような finalize 向け情報を base cache key に入れない。
+
+狙い:
+
+- 字幕タイミングだけ変わった場合でも base を再利用する。
+
+#### P1: cache miss 理由を「なぜその値が変わったか」まで出す
+
+現状の `reason=subtitle_config_or_timing_changed` は粒度が粗い。
+
+追加したい内訳:
+
+- text changed
+- audio duration changed
+- subtitle style changed
+- scene timing offset changed
+- scene composition changed
+- background/character transform changed
+
+狙い:
+
+- 「本当に `police_hook` だけか」をログから即判定できるようにする。
+
+#### P1: subtitle burn の重い scene を継続監視する
+
+1 本目では `subtitle_burn_ms=395511.3` と大きい。
+
+継続施策:
+
+- `subtitle_burn_top` 上位 scene を定期的に見る。
+- 4 字幕以上を 1 chunk に詰めすぎている scene があれば chunk 分割を見直す。
+- スライド系 scene で subtitle overlay と face overlay の同時適用が不要な場面は構成を簡素化する。
+
+#### P1: `has_audio_stream` probe をさらに減らす
+
+1 本目では 129 回 / 約 149.6 秒で、まだ大きい。
+
+候補:
+
+- clip render 前後の stream probe を path 単位で強く再利用する。
+- scene concat / subtitle burn / finalize で同一ファイルを複数回見ている経路を棚卸しする。
+
+### 次に確認すべきこと
+
+実装前に次を確認すると切り分けが速い。
+
+1. 同一台本で `police_hook` の文言だけ 1 行変えた最小ケースを作る
+2. その前後で `SceneCache` hit/miss の scene 一覧を比較する
+3. `intro` まで miss するなら cache key 設計問題として扱う
+4. `police_hook` 以降だけ miss するなら timeline/timing 連鎖として扱う
+
+### 今回の判断
+
+- `FinalizePhase cache` 自体は機能している
+- 今回の遅さの本丸は、画像署名に `sha256` と `mtime_ns` の両方を含めていたため、SlideForge が同一内容の PNG を再出力しただけで `SceneCache` が無効化されたこと
+- 画像は `path + size + sha256`、動画・音声は従来どおり `path + size + mtime_ns` で識別する
+- 次の改善対象は `FinalizePhase` ではなく、scene cache miss reason の可観測性
+
+### 対応結果
+
+2026-06-11 に画像署名を修正した。
+
+- 画像は内容が同一なら、再保存で `mtime_ns` が変わっても cache key を維持する。
+- 画像内容が変われば `sha256` が変わるため cache miss する。
+- 動画・音声は内容ハッシュ計算コストを避け、従来どおり `mtime_ns` 変更で cache miss する。
+- `tests/test_cache_manager.py` に同一画像再出力、画像内容変更、非画像 mtime 変更の回帰テストを追加した。
+- 署名形式が変わるため、修正適用後の初回レンダーだけは既存画像 scene cache と互換せず cold run になる。
+
+既存短尺台本 `scripts/benchmark_perf_summary.yaml` を Docker 内で実行し、初回生成後に背景 PNG の `mtime` だけを更新して再実行した。
+
+| metric | 初回 | 同一内容 PNG 再出力相当 |
+|---|---:|---:|
+| Total | 74.55s | 22.46s |
+| VideoPhase | 53.63s | 1.06s |
+| FinalizePhase | 1.04s | 0.39s |
+| line_clips | 3 | 0 |
+| subtitle_chunks | 1 | 0 |
+| subtitle_burn_ms | 5528.5 | 0.0 |
+
+再実行時に `scene=perf_summary_smoke layer=sub HIT` を確認した。これにより、SlideForge が同一内容のスライド PNG を再出力しても scene cache を再利用できる。
 
 ## 2026-05-20 P0-1 Performance 計測ログ拡張
 
