@@ -121,6 +121,78 @@ def test_validate_config_preserves_sound_effect_type_error(tmp_path: Path):
         ({"saturation": -0.1}, "saturation.*0 or greater"),
         ({"brightness": -0.1}, "brightness.*0 or greater"),
         ({"hue": "blue"}, "hue.*must be a number"),
+        (
+            {
+                "targets": [
+                    {
+                        "region": {"type": "left", "ratio": 0.5},
+                        "select": {"color": {"mode": "luma", "min": 0, "max": 90}},
+                        "adjust": {"hue": 120, "saturation": 1.0, "brightness": 1.0},
+                    }
+                ]
+            },
+            "type.*top.*bottom.*rect",
+        ),
+        (
+            {
+                "targets": [
+                    {
+                        "region": {"type": "top", "ratio": 1.5},
+                        "select": {"color": {"mode": "luma", "min": 0, "max": 90}},
+                        "adjust": {"hue": 120, "saturation": 1.0, "brightness": 1.0},
+                    }
+                ]
+            },
+            "ratio.*between 0 and 1",
+        ),
+        (
+            {
+                "targets": [
+                    {
+                        "region": {
+                            "type": "rect",
+                            "x": 0.8,
+                            "y": 0.0,
+                            "width": 0.3,
+                            "height": 0.2,
+                        },
+                        "select": {"color": {"mode": "luma", "min": 0, "max": 90}},
+                        "adjust": {"hue": 120, "saturation": 1.0, "brightness": 1.0},
+                    }
+                ]
+            },
+            "rect.*within normalized bounds",
+        ),
+        (
+            {
+                "targets": [
+                    {
+                        "region": {"type": "top", "ratio": 0.5},
+                        "select": {
+                            "color": {
+                                "mode": "rgb_distance",
+                                "color": "not-a-color",
+                                "tolerance": 40,
+                            }
+                        },
+                        "adjust": {"hue": 120, "saturation": 1.0, "brightness": 1.0},
+                    }
+                ]
+            },
+            "valid hex color string",
+        ),
+        (
+            {
+                "targets": [
+                    {
+                        "region": {"type": "top", "ratio": 0.5},
+                        "select": {"color": {"mode": "lab", "min": 0, "max": 90}},
+                        "adjust": {"hue": 120, "saturation": 1.0, "brightness": 1.0},
+                    }
+                ]
+            },
+            "mode.*luma.*rgb_distance",
+        ),
     ],
 )
 def test_validate_config_rejects_invalid_character_color_filter(
@@ -149,6 +221,40 @@ def test_validate_config_accepts_character_color_filter_in_defaults() -> None:
                             "hue": 210,
                             "saturation": 1.2,
                             "brightness": 0.9,
+                        }
+                    }
+                }
+            },
+            "script": {"scenes": []},
+        }
+    )
+
+
+def test_validate_config_accepts_targeted_character_color_filter() -> None:
+    validate_config(
+        {
+            "defaults": {
+                "characters": {
+                    "hero": {
+                        "color_filter": {
+                            "targets": [
+                                {
+                                    "name": "hair",
+                                    "region": {"type": "top", "ratio": 0.45},
+                                    "select": {
+                                        "color": {
+                                            "mode": "luma",
+                                            "min": 0,
+                                            "max": 90,
+                                        }
+                                    },
+                                    "adjust": {
+                                        "hue": 340,
+                                        "saturation": 1.6,
+                                        "brightness": 1.35,
+                                    },
+                                }
+                            ]
                         }
                     }
                 }

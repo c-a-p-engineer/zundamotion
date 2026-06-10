@@ -22,6 +22,17 @@ def _make_character(root: Path, color=(255, 0, 0, 255)) -> Path:
     return image_path
 
 
+def _save_test_rgba(
+    path: Path,
+    pixels: list[tuple[int, int, int, int]],
+    size: tuple[int, int],
+) -> None:
+    image = Image.new("RGBA", size)
+    image.putdata(pixels)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path)
+
+
 def test_color_filter_preserves_alpha_and_reuses_cache(tmp_path: Path, monkeypatch) -> None:
     async def _run() -> None:
         source_path = _make_character(tmp_path, (255, 0, 0, 77))
@@ -125,5 +136,106 @@ def test_collect_character_inputs_can_use_alias_with_shared_asset(
         assert inputs.metadata[0]["name"] == "red-hero"
         assert inputs.metadata[0]["asset_name"] == "hero"
         assert inputs.metadata[0]["image_path"] == source_path.relative_to(tmp_path)
+
+    asyncio.run(_run())
+
+
+def test_color_filter_targets_only_recolors_top_dark_pixels(
+    tmp_path: Path, monkeypatch
+) -> None:
+    async def _run() -> None:
+        source_path = tmp_path / "assets" / "characters" / "hero" / "default" / "base.png"
+        _save_test_rgba(
+            source_path,
+            [
+                (25, 25, 25, 255),
+                (230, 210, 190, 255),
+                (30, 30, 30, 255),
+                (10, 10, 10, 0),
+            ],
+            (2, 2),
+        )
+        monkeypatch.chdir(tmp_path)
+        cache = CharacterImageResolver(ImageColorFilterCache(CacheManager(tmp_path / "cache")))
+
+        filtered_path = await cache.resolve_image(
+            "hero",
+            "default",
+            {
+                "targets": [
+                    {
+                        "name": "hair",
+                        "region": {"type": "top", "ratio": 0.5},
+                        "select": {"color": {"mode": "luma", "min": 0, "max": 90}},
+                        "adjust": {"hue": 330, "saturation": 1.6, "brightness": 1.4},
+                    }
+                ]
+            },
+        )
+
+        with Image.open(filtered_path) as filtered:
+            pixels = list(filtered.convert("RGBA").getdata())
+
+        assert pixels[0][:3] != (25, 25, 25)
+        assert len(set(pixels[0][:3])) > 1
+        assert pixels[1][:3] == (230, 210, 190)
+        assert pixels[2][:3] == (30, 30, 30)
+        assert pixels[3][3] == 0
+
+    asyncio.run(_run())
+
+
+def test_color_filter_targets_can_use_rect_and_rgb_distance(
+    tmp_path: Path, monkeypatch
+) -> None:
+    async def _run() -> None:
+        source_path = tmp_path / "assets" / "characters" / "hero" / "default" / "base.png"
+        _save_test_rgba(
+            source_path,
+            [
+                (26, 26, 26, 255),
+                (100, 100, 100, 255),
+                (26, 26, 26, 255),
+                (26, 26, 26, 255),
+            ],
+            (2, 2),
+        )
+        monkeypatch.chdir(tmp_path)
+        cache = CharacterImageResolver(ImageColorFilterCache(CacheManager(tmp_path / "cache")))
+
+        filtered_path = await cache.resolve_image(
+            "hero",
+            "default",
+            {
+                "targets": [
+                    {
+                        "name": "rect-dark",
+                        "region": {
+                            "type": "rect",
+                            "x": 0.0,
+                            "y": 0.0,
+                            "width": 0.5,
+                            "height": 0.5,
+                        },
+                        "select": {
+                            "color": {
+                                "mode": "rgb_distance",
+                                "color": "#1a1a1a",
+                                "tolerance": 5,
+                            }
+                        },
+                        "adjust": {"hue": 220, "saturation": 1.4, "brightness": 1.5},
+                    }
+                ]
+            },
+        )
+
+        with Image.open(filtered_path) as filtered:
+            pixels = list(filtered.convert("RGBA").getdata())
+
+        assert pixels[0][:3] != (26, 26, 26)
+        assert pixels[1][:3] == (100, 100, 100)
+        assert pixels[2][:3] == (26, 26, 26)
+        assert pixels[3][:3] == (26, 26, 26)
 
     asyncio.run(_run())

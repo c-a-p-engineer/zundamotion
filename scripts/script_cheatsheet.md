@@ -305,6 +305,20 @@ lines:
           hue: 210                # 色相シフト: 0〜360
           saturation: 1.2         # 彩度倍率: 0以上
           brightness: 1.0         # 明度倍率: 0以上
+          targets:                # 指定時は対象領域・対象色ごとの部分色替えも追加適用
+            - name: hair
+              region:
+                type: top
+                ratio: 0.45
+              select:
+                color:
+                  mode: luma
+                  min: 0
+                  max: 90
+              adjust:
+                hue: 340
+                saturation: 1.6
+                brightness: 1.35
         effects:
           - type: "char:shake_char"
             amplitude: {x: 20, y: 12}
@@ -321,7 +335,127 @@ lines:
 - `flip_x: true` で立ち絵、口パク、目パチ差分をまとめて左右反転できます。右向き素材を左向きにしたい時に使います。
 - `flip_y: true` で同じ対象を上下反転できます。上下反転の確認や特殊演出に使えます。
 - `color_filter` は Pillow でベース立ち絵と口パク・目パチ差分PNGを事前変換し、同じ元画像と設定ではキャッシュを再利用します。未指定時は元画像をそのまま使います。
+- 既存形式の `hue` / `saturation` / `brightness` は従来通り画像全体へ適用します。
+- `color_filter.targets` を使うと、画像上部 / 下部 / 矩形領域のうち、指定した色域だけを部分色替えできます。
+- `region.type` は `top`, `bottom`, `rect` をサポートします。`top` / `bottom` の `ratio`、`rect` の `x`, `y`, `width`, `height` はすべて 0.0〜1.0 の比率指定です。
+- `select.color.mode` は `luma` と `rgb_distance` をサポートします。`luma` は明るさ帯で選択、`rgb_distance` は指定 hex 色との近さで選択します。
+- `targets` と全体指定を併用した場合は、全体色替えを先に適用し、そのあと `targets` を順番に追加適用します。
+- 黒髪や黒服は `hue` だけでは変化が弱いため、`brightness` と `saturation` も上げます。ただし線画まで壊れやすいので、`luma.max` を上げすぎないでください。
 - サンプル台本: [`sample_character_enter.yaml`](./sample_character_enter.yaml), [`sample_character_flip.yaml`](./sample_character_flip.yaml), [`sample_character_color_filter.yaml`](./sample_character_color_filter.yaml)。
+
+### `color_filter` 例
+
+#### 値の考え方
+
+- `hue` は「何色に寄せるか」です。目安として `0` は赤、`30` はオレンジ、`60` は黄、`120` は緑、`180` はシアン、`210` は青、`270` は紫、`330` は赤紫です。
+- `saturation` は「色の濃さ」です。`1.0` は元のまま、`1.2` から `1.4` は少し鮮やか、`1.5` 以上はかなり強め、`0.3` 付近まで下げると色が抜けて灰色寄りになります。
+- `brightness` は「明るさ」です。`1.0` は元のまま、`1.1` から `1.25` は少し明るい、`1.3` 以上は黒髪や黒服を別色に起こしたい時向け、`0.8` 前後は暗く沈めたい時向けです。
+- 黒に近い部分は、`hue` だけ変えてもあまり色が出ません。黒髪を赤や青にしたい時は `saturation: 1.4` 以上、`brightness: 1.2` 以上から試す方が変化を確認しやすいです。
+- 逆に白や肌まで巻き込むと不自然になるので、部分色替えでは `luma.max` を低めに保ちます。黒髪ならまず `70` から `90`、黒服なら `60` から `80` が出発点です。
+
+#### よくある狙いと値の目安
+
+| 狙い | まず試す値 | 補足 |
+| --- | --- | --- |
+| 少し青くする | `hue: 210`, `saturation: 1.15`, `brightness: 1.0` | 全体色替えの軽い色違い向け |
+| はっきり青髪にする | `hue: 220`, `saturation: 1.45`, `brightness: 1.25` | 黒髪なら `targets` + `luma` 併用推奨 |
+| 赤髪にする | `hue: 350`, `saturation: 1.55`, `brightness: 1.3` | 朱色っぽければ `hue: 10` 付近も試す |
+| ピンク寄りにする | `hue: 330`, `saturation: 1.45`, `brightness: 1.28` | 黒髪を柔らかく変えたい時向け |
+| 緑髪にする | `hue: 120`, `saturation: 1.35`, `brightness: 1.18` | 暗すぎると緑が濁るので少し明るめが無難 |
+| 黒っぽく戻す / 落ち着かせる | `saturation: 0.6`, `brightness: 0.82` | `hue` は省略可。彩度を落として暗くする |
+| 銀髪・色を抜く | `saturation: 0.2`, `brightness: 1.3` | 完全な白にはならないので元絵依存 |
+
+#### 調整のコツ
+
+1. まず `region` で髪や服の大まかな場所だけに絞る。
+2. 次に `luma` か `rgb_distance` で対象色を狭める。
+3. そのあと `hue` だけ決める。
+4. まだ黒くて色が出ないなら `saturation` と `brightness` を上げる。
+5. 肌や線画まで変わるなら `luma.max` を下げるか、`rect` / `rgb_distance` に切り替える。
+
+全体色替え:
+
+```yaml
+color_filter:
+  hue: 210
+  saturation: 1.2
+  brightness: 1.0
+```
+
+髪色だけ変える:
+
+```yaml
+color_filter:
+  targets:
+    - name: hair
+      region:
+        type: top
+        ratio: 0.45
+      select:
+        color:
+          mode: luma
+          min: 0
+          max: 90
+      adjust:
+        hue: 340
+        saturation: 1.6
+        brightness: 1.35
+```
+
+- `hue: 340` は赤紫寄りです。赤を強めたければ `350` 前後、ピンク寄りなら `320` から `330` も試せます。
+- 黒髪で色が出ない時は、まず `brightness` を `1.2` から `1.35` の範囲で上げます。
+- 前髪以外の顔影まで巻き込むなら、`ratio` を `0.40` へ下げるか `max` を `75` 前後に下げます。
+
+服色だけ変える:
+
+```yaml
+color_filter:
+  targets:
+    - name: clothes
+      region:
+        type: bottom
+        ratio: 0.65
+      select:
+        color:
+          mode: luma
+          min: 0
+          max: 80
+      adjust:
+        hue: 220
+        saturation: 1.3
+        brightness: 1.0
+```
+
+- `hue: 220` は青系です。制服や上着を寒色へ寄せたい時の出発点です。
+- 黒服を青くしたいのに変化が弱いなら、`brightness: 1.12` から `1.2` を足します。
+- 白シャツや肌まで混ざるなら `ratio` を少し下げるか、`luma.max` を `70` 付近まで絞ります。
+
+矩形範囲の近似色だけ変える:
+
+```yaml
+color_filter:
+  targets:
+    - name: ribbon
+      region:
+        type: rect
+        x: 0.18
+        y: 0.00
+        width: 0.64
+        height: 0.42
+      select:
+        color:
+          mode: rgb_distance
+          color: "#1a1a1a"
+          tolerance: 40
+      adjust:
+        hue: 220
+        saturation: 1.3
+        brightness: 1.0
+```
+
+- `rgb_distance` は「この色に近い部分だけ変えたい」時向けです。リボン、ネクタイ、ワンポイント装飾のような狭いパーツで使います。
+- `tolerance` は小さいほど厳密です。まず `25` から `40`、広げたければ `50` 前後を試します。
+- 指定色がよく分からない時は、画像編集ソフトのスポイトで元色を拾って `#rrggbb` で入れます。
 
 ### 立ち絵アニメーション
 

@@ -38,3 +38,28 @@ scenes:
               hue: 210
               saturation: 1.2
               brightness: 1.0
+  - id: character_targeted_color_filter
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "黒髪キャラなら、髪や服だけを狙って色替えした方が自然なのだ。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            visible: true
+            expression: "default"
+            position: {x: 0, y: -36}
+            color_filter:
+              targets:
+                - name: "hair"
+                  region:
+                    type: top
+                    ratio: 0.45
+                  select:
+                    color:
+                      mode: luma
+                      min: 0
+                      max: 90
+                  adjust:
+                    hue: 340
+                    saturation: 1.6
+                    brightness: 1.35
