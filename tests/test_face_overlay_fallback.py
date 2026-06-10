@@ -30,6 +30,43 @@ class _RecordingColorFilterCache:
         return path
 
 
+def test_apply_face_overlays_skips_explicitly_hidden_character() -> None:
+    async def _run() -> None:
+        overlay_streams: list[str] = []
+        overlay_filters: list[str] = []
+
+        await apply_face_overlays(
+            renderer=_StubRenderer(),
+            face_anim={
+                "target_name": "hero",
+                "mouth": [{"start": 0.0, "end": 0.3, "state": "half"}],
+                "eyes": [{"start": 0.4, "end": 0.45, "state": "close"}],
+            },
+            subtitle_line_config={
+                "characters": [{"name": "hero", "visible": False}]
+            },
+            char_overlay_placement={
+                "hero": {
+                    "x_expr": "0",
+                    "y_expr": "0",
+                    "scale": "1.0",
+                    "expression": "default",
+                }
+            },
+            duration=1.0,
+            cmd=[],
+            input_layers=[],
+            filter_complex_parts=[],
+            overlay_streams=overlay_streams,
+            overlay_filters=overlay_filters,
+        )
+
+        assert overlay_streams == []
+        assert overlay_filters == []
+
+    asyncio.run(_run())
+
+
 def test_apply_face_overlays_uses_line_character_fallback_when_char_is_baked_into_base(
     monkeypatch, tmp_path: Path
 ) -> None:

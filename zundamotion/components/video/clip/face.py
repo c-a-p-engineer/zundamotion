@@ -87,6 +87,15 @@ async def apply_face_overlays(
     if not target_name:
         return
 
+    if subtitle_line_config:
+        for character in subtitle_line_config.get("characters") or []:
+            if (
+                isinstance(character, dict)
+                and character.get("name") == target_name
+                and character.get("visible") is False
+            ):
+                return
+
     placement = char_overlay_placement.get(str(target_name))
     if not placement and subtitle_line_config:
         try:

@@ -232,3 +232,43 @@ def test_audio_phase_prefetches_audio_generation_concurrently(tmp_path):
         ]
 
     asyncio.run(_run())
+
+
+def test_audio_phase_skips_face_anim_for_explicitly_hidden_speaker(tmp_path):
+    async def _run() -> None:
+        config = {
+            "video": {"fps": 30, "face_anim": {}},
+            "voice": {},
+            "system": {"video_extensions": [".mp4"]},
+        }
+        audio_phase = AudioPhase(config, tmp_path, StubCacheManager(tmp_path), AudioParams())
+        narration_audio = tmp_path / "narration.wav"
+        narration_audio.write_bytes(b"wav")
+
+        async def fake_generate_audio(
+            text: str, line_config: Dict[str, Any], output_filename: str
+        ) -> Tuple[Path, List[Tuple[int, str]], List[Dict[str, Any]]]:
+            return narration_audio, [(8, text)], []
+
+        audio_phase.audio_gen.generate_audio = fake_generate_audio  # type: ignore[assignment]
+        scenes = [
+            {
+                "id": "hidden_narration",
+                "lines": [
+                    {
+                        "text": "姿を出さずに説明します。",
+                        "speaker_name": "linka",
+                        "characters": [
+                            {"name": "copipetan", "visible": True},
+                            {"name": "linka", "visible": False},
+                        ],
+                    }
+                ],
+            }
+        ]
+
+        line_data_map, _voice_usage = await audio_phase.run(scenes, StubTimeline())
+
+        assert line_data_map["hidden_narration_1"]["face_anim"] is None
+
+    asyncio.run(_run())

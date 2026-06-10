@@ -70,6 +70,16 @@ class AudioPhase:
         except Exception:
             return 2
 
+    @staticmethod
+    def _is_face_anim_target_hidden(line: Dict[str, Any], target_name: str) -> bool:
+        """Return true when the line explicitly hides the animation target."""
+        for character in line.get("characters", []) or []:
+            if not isinstance(character, dict):
+                continue
+            if character.get("name") == target_name and character.get("visible") is False:
+                return True
+        return False
+
     @time_log(logger)
     async def run(
         self, scenes: List[Dict[str, Any]], timeline: Timeline
@@ -495,7 +505,9 @@ class AudioPhase:
                     layer_face_anims: List[Dict[str, Any]] = []
                     for layer_idx, layer_cfg in enumerate(voice_layers_cfg):
                         target_name = layer_cfg.get("speaker_name")
-                        if not target_name:
+                        if not target_name or self._is_face_anim_target_hidden(
+                            line, str(target_name)
+                        ):
                             continue
                         matching_segments = [
                             seg
@@ -578,7 +590,9 @@ class AudioPhase:
                                 target_name = layer.get("speaker_name")
                                 break
 
-                    if target_name:
+                    if target_name and not self._is_face_anim_target_hidden(
+                        line, str(target_name)
+                    ):
                         try:
                             mouth_segments = (
                                 await _load_mouth_segments(audio_path)
