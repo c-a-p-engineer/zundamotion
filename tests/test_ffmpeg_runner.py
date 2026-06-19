@@ -78,3 +78,30 @@ def test_run_ffmpeg_async_terminates_when_progress_stalls(tmp_path, monkeypatch)
 
     with pytest.raises(subprocess.TimeoutExpired):
         asyncio.run(run_ffmpeg_async([str(fake_ffmpeg), str(tmp_path / "out.mp4")]))
+
+
+def test_run_ffmpeg_async_allows_fast_process_when_stall_watcher_exits(tmp_path, monkeypatch) -> None:
+    fake_ffmpeg = tmp_path / "ffmpeg-fast"
+    output_path = tmp_path / "out.mp4"
+    fake_ffmpeg.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import sys",
+                "from pathlib import Path",
+                "Path(sys.argv[-1]).write_bytes(b'ok')",
+                "print('out_time_ms=1000000', flush=True)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fake_ffmpeg.chmod(0o755)
+
+    monkeypatch.setenv("FFMPEG_STALL_TIMEOUT_SEC", "900")
+    monkeypatch.setenv("FFMPEG_PROGRESS_LOG_INTERVAL_SEC", "1")
+
+    result = asyncio.run(run_ffmpeg_async([str(fake_ffmpeg), str(output_path)]))
+
+    assert result.returncode == 0
+    assert output_path.read_bytes() == b"ok"

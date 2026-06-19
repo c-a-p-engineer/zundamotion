@@ -437,15 +437,14 @@ async def run_ffmpeg_async(
                     return_when=asyncio.FIRST_COMPLETED,
                 )
 
+            if stall_task is not None and stall_task in done:
+                stall_exception = stall_task.exception()
+                if stall_exception is not None:
+                    raise stall_exception
+
+            await wait_task
             if stall_task is not None:
-                first = next(iter(done))
-                await first
-                if first is stall_task:
-                    raise stall_task.exception() or subprocess.TimeoutExpired(args, stall_timeout)
-                if stall_task is not None:
-                    stall_task.cancel()
-            else:
-                await wait_task
+                stall_task.cancel()
         except (asyncio.TimeoutError, subprocess.TimeoutExpired) as exc:
             grace = 5.0
             try:
