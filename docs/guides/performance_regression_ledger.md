@@ -983,6 +983,18 @@ GPU が利用できる環境の標準比較は `HW_FILTER_MODE=cpu --hw-encoder 
 - 残ボトルネックは PNG 字幕焼き込みと `FinalizePhase` の dissolve transition 再エンコード
 - 進捗ログの `ETA` / `pct` は長い ffmpeg では出るが、推定値はかなり揺れる
 
+2026-06-19 `copipetan-dev-room/047_security_csrf` FFmpeg 停滞検知追加:
+
+- 症状:
+  - パイプライン自体は残るが、内側の FFmpeg が `pct:98.x%` / `size:0.3MB` 付近から数時間進まない
+  - 既存の heartbeat は出続けるため、外側からは「処理中」に見える
+- 対応:
+  - `run_ffmpeg_async` に進捗 marker と出力ファイルサイズの停滞検知を追加
+  - `FFMPEG_STALL_TIMEOUT_SEC` 秒、どちらも変化しない場合は FFmpeg を terminate し、猶予後に kill する
+  - 既定値は `900` 秒、`0` で無効化
+- 狙い:
+  - 外側 watchdog の起動忘れに依存せず、エンジン内で停止状態を検出して失敗扱いにする
+
 2026-05-02 `sample_subtitle_render_modes` 改善確認:
 
 - CPU固定時のOpenCL smoke testをスキップ

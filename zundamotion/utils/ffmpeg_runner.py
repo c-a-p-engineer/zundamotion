@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import dataclass
 import logging
 import os
 from pathlib import Path
@@ -93,6 +94,17 @@ def _format_progress_size(path: Optional[Path]) -> str:
         return "size:unavailable"
 
 
+def _read_output_size(path: Optional[Path]) -> Optional[int]:
+    if path is None:
+        return None
+    try:
+        if not path.exists():
+            return None
+        return path.stat().st_size
+    except Exception:
+        return None
+
+
 def _format_seconds(value: Optional[float]) -> str:
     if value is None:
         return "--"
@@ -145,6 +157,39 @@ class _ProgressState:
             return None
         total_est = elapsed / (pct / 100.0)
         return max(0.0, total_est - elapsed)
+
+    def stall_marker(self) -> Optional[float]:
+        return self.out_time_seconds
+
+
+@dataclass
+class _StallSnapshot:
+    marker: Optional[float]
+    output_size: Optional[int]
+
+
+class _StallDetector:
+    def __init__(self, timeout_sec: float):
+        self.timeout_sec = timeout_sec
+        self.snapshot: Optional[_StallSnapshot] = None
+        self.snapshot_at: Optional[float] = None
+
+    def update(self, snapshot: _StallSnapshot, now: float) -> Optional[float]:
+        if self.timeout_sec <= 0:
+            return None
+        if snapshot.marker is None and snapshot.output_size is None:
+            return None
+        if self.snapshot != snapshot:
+            self.snapshot = snapshot
+            self.snapshot_at = now
+            return None
+        if self.snapshot_at is None:
+            self.snapshot_at = now
+            return None
+        stagnant_for = now - self.snapshot_at
+        if stagnant_for >= self.timeout_sec:
+            return stagnant_for
+        return None
 
 
 def _parse_ffmpeg_target_duration(args: List[str]) -> Optional[float]:
@@ -232,6 +277,49 @@ async def _log_ffmpeg_heartbeat(
         )
 
 
+async def _watch_ffmpeg_stall(
+    process: asyncio.subprocess.Process,
+    base: str,
+    output_path: Optional[Path],
+    progress: _ProgressState,
+    timeout_sec: float,
+    check_interval_sec: float,
+) -> None:
+    if timeout_sec <= 0:
+        return
+
+    interval = max(1.0, min(check_interval_sec if check_interval_sec > 0 else 15.0, 15.0))
+    detector = _StallDetector(timeout_sec)
+    while process.returncode is None:
+        await asyncio.sleep(interval)
+        if process.returncode is not None:
+            return
+        now = time.monotonic()
+        stagnant_for = detector.update(
+            _StallSnapshot(
+                marker=progress.stall_marker(),
+                output_size=_read_output_size(output_path),
+            ),
+            now,
+        )
+        if stagnant_for is None:
+            continue
+        logger.error(
+            "[FFmpegStall] %s PID=%s stalled for %.1fs (timeout=%.1fs, marker=%s, output=%s).",
+            base,
+            process.pid,
+            stagnant_for,
+            timeout_sec,
+            progress.stall_marker(),
+            _format_progress_size(output_path),
+        )
+        raise subprocess.TimeoutExpired(
+            cmd=[base],
+            timeout=timeout_sec,
+            output=f"ffmpeg progress stalled for {stagnant_for:.1f}s",
+        )
+
+
 async def run_ffmpeg_async(
     args: List[str],
     *,
@@ -276,6 +364,10 @@ async def run_ffmpeg_async(
             heartbeat_interval = float(os.getenv("FFMPEG_PROGRESS_LOG_INTERVAL_SEC", "15") or 15)
         except Exception:
             heartbeat_interval = 15.0
+        try:
+            stall_timeout = float(os.getenv("FFMPEG_STALL_TIMEOUT_SEC", "900") or 0)
+        except Exception:
+            stall_timeout = 900.0
         progress = _ProgressState(_parse_ffmpeg_target_duration(args))
         process = await asyncio.create_subprocess_exec(
             *args,
@@ -286,6 +378,18 @@ async def run_ffmpeg_async(
         heartbeat_task = asyncio.create_task(
             _log_ffmpeg_heartbeat(process, base, output_path, t0, heartbeat_interval, progress)
         )
+        stall_task: Optional[asyncio.Task[None]] = None
+        if base.startswith("ffmpeg") and stall_timeout > 0:
+            stall_task = asyncio.create_task(
+                _watch_ffmpeg_stall(
+                    process,
+                    base,
+                    output_path,
+                    progress,
+                    stall_timeout,
+                    heartbeat_interval,
+                )
+            )
 
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
@@ -313,22 +417,46 @@ async def run_ffmpeg_async(
         stdout_task = asyncio.create_task(_read_stdout())
         stderr_task = asyncio.create_task(_read_stderr())
 
+        wait_task: Optional[asyncio.Future[list[object]]] = None
         try:
+            wait_task = asyncio.gather(process.wait(), stdout_task, stderr_task)
+            watch_tasks: set[asyncio.Future[Any]] = {wait_task}
+            if stall_task is not None:
+                watch_tasks.add(stall_task)
             if timeout is not None and timeout > 0:
-                await asyncio.wait_for(
-                    asyncio.gather(process.wait(), stdout_task, stderr_task),
+                done, _pending = await asyncio.wait(
+                    watch_tasks,
                     timeout=timeout,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
+                if not done:
+                    raise asyncio.TimeoutError
             else:
-                await asyncio.gather(process.wait(), stdout_task, stderr_task)
-        except asyncio.TimeoutError:
+                done, _pending = await asyncio.wait(
+                    watch_tasks,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+            if stall_task is not None:
+                first = next(iter(done))
+                await first
+                if first is stall_task:
+                    raise stall_task.exception() or subprocess.TimeoutExpired(args, stall_timeout)
+                if stall_task is not None:
+                    stall_task.cancel()
+            else:
+                await wait_task
+        except (asyncio.TimeoutError, subprocess.TimeoutExpired) as exc:
             grace = 5.0
             try:
                 grace = float(os.getenv("FFMPEG_KILL_GRACE_SEC", "5"))
             except Exception:
                 grace = 5.0
+            timeout_value = getattr(exc, "timeout", timeout)
             logger.error(
-                f"Command timed out after {timeout:.1f}s (PID={process.pid}). Sending terminate..."
+                "Command timed out/stalled after %ss (PID=%s). Sending terminate...",
+                f"{timeout_value:.1f}" if isinstance(timeout_value, (int, float)) else timeout_value,
+                process.pid,
             )
             with contextlib.suppress(Exception):
                 process.terminate()
@@ -339,7 +467,7 @@ async def run_ffmpeg_async(
                 with contextlib.suppress(Exception):
                     process.kill()
                 await process.wait()
-            raise subprocess.TimeoutExpired(args, timeout)
+            raise subprocess.TimeoutExpired(args, timeout_value)
         except asyncio.CancelledError:
             logger.warning(f"Task cancelled while running {base} (PID={process.pid}); terminating...")
             with contextlib.suppress(Exception):
@@ -353,6 +481,14 @@ async def run_ffmpeg_async(
             heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await heartbeat_task
+            if stall_task is not None:
+                stall_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await stall_task
+            if wait_task is not None:
+                wait_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await wait_task
             for task in (stdout_task, stderr_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):

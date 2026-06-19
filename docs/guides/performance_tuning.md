@@ -55,6 +55,9 @@ system:
 
 - `FFMPEG_PROFILE_MODE=1` で `-benchmark -stats` を付与
 - `FFMPEG_THREADS` で `-threads` を明示上書き
+- `FFMPEG_STALL_TIMEOUT_SEC` で FFmpeg の進捗・出力サイズが停滞した場合の中断秒数を調整
+  - 既定値は `900`
+  - `0` で停滞検知を無効化
 - CPU フィルタ経路では `-filter_threads` / `-filter_complex_threads` を保守的にキャップ
 
 ## 自動チューニング
