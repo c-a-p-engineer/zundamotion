@@ -8,7 +8,12 @@ from typing import Any, Dict, List, Optional
 from ...utils.logger import logger
 from ..character_image_resolver import CharacterImageResolver
 from .effects import resolve_character_effects
-from .movement import build_move_expressions
+from .movement import (
+    build_dynamic_scale_filter,
+    build_move_expressions,
+    build_scale_expression,
+    has_scale_transition,
+)
 
 
 def is_horizontal_flip_enabled(char_config: Dict[str, Any]) -> bool:
@@ -135,7 +140,10 @@ async def collect_character_inputs(
         flip_x = is_horizontal_flip_enabled(char_config)
         flip_y = is_vertical_flip_enabled(char_config)
 
-        use_char_cache = os.environ.get("CHAR_CACHE_DISABLE", "0") != "1"
+        use_char_cache = (
+            os.environ.get("CHAR_CACHE_DISABLE", "0") != "1"
+            and not has_scale_transition(char_config.get("move"))
+        )
         preprocessed_flip_x = False
         preprocessed_flip_y = False
         if use_char_cache and (abs(scale_cfg - 1.0) > 1e-6 or flip_x or flip_y):
@@ -170,11 +178,20 @@ async def collect_character_inputs(
             effective_scale = scale_cfg
 
         char_effective_scale[i] = float(effective_scale)
+        try:
+            from PIL import Image as _PILImage  # type: ignore
+
+            with _PILImage.open(char_image_path) as image:
+                source_width, source_height = image.size
+        except Exception:
+            source_width = source_height = 0
         metadata[i] = {
             "name": str(char_name),
             "asset_name": str(asset_name),
             "expression": str(char_expression),
             "image_path": char_image_path,
+            "source_width": source_width,
+            "source_height": source_height,
             "preprocessed_flip_x": preprocessed_flip_x,
             "preprocessed_flip_y": preprocessed_flip_y,
         }
@@ -256,6 +273,11 @@ def build_character_overlays(
             to_y_expr=y_base,
         )
         position_dynamic = position_dynamic or move_dynamic
+        scale_expr, scale_dynamic = build_scale_expression(
+            move_config=char_config.get("move"),
+            to_scale=scale,
+        )
+        position_dynamic = position_dynamic or scale_dynamic
 
         if enter_effect == "fade":
             fade += f",fade=t=in:st=0:d={enter_duration}:alpha=1"
@@ -329,6 +351,15 @@ def build_character_overlays(
 
         x_expr = _escape_commas(x_expr)
         y_expr = _escape_commas(y_expr)
+        dynamic_scale_filter = build_dynamic_scale_filter(
+            scale_expr=scale_expr,
+            move_config=char_config.get("move"),
+            to_scale=scale,
+            source_width=int(metadata.get(i, {}).get("source_width", 0)),
+            source_height=int(metadata.get(i, {}).get("source_height", 0)),
+            anchor=str(anchor),
+            scale_flags=renderer.scale_flags,
+        ) if scale_dynamic else ""
 
         overlay_label: Optional[str] = None
         flip_filters: List[str] = []
@@ -343,15 +374,25 @@ def build_character_overlays(
         flip_filter = "".join(f",{item}" for item in flip_filters)
 
         if use_cuda_filters:
-            filter_complex_parts.append(
-                f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},hwupload_cuda,{renderer.scale_filter}=iw*{scale}:ih*{scale}[char_scaled_{i}]"
-            )
+            if scale_dynamic:
+                filter_complex_parts.append(
+                    f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},"
+                    f"{dynamic_scale_filter},hwupload_cuda[char_scaled_{i}]"
+                )
+            else:
+                filter_complex_parts.append(
+                    f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},hwupload_cuda,"
+                    f"{renderer.scale_filter}=iw*{scale}:ih*{scale}[char_scaled_{i}]"
+                )
             overlay_label = f"[char_scaled_{i}]"
             overlay_streams.append(overlay_label)
             overlay_filters.append(f"overlay_cuda=x={x_expr}:y={y_expr}")
         elif use_opencl:
             opencl_success = False
-            if os.environ.get("CHAR_CACHE_DISABLE", "0") != "1":
+            if (
+                os.environ.get("CHAR_CACHE_DISABLE", "0") != "1"
+                and not scale_dynamic
+            ):
                 try:
                     filter_complex_parts.append(
                         f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},hwupload[char_gpu_{i}]"
@@ -366,15 +407,26 @@ def build_character_overlays(
                 except Exception:
                     overlay_label = None
             if not opencl_success:
+                scale_filter = (
+                    dynamic_scale_filter
+                    if scale_dynamic
+                    else f"scale=iw*{scale}:ih*{scale}"
+                )
                 filter_complex_parts.append(
-                    f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale},format=rgba{fade}{flip_filter},hwupload[char_gpu_{i}]"
+                    f"[{ffmpeg_index}:v]{scale_filter},format=rgba{fade}"
+                    f"{flip_filter},hwupload[char_gpu_{i}]"
                 )
                 overlay_label = f"[char_gpu_{i}]"
                 overlay_streams.append(overlay_label)
                 overlay_filters.append(f"overlay_opencl=x={x_expr}:y={y_expr}")
                 char_effective_scale[i] = 1.0
         else:
-            if os.environ.get("CHAR_CACHE_DISABLE", "0") != "1" and abs(scale - 1.0) < 1e-6:
+            if scale_dynamic:
+                filter_complex_parts.append(
+                    f"[{ffmpeg_index}:v]{dynamic_scale_filter},format=rgba{fade}"
+                    f"{flip_filter}[char_scaled_{i}]"
+                )
+            elif os.environ.get("CHAR_CACHE_DISABLE", "0") != "1" and abs(scale - 1.0) < 1e-6:
                 filter_complex_parts.append(
                     f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter}[char_scaled_{i}]"
                 )
@@ -398,6 +450,10 @@ def build_character_overlays(
                 fade=fade,
                 duration=duration,
                 scale=scale,
+                scale_expr=scale_expr,
+                dynamic_scale=scale_dynamic,
+                source_width=int(metadata.get(i, {}).get("source_width", 0)),
+                source_height=int(metadata.get(i, {}).get("source_height", 0)),
                 dynamic_position=position_dynamic,
             )
         )
@@ -417,6 +473,10 @@ def _build_face_placement(
     fade: str,
     duration: float,
     scale: float,
+    scale_expr: str,
+    dynamic_scale: bool,
+    source_width: int,
+    source_height: int,
     dynamic_position: bool,
 ) -> Dict[str, Dict[str, str]]:
     try:
@@ -501,6 +561,12 @@ def _build_face_placement(
             "fade": fade,
             "scale_orig": f"{scale_orig}",
             "scale_eff": f"{scale}",
+            "scale_expr": scale_expr,
+            "dynamic_scale": dynamic_scale,
+            "source_width": source_width,
+            "source_height": source_height,
+            "anchor": anchor,
+            "move": char_config.get("move"),
             "x_num": str(int(round(x_num))),
             "y_num": str(int(round(y_num))),
             "expression": str(char_config.get("expression", char_data.get("expression", "default"))),

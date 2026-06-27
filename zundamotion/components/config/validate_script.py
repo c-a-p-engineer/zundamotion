@@ -263,6 +263,12 @@ def _validate_character_move(move: Any, label: str) -> None:
             value = from_position.get(axis)
             if value is not None and not isinstance(value, (int, float, str)):
                 raise ValidationError(f"{label}.from.{axis} must be a number or string.")
+        from_scale = from_position.get("scale")
+        if from_scale is not None:
+            if not isinstance(from_scale, (int, float)):
+                raise ValidationError(f"{label}.from.scale must be a number.")
+            if from_scale <= 0:
+                raise ValidationError(f"{label}.from.scale must be greater than 0.")
 
 
 def _validate_sound_effects(sound_effects: Any, scene_id: str, line_idx: int) -> None:

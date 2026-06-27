@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from ...utils.ffmpeg_ops import calculate_overlay_position
 from ...utils.logger import logger
 from .characters import is_horizontal_flip_enabled, is_vertical_flip_enabled
+from .movement import build_dynamic_scale_filter
 
 
 def _enable_expr(
@@ -150,6 +151,12 @@ async def apply_face_overlays(
         scale = float(scale_raw)
     except Exception:
         scale = 1.0
+    dynamic_scale_raw = placement.get("dynamic_scale", False)
+    if isinstance(dynamic_scale_raw, str):
+        dynamic_scale = dynamic_scale_raw.lower() in {"1", "true", "yes", "on"}
+    else:
+        dynamic_scale = bool(dynamic_scale_raw)
+    scale_expr = str(placement.get("scale_expr") or f"{scale:.6f}")
 
     x_fix = placement.get("x_num") or placement.get("x_expr") or "0"
     y_fix = placement.get("y_num") or placement.get("y_expr") or "0"
@@ -221,7 +228,7 @@ async def apply_face_overlays(
                 path = await renderer.image_color_filter_cache.filter_image(
                     path, color_filter
                 )
-            if os.environ.get("FACE_CACHE_DISABLE", "0") == "1":
+            if dynamic_scale or os.environ.get("FACE_CACHE_DISABLE", "0") == "1":
                 idx = _add_image_input(path)
                 if idx is not None:
                     face_input_paths.append(str(path.resolve()))
@@ -263,8 +270,21 @@ async def apply_face_overlays(
             if flip_y:
                 flip_filters.append("vflip")
             flip_filter = "".join(f",{item}" for item in flip_filters)
+            if dynamic_scale:
+                scale_filter = build_dynamic_scale_filter(
+                    scale_expr=scale_expr,
+                    move_config=placement.get("move"),
+                    to_scale=scale,
+                    source_width=int(placement.get("source_width", 0)),
+                    source_height=int(placement.get("source_height", 0)),
+                    anchor=str(placement.get("anchor", "bottom_center")),
+                    scale_flags=renderer.scale_flags,
+                )
+            else:
+                scale_filter = f"scale=iw*{scale_value}:ih*{scale_value}"
             filter_complex_parts.append(
-                f"[{input_index}:v]format=rgba{fade_add},scale=iw*{scale_value}:ih*{scale_value}{flip_filter}[{out_label}]"
+                f"[{input_index}:v]format=rgba{fade_add},{scale_filter}"
+                f"{flip_filter}[{out_label}]"
             )
 
     eyes_segments = face_anim.get("eyes") or []

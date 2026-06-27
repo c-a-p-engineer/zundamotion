@@ -28,7 +28,11 @@ from ....utils import perf_stats
 from ....utils.subtitle_text import is_effective_subtitle_text
 from ...video.clip.face import _enable_expr, _resolve_face_asset
 from ...video.clip.characters import is_horizontal_flip_enabled, is_vertical_flip_enabled
-from ...video.clip.movement import build_move_expressions
+from ...video.clip.movement import (
+    build_dynamic_scale_filter,
+    build_move_expressions,
+    build_scale_expression,
+)
 from .badge_tracker import BadgeTracker
 
 
@@ -617,6 +621,13 @@ class SceneRenderer:
         if image_path is None:
             return None, f"missing_character_asset:{name}/{expression}"
         try:
+            from PIL import Image as _PILImage  # type: ignore
+
+            with _PILImage.open(image_path) as image:
+                source_width, source_height = image.size
+        except Exception:
+            return None, f"invalid_character_asset:{name}/{expression}"
+        try:
             scale = float(char.get("scale", 1.0))
         except Exception:
             scale = 1.0
@@ -627,6 +638,8 @@ class SceneRenderer:
                 "name": str(name),
                 "expression": expression,
                 "image_path": image_path,
+                "source_width": source_width,
+                "source_height": source_height,
                 "scale": scale,
                 "anchor": anchor,
                 "position": {
@@ -703,6 +716,15 @@ class SceneRenderer:
             to_y_expr=y_base,
             time_base=start_time,
         )
+        try:
+            final_scale = float(char_state.get("scale", 1.0))
+        except Exception:
+            final_scale = 1.0
+        scale_expr, scale_dynamic = build_scale_expression(
+            move_config=char_state.get("move"),
+            to_scale=final_scale,
+            time_base=start_time,
+        )
         if enter_effect == "slide_left" and enter_duration > 0:
             x_expr = (
                 f"if(lt(t,{start_time + enter_duration:.3f}), "
@@ -752,6 +774,8 @@ class SceneRenderer:
             "leave_effect": leave_effect,
             "enter_duration": enter_duration,
             "fade_filters": fade_filters,
+            "scale_expr": scale_expr,
+            "scale_dynamic": scale_dynamic,
         }
 
     def _can_use_simple_scene_fast_path(
@@ -1007,6 +1031,12 @@ class SceneRenderer:
                         {
                             "path": asset_path,
                             "scale": scale,
+                            "scale_expr": placement["scale_expr"],
+                            "scale_dynamic": placement["scale_dynamic"],
+                            "source_width": current_char_state["source_width"],
+                            "source_height": current_char_state["source_height"],
+                            "anchor": current_char_state["anchor"],
+                            "move": current_char_state.get("move"),
                             "x_expr": placement["x_expr"],
                             "y_expr": placement["y_expr"],
                             "enable": enable_expr,
@@ -1092,9 +1122,24 @@ class SceneRenderer:
             except Exception:
                 scale = 1.0
             char_label = f"char_src_{character_input_idx}"
+            if position["scale_dynamic"]:
+                scale_step = build_dynamic_scale_filter(
+                    scale_expr=str(position["scale_expr"]),
+                    move_config=state.get("move"),
+                    to_scale=scale,
+                    source_width=int(state["source_width"]),
+                    source_height=int(state["source_height"]),
+                    anchor=str(state["anchor"]),
+                    scale_flags=self.video_renderer.scale_flags,
+                )
+            else:
+                scale_step = (
+                    f"scale=iw*{scale}:ih*{scale}:"
+                    f"flags={self.video_renderer.scale_flags}"
+                )
             steps = [
                 "format=rgba",
-                f"scale=iw*{scale}:ih*{scale}:flags={self.video_renderer.scale_flags}",
+                scale_step,
             ]
             steps.extend(position["fade_filters"])
             filter_parts.append(f"[{input_idx}:v]{','.join(steps)}[{char_label}]")
@@ -1112,9 +1157,25 @@ class SceneRenderer:
         for face in face_overlays:
             input_idx = _add_looped_image_input(face["path"])
             face_label = f"face_src_{face_input_idx}"
+            if face["scale_dynamic"]:
+                scale_step = build_dynamic_scale_filter(
+                    scale_expr=str(face["scale_expr"]),
+                    move_config=face.get("move"),
+                    to_scale=float(face["scale"]),
+                    source_width=int(face["source_width"]),
+                    source_height=int(face["source_height"]),
+                    anchor=str(face["anchor"]),
+                    scale_flags=self.video_renderer.scale_flags,
+                )
+            else:
+                scale_step = (
+                    f"scale=iw*{float(face['scale']):.6f}:"
+                    f"ih*{float(face['scale']):.6f}:"
+                    f"flags={self.video_renderer.scale_flags}"
+                )
             steps = [
                 "format=rgba",
-                f"scale=iw*{float(face['scale']):.6f}:ih*{float(face['scale']):.6f}:flags={self.video_renderer.scale_flags}",
+                scale_step,
             ]
             steps.extend(face.get("fade_filters") or [])
             filter_parts.append(f"[{input_idx}:v]{','.join(steps)}[{face_label}]")

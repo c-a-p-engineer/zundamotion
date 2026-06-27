@@ -330,9 +330,10 @@ lines:
 
 - `characters_persist: true` を `defaults` に設定すると、同シーン内で立ち絵状態が自動的に引き継がれ、差分のみ記述すればよくなります。
 - `enter_duration` / `leave_duration` と `enter` / `leave` を組み合わせると立ち絵のスライドイン・アウトが可能。
-- `move` を指定すると、発話行または `wait` 行のクリップ内で `move.from` から `position` へ移動できます。`position` は移動後の最終位置です。
+- `move` を指定すると、発話行または `wait` 行のクリップ内で `move.from` から `position` / `scale` へ補間できます。`position` と `scale` は移動後の最終状態です。
+- その場で拡縮する場合は `move.from: {scale: 0.6}`、移動と同時に拡縮する場合は `move.from: {x: -420, y: -32, scale: 0.6}` のように指定します。
 - `move.duration` は秒数、`move.start` はクリップ開始からの遅延秒数、`move.easing` は `linear` / `ease_in` / `ease_out` / `ease_in_out` を指定できます。
-- `characters_persist: true` で同一シーン内の直前位置がある場合は、`move.from` を省略できます。省略できない場合は `move.from` を明示してください。
+- `characters_persist: true` で同一シーン内の直前状態がある場合は、`move.from` を省略できます。座標や倍率が変わる場合は直前値を開始状態として使います。省略できない場合は `move.from` を明示してください。
 - `expression` は `assets/characters/<name>/<expression>/` の差分素材に対応。
 - `asset_name` を指定すると、`name` は別名のまま `assets/characters/<asset_name>/` の素材を共有できます。色違いキャラクターを独立して同時表示するときに使います。
 - `flip_x: true` で立ち絵、口パク、目パチ差分をまとめて左右反転できます。右向き素材を左向きにしたい時に使います。

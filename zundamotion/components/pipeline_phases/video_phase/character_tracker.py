@@ -42,8 +42,19 @@ class CharacterTracker:
                 move = dict(upd["move"])
                 if move.get("enabled") is not False and "from" not in move:
                     previous_position = previous_state.get("position")
+                    previous_scale = previous_state.get("scale")
+                    previous_transform: Dict[str, Any] = {}
                     if isinstance(previous_position, dict):
-                        move["from"] = previous_position.copy()
+                        previous_transform.update(previous_position)
+                    next_scale = upd.get("scale", previous_scale)
+                    if (
+                        previous_scale is not None
+                        and next_scale is not None
+                        and _values_differ(previous_scale, next_scale)
+                    ):
+                        previous_transform["scale"] = previous_scale
+                    if previous_transform:
+                        move["from"] = previous_transform
                 upd = upd.copy()
                 upd["move"] = move
             if "enter" in upd:
@@ -84,3 +95,10 @@ class CharacterTracker:
             else:
                 st.pop("leave_duration", None)
         return snap
+
+
+def _values_differ(left: Any, right: Any) -> bool:
+    try:
+        return abs(float(left) - float(right)) > 1e-9
+    except Exception:
+        return left != right

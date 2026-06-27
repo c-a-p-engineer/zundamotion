@@ -64,3 +64,23 @@ scenes:
               - type: "char:bob_char"
                 amplitude: 8
                 freq: 1.4
+      - text: "座標を変えず、開始倍率だけ書けば、その場で拡大できます。"
+        speaker_name: "engy"
+        characters:
+          - name: "engy"
+            position: {x: -120, y: -32}
+            scale: 1.0
+            move:
+              from: {scale: 0.55}
+              duration: 0.8
+              easing: ease_out
+      - text: "開始座標と開始倍率を一緒に書けば、移動しながら拡大できます。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            position: {x: 280, y: -32}
+            scale: 1.05
+            move:
+              from: {x: -360, y: -32, scale: 0.6}
+              duration: 1.0
+              easing: ease_in_out
