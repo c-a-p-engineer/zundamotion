@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from ...utils.logger import logger
 from ..character_image_resolver import CharacterImageResolver
 from .effects import resolve_character_effects
+from .movement import build_move_expressions
 
 
 def is_horizontal_flip_enabled(char_config: Dict[str, Any]) -> bool:
@@ -245,6 +246,16 @@ def build_character_overlays(
         fade = ""
         x_expr, y_expr = x_base, y_base
         position_dynamic = False
+
+        x_expr, y_expr, move_dynamic = build_move_expressions(
+            move_config=char_config.get("move"),
+            anchor=str(anchor),
+            from_position=None,
+            to_position=position,
+            to_x_expr=x_base,
+            to_y_expr=y_base,
+        )
+        position_dynamic = position_dynamic or move_dynamic
 
         if enter_effect == "fade":
             fade += f",fade=t=in:st=0:d={enter_duration}:alpha=1"

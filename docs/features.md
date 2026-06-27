@@ -6,7 +6,7 @@
 | 台本/検証 | YAMLロード・検証・デフォルト適用 | `defaults/characters_persist`や字幕/解像度をバリデーションし、欠損を補完 | zundamotion/components/config/validate.py, components/script/loader.py |
 | 音声合成 | VOICEVOX音声生成＋キャッシュ | speaker設定に従い音声を生成しキャッシュ共有 | components/audio/generator.py, components/audio/voicevox_client.py |
 | クリップ生成 | 背景画像/動画の正規化とシーン連結 | contain/cover/fit_width等でリサイズし、行ごとのクリップをconcat | utils/ffmpeg_ops.build_background_fit_steps, components/video/renderer.py, components/pipeline_phases/video_phase/scene_renderer.py |
-| キャラ配置 | アンカー＋座標＋スケール配置、揺れ系エフェクト | shake/bob/swayをoverlay式で表現、enter/leave余白計算あり | components/video/clip/effects/resolve.py |
+| キャラ配置 | アンカー＋座標＋スケール配置、座標移動、揺れ系エフェクト | `move` で行クリップ内の任意座標移動、shake/bob/swayをoverlay式で表現、enter/leave余白計算あり | components/video/clip/movement.py, components/video/clip/effects/resolve.py |
 | キャラ配置 | 立ち絵PNG色替えフィルター | 汎用画像フィルターキャッシュを使い、色相・彩度・明度の事前変換、透明度維持、キャッシュ再利用に対応。`targets` による上部/下部/矩形 + 色域指定の部分色替えと、`asset_name` での別名キャラクター間素材共有も可能 | components/video/image_color_filter_cache.py, components/video/character_image_resolver.py |
 | 背景/画面効果 | 背景揺れ・画面揺れ | pad+crop方式でシェイク | components/video/clip/effects/resolve.py |
 | オーバーレイ | 画像レイヤー・前景オーバーレイ・PiP | image_layers/fg_overlays/insertでロゴ・挿入映像を重畳 | components/video/renderer.py, components/pipeline_phases/video_phase/scene_renderer.py |

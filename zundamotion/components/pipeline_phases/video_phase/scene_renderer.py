@@ -28,6 +28,7 @@ from ....utils import perf_stats
 from ....utils.subtitle_text import is_effective_subtitle_text
 from ...video.clip.face import _enable_expr, _resolve_face_asset
 from ...video.clip.characters import is_horizontal_flip_enabled, is_vertical_flip_enabled
+from ...video.clip.movement import build_move_expressions
 from .badge_tracker import BadgeTracker
 
 
@@ -636,6 +637,7 @@ class SceneRenderer:
                 "enter_duration": char.get("enter_duration", 0.3),
                 "leave": char.get("leave"),
                 "leave_duration": char.get("leave_duration", 0.3),
+                "move": char.get("move"),
             },
             None,
         )
@@ -649,6 +651,7 @@ class SceneRenderer:
             str(char_state.get("anchor", "bottom_center")),
             str((char_state.get("position") or {}).get("x", "0")),
             str((char_state.get("position") or {}).get("y", "0")),
+            repr(char_state.get("move")),
         )
 
     def _compute_global_char_position(
@@ -691,27 +694,34 @@ class SceneRenderer:
         if leave_effect == "fade" and leave_duration > 0:
             fade_filters.append(f"fade=t=out:st={leave_start:.3f}:d={leave_duration:.3f}:alpha=1")
 
-        x_expr = x_base
-        y_expr = y_base
+        x_expr, y_expr, _move_dynamic = build_move_expressions(
+            move_config=char_state.get("move"),
+            anchor=str(char_state.get("anchor", "bottom_center")),
+            from_position=None,
+            to_position=char_state.get("position") or {},
+            to_x_expr=x_base,
+            to_y_expr=y_base,
+            time_base=start_time,
+        )
         if enter_effect == "slide_left" and enter_duration > 0:
             x_expr = (
                 f"if(lt(t,{start_time + enter_duration:.3f}), "
-                f"-w+({x_base}+w)*(t-{start_time:.3f})/{enter_duration:.3f}, {x_base})"
+                f"-w+({x_base}+w)*(t-{start_time:.3f})/{enter_duration:.3f}, {x_expr})"
             )
         elif enter_effect == "slide_right" and enter_duration > 0:
             x_expr = (
                 f"if(lt(t,{start_time + enter_duration:.3f}), "
-                f"W+({x_base}-W)*(t-{start_time:.3f})/{enter_duration:.3f}, {x_base})"
+                f"W+({x_base}-W)*(t-{start_time:.3f})/{enter_duration:.3f}, {x_expr})"
             )
         elif enter_effect == "slide_top" and enter_duration > 0:
             y_expr = (
                 f"if(lt(t,{start_time + enter_duration:.3f}), "
-                f"-h+({y_base}+h)*(t-{start_time:.3f})/{enter_duration:.3f}, {y_base})"
+                f"-h+({y_base}+h)*(t-{start_time:.3f})/{enter_duration:.3f}, {y_expr})"
             )
         elif enter_effect == "slide_bottom" and enter_duration > 0:
             y_expr = (
                 f"if(lt(t,{start_time + enter_duration:.3f}), "
-                f"H+({y_base}-H)*(t-{start_time:.3f})/{enter_duration:.3f}, {y_base})"
+                f"H+({y_base}-H)*(t-{start_time:.3f})/{enter_duration:.3f}, {y_expr})"
             )
 
         if leave_effect == "slide_left" and leave_duration > 0:

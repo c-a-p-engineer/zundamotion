@@ -36,7 +36,16 @@ class CharacterTracker:
             if upd.get("exit"):
                 self._states.pop(name, None)
                 continue
-            state = self._states.get(name, {}).copy()
+            previous_state = self._states.get(name, {})
+            state = previous_state.copy()
+            if isinstance(upd.get("move"), dict):
+                move = dict(upd["move"])
+                if move.get("enabled") is not False and "from" not in move:
+                    previous_position = previous_state.get("position")
+                    if isinstance(previous_position, dict):
+                        move["from"] = previous_position.copy()
+                upd = upd.copy()
+                upd["move"] = move
             if "enter" in upd:
                 state["enter"] = upd.get("enter")
                 if "enter_duration" in upd:
@@ -66,6 +75,7 @@ class CharacterTracker:
         snap: List[Dict[str, Any]] = []
         for name, st in list(self._states.items()):
             snap.append(st.copy())
+            st.pop("move", None)
             st.pop("enter", None)
             st.pop("enter_duration", None)
             if st.pop("leave", None) is not None:

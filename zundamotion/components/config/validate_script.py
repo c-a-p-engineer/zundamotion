@@ -183,6 +183,10 @@ def _validate_line_features(line: Dict[str, Any], scene_id: str, line_idx: int) 
                 character.get("color_filter"),
                 f"{container_id}, characters[{char_idx}].color_filter",
             )
+            _validate_character_move(
+                character.get("move"),
+                f"{container_id}, characters[{char_idx}].move",
+            )
     reset_flag = line.get("reset_characters")
     if reset_flag is not None and not isinstance(reset_flag, bool):
         raise ValidationError(
@@ -223,6 +227,42 @@ def _validate_wait_line(wait_value: Any, scene_id: str, line_idx: int) -> None:
         raise ValidationError(
             f"Wait duration for scene '{scene_id}', line {line_idx} must be positive, but got {duration}."
         )
+
+
+def _validate_character_move(move: Any, label: str) -> None:
+    if move is None:
+        return
+    if not isinstance(move, dict):
+        raise ValidationError(f"{label} must be a dictionary.")
+    enabled = move.get("enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        raise ValidationError(f"{label}.enabled must be a boolean.")
+    for key in ("duration", "start"):
+        value = move.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, (int, float)):
+            raise ValidationError(f"{label}.{key} must be a number.")
+        if value < 0:
+            raise ValidationError(f"{label}.{key} must be greater than or equal to 0.")
+    easing = move.get("easing")
+    if easing is not None and easing not in {
+        "linear",
+        "ease_in",
+        "ease_out",
+        "ease_in_out",
+    }:
+        raise ValidationError(
+            f"{label}.easing must be one of linear, ease_in, ease_out, ease_in_out."
+        )
+    from_position = move.get("from")
+    if from_position is not None:
+        if not isinstance(from_position, dict):
+            raise ValidationError(f"{label}.from must be a dictionary.")
+        for axis in ("x", "y"):
+            value = from_position.get(axis)
+            if value is not None and not isinstance(value, (int, float, str)):
+                raise ValidationError(f"{label}.from.{axis} must be a number or string.")
 
 
 def _validate_sound_effects(sound_effects: Any, scene_id: str, line_idx: int) -> None:

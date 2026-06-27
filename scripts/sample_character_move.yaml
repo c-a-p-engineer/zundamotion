@@ -1,0 +1,66 @@
+meta:
+  title: "キャラクター移動サンプル"
+  version: 1
+
+video:
+  fps: 30
+
+defaults:
+  characters_persist: true
+  characters:
+    copetan:
+      speaker_id: 3
+      scale: 0.82
+      anchor: bottom_center
+      position: {x: -420, y: -32}
+    engy:
+      speaker_id: 8
+      scale: 0.82
+      anchor: bottom_center
+      position: {x: 420, y: -32}
+
+scenes:
+  - id: character_move_showcase
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "キャラクターの位置を、発話中にすっと動かせるようになりました。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            visible: true
+            expression: "default"
+            position: {x: -420, y: -32}
+          - name: "engy"
+            visible: true
+            expression: "default"
+            position: {x: 420, y: -32}
+      - text: "position は移動後の位置。move.from からそこへ補間します。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            position: {x: 0, y: -32}
+            move:
+              from: {x: -420, y: -32}
+              duration: 0.8
+              easing: ease_out
+      - text: "characters_persist が有効なら、from を省略して前の位置から動けます。"
+        speaker_name: "engy"
+        characters:
+          - name: "engy"
+            position: {x: -120, y: -32}
+            move:
+              duration: 0.9
+              easing: ease_in_out
+      - text: "開始を少し遅らせたり、揺れと組み合わせたりもできます。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            position: {x: -360, y: -32}
+            move:
+              duration: 0.7
+              start: 0.2
+              easing: ease_in
+            effects:
+              - type: "char:bob_char"
+                amplitude: 8
+                freq: 1.4
