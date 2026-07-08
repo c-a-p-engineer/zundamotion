@@ -1,6 +1,7 @@
 """音声・映像生成フェーズを統括するパイプライン実装。"""
 
 import asyncio
+import json
 import shutil
 import os
 import statistics
@@ -590,6 +591,42 @@ class GenerationPipeline:
                 "[PerfSummary] av_warnings_total=%s",
                 av_warnings.get("total", 0),
             )
+            phase_ms = perf_summary.get("phase_ms") or {}
+            for name, elapsed_ms in sorted(
+                phase_ms.items(),
+                key=lambda item: float(item[1] or 0.0),
+                reverse=True,
+            )[:4]:
+                logger.info(
+                    "[PerfSummary] phase_top name=%s elapsed_ms=%.1f",
+                    name,
+                    float(elapsed_ms or 0.0),
+                )
+            timing_items = [
+                ("subtitle_burn", float(perf_summary.get("subtitle_burn_ms", 0.0) or 0.0)),
+                ("video_line_clip", float(perf_summary.get("video_line_clip_ms", 0.0) or 0.0)),
+                ("face_precache", float(perf_summary.get("face_precache_ms", 0.0) or 0.0)),
+                ("scene_concat", float(perf_summary.get("scene_concat_ms", 0.0) or 0.0)),
+            ]
+            for name, elapsed_ms in sorted(
+                timing_items,
+                key=lambda item: item[1],
+                reverse=True,
+            ):
+                if elapsed_ms <= 0.0:
+                    continue
+                logger.info(
+                    "[PerfSummary] timing_top name=%s elapsed_ms=%.1f",
+                    name,
+                    elapsed_ms,
+                )
+            scene_cache = perf_summary.get("scene_cache") or {}
+            miss_reasons = scene_cache.get("miss_reasons") or {}
+            if miss_reasons:
+                logger.info(
+                    "[PerfSummary] scene_cache_miss_reasons=%s",
+                    json.dumps(miss_reasons, ensure_ascii=False, sort_keys=True),
+                )
             subtitle_burn = perf_summary.get("subtitle_burn") or {}
             for item in (subtitle_burn.get("top_chunks") or [])[:5]:
                 logger.info(

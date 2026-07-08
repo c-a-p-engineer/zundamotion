@@ -48,6 +48,7 @@ class PerfStats:
         self.subtitle_burn_chunks: list[Dict[str, Any]] = []
         self.ffprobe_calls_detail: list[Dict[str, Any]] = []
         self.ffprobe_cache_hits_detail: list[Dict[str, Any]] = []
+        self.scene_cache_events: list[Dict[str, Any]] = []
 
     def incr(self, name: str, value: int = 1) -> None:
         self.counters[name] = int(self.counters.get(name, 0)) + int(value)
@@ -113,6 +114,28 @@ class PerfStats:
             self.ffprobe_cache_hits_detail.append(item)
         else:
             self.ffprobe_calls_detail.append(item)
+
+    def record_scene_cache_event(
+        self,
+        *,
+        scene_id: str,
+        layer: str,
+        status: str,
+        key: str = "-",
+        reason: Optional[str] = None,
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        item: Dict[str, Any] = {
+            "scene_id": str(scene_id),
+            "layer": str(layer),
+            "status": str(status),
+            "key": str(key),
+        }
+        if reason:
+            item["reason"] = str(reason)
+        if detail:
+            item["detail"] = dict(detail)
+        self.scene_cache_events.append(item)
 
     def scan_intermediates(self, temp_dir: Path) -> None:
         count = 0
@@ -228,6 +251,26 @@ class PerfStats:
             "cache_hits_by_caller": dict(sorted(cache_hits_by_caller.items())),
         }
 
+    def _build_scene_cache_summary(self) -> Dict[str, Any]:
+        by_layer_status = Counter()
+        miss_reasons = Counter()
+        misses: list[Dict[str, Any]] = []
+        for item in self.scene_cache_events:
+            layer = str(item.get("layer", "unknown"))
+            status = str(item.get("status", "unknown"))
+            by_layer_status[f"{layer}:{status}"] += 1
+            if status.upper() == "MISS":
+                reason = str(item.get("reason", "unknown"))
+                miss_reasons[reason] += 1
+                if len(misses) < 50:
+                    misses.append(dict(item))
+        return {
+            "total_events": len(self.scene_cache_events),
+            "by_layer_status": dict(sorted(by_layer_status.items())),
+            "miss_reasons": dict(sorted(miss_reasons.items())),
+            "misses": misses,
+        }
+
     def to_dict(self) -> Dict[str, Any]:
         data: Dict[str, Any] = dict(self.counters)
         data["run_id"] = self.run_id
@@ -239,6 +282,7 @@ class PerfStats:
         data["av_warnings"] = self._build_av_warning_summary()
         data["subtitle_burn"] = self._build_subtitle_burn_summary()
         data["ffprobe"] = self._build_ffprobe_summary()
+        data["scene_cache"] = self._build_scene_cache_summary()
         return data
 
     def write_json(self, output_path: Path) -> None:
@@ -269,3 +313,24 @@ def add_ms(name: str, value: float) -> None:
     stats = current_perf_stats()
     if stats is not None:
         stats.add_ms(name, value)
+
+
+def record_scene_cache_event(
+    *,
+    scene_id: str,
+    layer: str,
+    status: str,
+    key: str = "-",
+    reason: Optional[str] = None,
+    detail: Optional[Dict[str, Any]] = None,
+) -> None:
+    stats = current_perf_stats()
+    if stats is not None:
+        stats.record_scene_cache_event(
+            scene_id=scene_id,
+            layer=layer,
+            status=status,
+            key=key,
+            reason=reason,
+            detail=detail,
+        )

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from ....utils import perf_stats
 from ....utils.subtitle_text import is_effective_subtitle_text
 
 
@@ -48,6 +49,55 @@ class SceneCacheMixin:
             return self.cache_manager._generate_hash(key_data)[:8]
         except Exception:
             return "-"
+
+    def _scene_cache_component_keys(
+        self,
+        scene_hash_data: Dict[str, Any],
+        scene_base_hash_data: Dict[str, Any],
+    ) -> Dict[str, str]:
+        """Return short component keys that explain scene cache invalidation."""
+        subtitle_config_data = {
+            "scene_cache_component": "subtitle_config",
+            "subtitle_config": scene_hash_data.get("subtitle_config", {}),
+        }
+        return {
+            "base_key": self._cache_key_short(scene_base_hash_data),
+            "subtitle_config_key": self._cache_key_short(subtitle_config_data),
+        }
+
+    def _subtitle_timing_key(self, subtitle_entries: List[Dict[str, Any]]) -> str:
+        timing_data = {
+            "scene_cache_component": "subtitle_timing",
+            "entries": [
+                {
+                    "text": item.get("text", ""),
+                    "start": round(float(item.get("start", 0.0) or 0.0), 3),
+                    "duration": round(float(item.get("duration", 0.0) or 0.0), 3),
+                    "line_config": item.get("line_config", {}),
+                }
+                for item in subtitle_entries
+            ],
+        }
+        return self._cache_key_short(timing_data)
+
+    def _record_scene_cache_event(
+        self,
+        *,
+        scene_id: str,
+        layer: str,
+        status: str,
+        key: str = "-",
+        reason: str | None = None,
+        detail: Dict[str, Any] | None = None,
+    ) -> None:
+        perf_stats.record_scene_cache_event(
+            scene_id=scene_id,
+            layer=layer,
+            status=status,
+            key=key,
+            reason=reason,
+            detail=detail,
+        )
 
     def _build_subtitle_entries(
         self,

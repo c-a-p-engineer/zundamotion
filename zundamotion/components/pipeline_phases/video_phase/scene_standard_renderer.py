@@ -99,6 +99,12 @@ class SceneStandardRendererMixin:
             start_time_by_idx=start_time_by_idx,
         )
         subtitle_entries = self._build_subtitle_entries(scene_id, start_time_by_idx)
+        component_keys = self._scene_cache_component_keys(
+            scene_hash_data,
+            scene_base_hash_data,
+        )
+        subtitle_timing_key = self._subtitle_timing_key(subtitle_entries)
+        component_keys["subtitle_timing_key"] = subtitle_timing_key
 
         if cache_scene_base_video:
             cached_base_scene_path = self.cache_manager.get_cached_path(
@@ -107,22 +113,40 @@ class SceneStandardRendererMixin:
                 extension="mp4",
             )
             if cached_base_scene_path:
+                base_key = self._cache_key_short(scene_base_hash_data)
+                self._record_scene_cache_event(
+                    scene_id=scene_id,
+                    layer="base",
+                    status="HIT",
+                    key=base_key,
+                    detail=component_keys,
+                )
                 logger.info(
-                    "[SceneCache] scene=%s layer=base HIT key=%s file=%s; reusing before subtitle burn",
+                    "[SceneCache] scene=%s layer=base HIT key=%s subtitle_timing_key=%s file=%s; reusing before subtitle burn",
                     scene_id,
-                    self._cache_key_short(scene_base_hash_data),
+                    base_key,
+                    subtitle_timing_key,
                     cached_base_scene_path.name,
                 )
                 scene_output_path = cached_base_scene_path
                 if subtitle_entries:
+                    self._record_scene_cache_event(
+                        scene_id=scene_id,
+                        layer="sub",
+                        status="MISS",
+                        key=self._cache_key_short(scene_sub_hash_data),
+                        reason="subtitle_layer_changed_base_hit",
+                        detail=component_keys,
+                    )
                     scene_output_path = await self.video_renderer.apply_subtitle_overlays(
                         cached_base_scene_path,
                         subtitle_entries,
                         scene_id=scene_id,
                     )
                     logger.info(
-                        "[SceneCache] scene=%s layer=sub MISS -> burned subtitles from cached base (%d subtitles)",
+                        "[SceneCache] scene=%s layer=sub MISS reason=subtitle_layer_changed_base_hit subtitle_timing_key=%s -> burned subtitles from cached base (%d subtitles)",
                         scene_id,
+                        subtitle_timing_key,
                         len(subtitle_entries),
                     )
                     self.cache_manager.cache_file(
@@ -132,9 +156,10 @@ class SceneStandardRendererMixin:
                         extension="mp4",
                     )
                     logger.info(
-                        "[SceneCache] scene=%s layer=sub STORE key=%s subtitles=%d",
+                        "[SceneCache] scene=%s layer=sub STORE key=%s subtitle_timing_key=%s subtitles=%d",
                         scene_id,
                         self._cache_key_short(scene_sub_hash_data),
+                        subtitle_timing_key,
                         len(subtitle_entries),
                     )
                     if generate_no_sub_video:
@@ -147,13 +172,30 @@ class SceneStandardRendererMixin:
                 scene_results.append(scene_output_path)
                 pbar_scenes.update(1)
                 return scene_results
+            base_key = self._cache_key_short(scene_base_hash_data)
+            self._record_scene_cache_event(
+                scene_id=scene_id,
+                layer="base",
+                status="MISS",
+                key=base_key,
+                reason="base_video_not_cached",
+                detail=component_keys,
+            )
             logger.info(
-                "[SceneCache] scene=%s layer=base MISS key=%s reason=%s",
+                "[SceneCache] scene=%s layer=base MISS key=%s subtitle_timing_key=%s reason=%s",
                 scene_id,
-                self._cache_key_short(scene_base_hash_data),
+                base_key,
+                subtitle_timing_key,
                 "base_video_not_cached",
             )
         else:
+            self._record_scene_cache_event(
+                scene_id=scene_id,
+                layer="base",
+                status="DISABLED",
+                reason="cache_scene_base_video_false",
+                detail=component_keys,
+            )
             logger.info(
                 "[SceneCache] scene=%s layer=base disabled reason=cache_scene_base_video_false",
                 scene_id,
@@ -1137,9 +1179,10 @@ class SceneStandardRendererMixin:
                     extension="mp4",
                 )
                 logger.info(
-                    "[SceneCache] scene=%s layer=base STORE key=%s file_name=scene_%s_base.mp4",
+                    "[SceneCache] scene=%s layer=base STORE key=%s subtitle_timing_key=%s file_name=scene_%s_base.mp4",
                     scene_id,
                     self._cache_key_short(scene_base_hash_data),
+                    subtitle_timing_key,
                     scene_id,
                 )
             if subtitle_entries:
@@ -1154,9 +1197,10 @@ class SceneStandardRendererMixin:
                     extension="mp4",
                 )
                 logger.info(
-                    "[SceneCache] scene=%s layer=sub STORE key=%s subtitles=%d",
+                    "[SceneCache] scene=%s layer=sub STORE key=%s subtitle_timing_key=%s subtitles=%d",
                     scene_id,
                     self._cache_key_short(scene_sub_hash_data),
+                    subtitle_timing_key,
                     len(subtitle_entries),
                 )
                 if generate_no_sub_video:

@@ -63,7 +63,9 @@
 | ffprobe 種別 PerfSummary | ffprobe を duration/stream/other に分類して集計する | probe 削減対象を判断しやすくなる | 採用 |
 | media probe in-flight dedupe | 同一実行内の同一 duration/media-info probe をまとめる | 同一 probe の多重起動を避けられる | 採用 |
 | media-info stream probe in-flight dedupe | `has_audio_stream` などの同一 media-info probe を同一実行内でまとめる | 並列処理中の同一ファイル stream ffprobe 多重起動を避けられる | 採用 |
+| media duration in-flight dedupe | 同一実行内の同一 duration probe を完了前からまとめる | 並列処理中の同一 duration ffprobe 多重起動を避けられる | 採用 |
 | A/V safety instrumentation | `run_id`、`AVWarning`、subtitle burn、ffprobe caller/path を記録する | timestamp warning や重い subtitle burn の発生箇所を追跡できる | 採用 |
+| SceneCache miss observability | base/subtitle/timing の短縮キーと miss reason を PerfSummary に残す | キャッシュ無効化の原因をログ末尾と JSON から切り分けやすい | 採用 |
 | subtitle gap copy 最大化 | 字幕のない gap を stream copy で最大限使う案を検証した | `000_intro_channel-intro` では `SubtitleGap count=0` で削れる gap がなかった | 却下 |
 | subtitle PNG tight bbox 化 | 字幕 PNG を bbox に合わせて小さく crop する案を検証した | PNG は字幕ボックス相当サイズで、crop は背景ボックス表現を壊すリスクが高い | 却下 |
 | subtitle PNG input 共有 | 同じ字幕 PNG input を共有する案を検証した | `000_intro_channel-intro` では duplicate total `0` で input count は減らなかった | 却下 |

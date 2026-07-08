@@ -72,6 +72,10 @@ class SceneRenderer(
             scene_hash_data,
             scene_base_hash_data,
         )
+        component_keys = self._scene_cache_component_keys(
+            scene_hash_data,
+            scene_base_hash_data,
+        )
 
         scene_cp = bool(
             scene.get(
@@ -166,10 +170,20 @@ class SceneRenderer(
             extension="mp4",
         )
         if cached_scene_video_path:
+            sub_key = self._cache_key_short(scene_sub_hash_data)
+            self._record_scene_cache_event(
+                scene_id=scene_id,
+                layer="sub",
+                status="HIT",
+                key=sub_key,
+                detail=component_keys,
+            )
             logger.info(
-                "[SceneCache] scene=%s layer=sub HIT key=%s file=%s",
+                "[SceneCache] scene=%s layer=sub HIT key=%s base_key=%s subtitle_config_key=%s file=%s",
                 scene_id,
-                self._cache_key_short(scene_sub_hash_data),
+                sub_key,
+                component_keys["base_key"],
+                component_keys["subtitle_config_key"],
                 cached_scene_video_path.name,
             )
             pbar_scenes.update(1)
@@ -181,10 +195,17 @@ class SceneRenderer(
             extension="mp4",
         )
         if cached_legacy_scene_video_path:
+            legacy_key = self._cache_key_short(scene_hash_data)
+            self._record_scene_cache_event(
+                scene_id=scene_id,
+                layer="legacy",
+                status="HIT",
+                key=legacy_key,
+            )
             logger.info(
                 "[SceneCache] scene=%s layer=legacy HIT key=%s file=%s",
                 scene_id,
-                self._cache_key_short(scene_hash_data),
+                legacy_key,
                 cached_legacy_scene_video_path.name,
             )
             pbar_scenes.update(1)
@@ -197,21 +218,38 @@ class SceneRenderer(
                 extension="mp4",
             )
             if cached_scene_video_path:
+                legacy_sub_key = self._cache_key_short(scene_hash_data)
+                self._record_scene_cache_event(
+                    scene_id=scene_id,
+                    layer="legacy_sub",
+                    status="HIT",
+                    key=legacy_sub_key,
+                )
                 logger.info(
                     "[SceneCache] scene=%s layer=legacy_sub HIT key=%s file=%s",
                     scene_id,
-                    self._cache_key_short(scene_hash_data),
+                    legacy_sub_key,
                     cached_scene_video_path.name,
                 )
                 pbar_scenes.update(1)
                 return [cached_scene_video_path]
 
+        sub_key = self._cache_key_short(scene_sub_hash_data)
+        self._record_scene_cache_event(
+            scene_id=scene_id,
+            layer="sub",
+            status="MISS",
+            key=sub_key,
+            reason="subtitle_or_base_key_changed",
+            detail=component_keys,
+        )
         logger.info(
-            "[SceneCache] scene=%s layer=sub MISS key=%s base_key=%s reason=%s",
+            "[SceneCache] scene=%s layer=sub MISS key=%s base_key=%s subtitle_config_key=%s reason=%s",
             scene_id,
-            self._cache_key_short(scene_sub_hash_data),
-            self._cache_key_short(scene_base_hash_data),
-            "subtitle_config_or_timing_changed",
+            sub_key,
+            component_keys["base_key"],
+            component_keys["subtitle_config_key"],
+            "subtitle_or_base_key_changed",
         )
 
         if not getattr(self.phase, "parallel_scene_rendering", False):

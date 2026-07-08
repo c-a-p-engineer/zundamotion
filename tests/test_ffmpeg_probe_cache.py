@@ -59,3 +59,37 @@ def test_has_audio_stream_deduplicates_parallel_media_info_probe(
         assert calls == 1
 
     asyncio.run(_run())
+
+
+def test_media_duration_deduplicates_parallel_probe(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    async def _run() -> None:
+        media = tmp_path / "clip.mp4"
+        media.write_bytes(b"fake-media")
+        calls = 0
+
+        async def fake_run_ffmpeg_async(cmd, context=None):
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0.05)
+            return SimpleNamespace(
+                stdout=json.dumps({"format": {"duration": "12.34"}}),
+                stderr="",
+            )
+
+        ffmpeg_probe._duration_memo.clear()
+        ffmpeg_probe._duration_inflight.clear()
+        monkeypatch.setattr(ffmpeg_probe, "run_ffmpeg_async", fake_run_ffmpeg_async)
+
+        results = await asyncio.gather(
+            ffmpeg_probe.get_media_duration(str(media)),
+            ffmpeg_probe.get_media_duration(str(media)),
+            ffmpeg_probe.get_media_duration(str(media)),
+        )
+
+        assert results == [12.34, 12.34, 12.34]
+        assert calls == 1
+
+    asyncio.run(_run())

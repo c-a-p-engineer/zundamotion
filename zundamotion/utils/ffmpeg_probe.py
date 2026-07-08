@@ -15,6 +15,7 @@ from .logger import logger
 _media_info_memo: Dict[tuple, "MediaInfo"] = {}
 _media_info_inflight: Dict[tuple, "asyncio.Task[MediaInfo]"] = {}
 _duration_memo: Dict[tuple, float] = {}
+_duration_inflight: Dict[tuple, "asyncio.Task[float]"] = {}
 
 
 def _resolve_probe_caller(caller: Optional[str]) -> str:
@@ -163,30 +164,42 @@ async def get_audio_duration(file_path: str, caller: Optional[str] = None) -> fl
         key = ("aud", str(p.resolve()), int(st.st_mtime), st.st_size)
         if key in _duration_memo:
             return _duration_memo[key]
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            file_path,
-        ]
-        result = await run_ffmpeg_async(
-            cmd,
-            context={
-                "phase": "Probe",
-                "operation": "audio_duration",
-                "caller": resolved_caller,
-                "path": file_path,
-            },
-        )
-        info = json.loads(result.stdout)
-        duration = float(info["format"]["duration"])
-        duration = round(duration, 2)
-        _duration_memo[key] = duration
-        return duration
+        existing = _duration_inflight.get(key)
+        if existing is not None:
+            return await existing
+
+        async def _probe() -> float:
+            cmd = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+                file_path,
+            ]
+            result = await run_ffmpeg_async(
+                cmd,
+                context={
+                    "phase": "Probe",
+                    "operation": "audio_duration",
+                    "caller": resolved_caller,
+                    "path": file_path,
+                },
+            )
+            info = json.loads(result.stdout)
+            duration = round(float(info["format"]["duration"]), 2)
+            _duration_memo[key] = duration
+            return duration
+
+        task = asyncio.create_task(_probe())
+        _duration_inflight[key] = task
+        try:
+            return await task
+        finally:
+            if _duration_inflight.get(key) is task:
+                _duration_inflight.pop(key, None)
     except Exception as e:
         logger.error(f"Failed to get audio duration for {file_path}: {e}")
         raise
@@ -201,30 +214,42 @@ async def get_media_duration(file_path: str, caller: Optional[str] = None) -> fl
         key = ("med", str(p.resolve()), int(st.st_mtime), st.st_size)
         if key in _duration_memo:
             return _duration_memo[key]
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            file_path,
-        ]
-        result = await run_ffmpeg_async(
-            cmd,
-            context={
-                "phase": "Probe",
-                "operation": "media_duration",
-                "caller": resolved_caller,
-                "path": file_path,
-            },
-        )
-        info = json.loads(result.stdout)
-        duration = float(info["format"]["duration"])
-        duration = round(duration, 2)
-        _duration_memo[key] = duration
-        return duration
+        existing = _duration_inflight.get(key)
+        if existing is not None:
+            return await existing
+
+        async def _probe() -> float:
+            cmd = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+                file_path,
+            ]
+            result = await run_ffmpeg_async(
+                cmd,
+                context={
+                    "phase": "Probe",
+                    "operation": "media_duration",
+                    "caller": resolved_caller,
+                    "path": file_path,
+                },
+            )
+            info = json.loads(result.stdout)
+            duration = round(float(info["format"]["duration"]), 2)
+            _duration_memo[key] = duration
+            return duration
+
+        task = asyncio.create_task(_probe())
+        _duration_inflight[key] = task
+        try:
+            return await task
+        finally:
+            if _duration_inflight.get(key) is task:
+                _duration_inflight.pop(key, None)
     except Exception as e:
         logger.error(f"Failed to get media duration for {file_path}: {e}")
         raise
