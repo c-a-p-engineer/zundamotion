@@ -234,6 +234,61 @@ def test_audio_phase_prefetches_audio_generation_concurrently(tmp_path):
     asyncio.run(_run())
 
 
+def test_audio_phase_l_cut_passes_audio_tail_to_next_line(tmp_path):
+    async def _run() -> None:
+        config = {
+            "video": {"fps": 30, "face_anim": {}},
+            "voice": {},
+            "system": {"video_extensions": [".mp4"]},
+        }
+        audio_phase = AudioPhase(config, tmp_path, StubCacheManager(tmp_path), AudioParams())
+        first_audio = tmp_path / "first.wav"
+        second_audio = tmp_path / "second.wav"
+        first_audio.write_bytes(b"first")
+        second_audio.write_bytes(b"second")
+
+        async def fake_generate_audio(
+            text: str, line_config: Dict[str, Any], output_filename: str
+        ) -> Tuple[Path, List[Tuple[int, str]], List[Dict[str, Any]]]:
+            if output_filename.endswith("_1"):
+                return first_audio, [(3, text)], []
+            return second_audio, [(3, text)], []
+
+        audio_phase.audio_gen.generate_audio = fake_generate_audio  # type: ignore[assignment]
+
+        timeline = StubTimeline()
+        scenes = [
+            {
+                "id": "lcut_demo",
+                "lines": [
+                    {
+                        "text": "前の音を残す",
+                        "speaker_name": "copetan",
+                        "l_cut": {"duration": 0.3, "volume": 0.8},
+                    },
+                    {"text": "次の絵に入る", "speaker_name": "copetan"},
+                ],
+            }
+        ]
+
+        line_data_map, _voice_usage = await audio_phase.run(scenes, timeline)
+
+        first = line_data_map["lcut_demo_1"]
+        second = line_data_map["lcut_demo_2"]
+        assert first["audio_full_duration"] == pytest.approx(0.8)
+        assert first["duration"] == pytest.approx(0.5)
+        assert timeline.events[0][1] == pytest.approx(0.5)
+        assert len(second["extra_audio_overlays"]) == 1
+        overlay = second["extra_audio_overlays"][0]
+        assert overlay["path"] == str(first_audio)
+        assert overlay["source_start"] == pytest.approx(0.5)
+        assert overlay["duration"] == pytest.approx(0.3)
+        assert overlay["start"] == 0.0
+        assert overlay["volume"] == 0.8
+
+    asyncio.run(_run())
+
+
 def test_audio_phase_skips_face_anim_for_explicitly_hidden_speaker(tmp_path):
     async def _run() -> None:
         config = {

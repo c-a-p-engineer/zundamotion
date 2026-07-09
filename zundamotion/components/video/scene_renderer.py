@@ -268,6 +268,7 @@ async def render_wait_clip(
     line_config: Dict[str, Any],
     characters_config: Optional[List[Dict[str, Any]]] = None,
     image_layer_overlays: Optional[List[Dict[str, Any]]] = None,
+    extra_audio_overlays: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Path]:
     output_path = renderer.temp_dir / f"{output_filename}.mp4"
     width = renderer.video_params.width
@@ -379,6 +380,21 @@ async def render_wait_clip(
             ov_entry = dict(ov)
             ov_entry["_ff_idx"] = ff_idx
             image_layer_inputs.append(ov_entry)
+
+    extra_audio_inputs: List[Dict[str, Any]] = []
+    if extra_audio_overlays:
+        for overlay in extra_audio_overlays:
+            if not isinstance(overlay, dict):
+                continue
+            path_str = overlay.get("path")
+            if not path_str:
+                continue
+            cmd.extend(["-i", str(Path(str(path_str)))])
+            ff_idx = len(input_layers)
+            input_layers.append({"type": "audio", "index": ff_idx})
+            entry = dict(overlay)
+            entry["_ff_idx"] = ff_idx
+            extra_audio_inputs.append(entry)
 
     char_inputs = await collect_character_inputs(
         renderer=renderer,
@@ -581,8 +597,46 @@ async def render_wait_clip(
 
     filter_parts.append(f"{current_video_stream}format=yuv420p[final_v]")
 
+    audio_map = "1:a"
+    if extra_audio_inputs:
+        mix_labels = [f"[{audio_map}]"]
+        for extra_idx, overlay in enumerate(extra_audio_inputs):
+            ff_idx = overlay.get("_ff_idx")
+            if ff_idx is None:
+                continue
+            try:
+                source_start = max(0.0, float(overlay.get("source_start", 0.0) or 0.0))
+            except Exception:
+                source_start = 0.0
+            try:
+                overlay_duration = max(0.0, float(overlay.get("duration", duration) or duration))
+            except Exception:
+                overlay_duration = duration
+            try:
+                overlay_start = max(0.0, float(overlay.get("start", 0.0) or 0.0))
+            except Exception:
+                overlay_start = 0.0
+            try:
+                overlay_volume = float(overlay.get("volume", 1.0) or 1.0)
+            except Exception:
+                overlay_volume = 1.0
+            trimmed = f"[wait_extra_audio_trim_{extra_idx}]"
+            delayed = f"[wait_extra_audio_{extra_idx}]"
+            filter_parts.append(
+                f"[{ff_idx}:a]atrim=start={source_start:.6f}:duration={overlay_duration:.6f},"
+                f"asetpts=PTS-STARTPTS,volume={overlay_volume:.6f}{trimmed}"
+            )
+            delay_ms = max(0, int(overlay_start * 1000))
+            filter_parts.append(f"{trimmed}adelay={delay_ms}:all=1{delayed}")
+            mix_labels.append(delayed)
+        if len(mix_labels) > 1:
+            filter_parts.append(
+                f"{''.join(mix_labels)}amix=inputs={len(mix_labels)}:duration=longest:dropout_transition=0[wait_final_a]"
+            )
+            audio_map = "[wait_final_a]"
+
     cmd.extend(["-filter_complex", ";".join(filter_parts)])
-    cmd.extend(["-map", "[final_v]", "-map", "1:a"])
+    cmd.extend(["-map", "[final_v]", "-map", audio_map])
     cmd.extend(["-t", str(duration)])
     cmd.extend(renderer.video_params.to_ffmpeg_opts(renderer.hw_kind))
     cmd.extend(renderer.audio_params.to_ffmpeg_opts())

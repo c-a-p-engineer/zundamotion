@@ -135,6 +135,16 @@ def resolve_background_effects(
                 index=idx,
                 id_prefix=id_prefix,
             )
+        elif effect_type in {"bg:pan_zoom", "bg:ken_burns"}:
+            snippet = _resolve_background_pan_zoom(
+                effect,
+                input_label=current_label,
+                duration=duration,
+                width=width,
+                height=height,
+                index=idx,
+                id_prefix=id_prefix,
+            )
         else:
             logger.debug("[Effects] Unsupported background effect type: %s", effect_type)
             continue
@@ -444,6 +454,103 @@ def _resolve_background_shake(
         overlay_kwargs={},
         dynamic=dynamic,
         output_label=crop_label,
+    )
+
+
+def _clamp_float(value: Any, default: float, min_value: float, max_value: float) -> float:
+    try:
+        parsed = float(value)
+    except Exception:
+        parsed = default
+    return max(min_value, min(max_value, parsed))
+
+
+def _extract_zoom_range(effect: Dict[str, Any]) -> tuple[float, float]:
+    zoom_cfg = effect.get("zoom", {})
+    if isinstance(zoom_cfg, dict):
+        start = zoom_cfg.get("from", zoom_cfg.get("start", effect.get("from", 1.0)))
+        end = zoom_cfg.get("to", zoom_cfg.get("end", effect.get("to", start)))
+    else:
+        start = 1.0
+        end = zoom_cfg if zoom_cfg is not None else 1.0
+    return (
+        _clamp_float(start, 1.0, 1.0, 4.0),
+        _clamp_float(end, 1.0, 1.0, 4.0),
+    )
+
+
+def _extract_focus(value: Any, default_x: float, default_y: float) -> tuple[float, float]:
+    if isinstance(value, dict):
+        return (
+            _clamp_float(value.get("x", value.get("horizontal", default_x)), default_x, 0.0, 1.0),
+            _clamp_float(value.get("y", value.get("vertical", default_y)), default_y, 0.0, 1.0),
+        )
+    return default_x, default_y
+
+
+def _extract_pan_range(effect: Dict[str, Any]) -> tuple[float, float, float, float]:
+    pan_cfg = effect.get("pan", effect.get("focus", {}))
+    if isinstance(pan_cfg, dict) and ("from" in pan_cfg or "to" in pan_cfg):
+        start_x, start_y = _extract_focus(pan_cfg.get("from"), 0.5, 0.5)
+        end_x, end_y = _extract_focus(pan_cfg.get("to"), start_x, start_y)
+        return start_x, start_y, end_x, end_y
+    start_x, start_y = _extract_focus(pan_cfg, 0.5, 0.5)
+    return start_x, start_y, start_x, start_y
+
+
+def _escape_zoompan_expr(expr: str) -> str:
+    return expr.replace(",", "\\,").replace(":", "\\:")
+
+
+def _resolve_background_pan_zoom(
+    effect: Dict[str, Any],
+    *,
+    input_label: str,
+    duration: float,
+    width: int,
+    height: int,
+    index: int,
+    id_prefix: str,
+) -> Optional[FilterSnippet]:
+    """Apply a Ken Burns style pan/zoom to the prepared background stream."""
+
+    zoom_start, zoom_end = _extract_zoom_range(effect)
+    pan_start_x, pan_start_y, pan_end_x, pan_end_y = _extract_pan_range(effect)
+    if (
+        abs(zoom_start - zoom_end) < 1e-6
+        and abs(pan_start_x - pan_end_x) < 1e-6
+        and abs(pan_start_y - pan_end_y) < 1e-6
+        and abs(zoom_start - 1.0) < 1e-6
+    ):
+        return None
+
+    try:
+        fps = float(effect.get("fps", 30.0))
+    except Exception:
+        fps = 30.0
+    fps = max(1.0, min(120.0, fps))
+    total_frames = max(1.0, duration * fps)
+    progress = f"min(max(on/{total_frames:.6f},0),1)"
+    zoom_expr = f"{zoom_start:.6f}+({zoom_end - zoom_start:.6f})*{progress}"
+    focus_x_expr = f"{pan_start_x:.6f}+({pan_end_x - pan_start_x:.6f})*{progress}"
+    focus_y_expr = f"{pan_start_y:.6f}+({pan_end_y - pan_start_y:.6f})*{progress}"
+    x_expr = f"(iw-iw/zoom)*({focus_x_expr})"
+    y_expr = f"(ih-ih/zoom)*({focus_y_expr})"
+    label = f"[{id_prefix}_pan_zoom_{index}]"
+    filter_text = (
+        f"{input_label}zoompan="
+        f"z='{_escape_zoompan_expr(zoom_expr)}':"
+        f"x='{_escape_zoompan_expr(x_expr)}':"
+        f"y='{_escape_zoompan_expr(y_expr)}':"
+        "d=1:"
+        f"s={width}x{height}:"
+        f"fps={fps:.3f}{label}"
+    )
+    return FilterSnippet(
+        filter_chain=[filter_text],
+        overlay_kwargs={},
+        dynamic=True,
+        output_label=label,
     )
 
 

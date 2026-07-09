@@ -80,6 +80,19 @@ class AudioPhase:
                 return True
         return False
 
+    @staticmethod
+    def _cut_duration(line: Dict[str, Any], key: str) -> float:
+        cfg = line.get(key)
+        raw: Any = 0.0
+        if isinstance(cfg, dict):
+            raw = cfg.get("duration", 0.0)
+        elif cfg is not None:
+            raw = cfg
+        try:
+            return max(0.0, float(raw or 0.0))
+        except Exception:
+            return 0.0
+
     @time_log(logger)
     async def run(
         self, scenes: List[Dict[str, Any]], timeline: Timeline
@@ -91,6 +104,7 @@ class AudioPhase:
         total_lines = sum(len(s.get("lines", [])) for s in scenes)
         audio_sem = asyncio.Semaphore(self.audio_workers)
         ordered_entries: List[Dict[str, Any]] = []
+        pending_l_cut_audio: Optional[Dict[str, Any]] = None
 
         async def _generate_line_audio(
             read_text: str,
@@ -274,6 +288,10 @@ class AudioPhase:
                 line = entry["line"]
                 line_idx = entry["line_idx"]
                 line_id = entry["line_id"]
+                incoming_audio_overlays: List[Dict[str, Any]] = []
+                if pending_l_cut_audio is not None:
+                    incoming_audio_overlays.append(pending_l_cut_audio)
+                    pending_l_cut_audio = None
 
                 if entry_type == "wait":
                         pbar.set_description(
@@ -295,6 +313,7 @@ class AudioPhase:
                             "line_config": line,
                             "audio_path": None,
                             "text": None,
+                            "extra_audio_overlays": incoming_audio_overlays,
                         }
                         pbar.update(1)
                         continue
@@ -310,6 +329,7 @@ class AudioPhase:
                             "line_config": line,
                             "audio_path": None,
                             "text": None,
+                            "extra_audio_overlays": incoming_audio_overlays,
                         }
                         pbar.update(1)
                         continue
@@ -393,12 +413,36 @@ class AudioPhase:
                         duration = await self.cache_manager.get_or_create_media_duration(
                             insert_path
                         )
+                        try:
+                            insert_speed = float(insert_config.get("speed", 1.0))
+                        except Exception:
+                            insert_speed = 1.0
+                        insert_speed = max(0.25, min(4.0, insert_speed))
+                        duration = duration / insert_speed
                     else:
                         duration = insert_config.get("duration", 2.0)
                 else:
                     duration = await self.cache_manager.get_or_create_media_duration(
                         audio_path
                     )
+
+                audio_full_duration = float(duration)
+                l_cut_duration = self._cut_duration(line, "l_cut")
+                if l_cut_duration > 0 and audio_full_duration > 0.05:
+                    l_cut_duration = min(l_cut_duration, max(0.0, audio_full_duration - 0.05))
+                    if l_cut_duration > 0:
+                        duration = max(0.05, audio_full_duration - l_cut_duration)
+                        pending_l_cut_audio = {
+                            "path": str(audio_path),
+                            "source_start": duration,
+                            "duration": l_cut_duration,
+                            "start": 0.0,
+                            "volume": float(
+                                (line.get("l_cut") or {}).get("volume", 1.0)
+                                if isinstance(line.get("l_cut"), dict)
+                                else 1.0
+                            ),
+                        }
 
                 voice_layers_cfg = [
                     layer
@@ -630,10 +674,12 @@ class AudioPhase:
                     "type": "talk",
                     "audio_path": audio_path,
                     "duration": duration,
+                    "audio_full_duration": audio_full_duration,
                     "text": effective_subtitle_text,
                     "tts_text": read_text,
                     "line_config": line,
                     "face_anim": face_anim,
+                    "extra_audio_overlays": incoming_audio_overlays,
                 }
                 pbar.update(1)
         # Ensure a clean newline after closing the progress bar

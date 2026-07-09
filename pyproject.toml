@@ -40,3 +40,7 @@ include = ["zundamotion*"]
 [tool.setuptools.package-data]
 zundamotion = ["templates/*.yaml", "plugins/builtin/*/plugin.yaml"]
 
+[tool.pytest.ini_options]
+markers = [
+  "smoke: render representative sample scripts and validate output media",
+]

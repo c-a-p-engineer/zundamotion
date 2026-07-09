@@ -20,6 +20,7 @@ from .timeline import Timeline
 from .plugins.manager import initialize_plugins
 from .utils.ffmpeg_params import AudioParams, VideoParams
 from .utils.ffmpeg_probe import get_media_duration
+from .utils.export_presets import apply_export_preset
 from .utils.logger import KVLogger, logger, time_log
 from .utils import perf_stats
 
@@ -39,7 +40,7 @@ class GenerationPipeline:
         quality: str = "balanced",
         final_copy_only: bool = False,
     ):
-        self.config = config
+        self.config = apply_export_preset(config)
         self.no_cache = no_cache
         self.cache_refresh = cache_refresh
         self.jobs = jobs

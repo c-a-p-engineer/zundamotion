@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 from zundamotion.exceptions import ValidationError
 from zundamotion.timeline import Timeline
-from zundamotion.utils.ffmpeg_audio import add_bgm_segments_to_video
+from zundamotion.utils.ffmpeg_audio import add_bgm_segments_to_video, apply_master_audio_filter
 from zundamotion.utils.ffmpeg_params import AudioParams
 from zundamotion.utils.ffmpeg_probe import get_audio_duration, get_media_duration
 from zundamotion.utils.logger import logger, time_log
@@ -28,10 +28,11 @@ class BGMPhase:
         bgm_layers = (
             (self.config.get("script", {}) or {}).get("bgm_layers") or []
         )
+        output_path = final_video_path
         if not bgm_layers or not timeline.bgm_events:
-            return final_video_path
+            return await self._apply_mastering_if_enabled(output_path)
 
-        video_duration = await get_media_duration(str(final_video_path))
+        video_duration = await get_media_duration(str(output_path))
         events = [
             dict(evt, _index=idx) for idx, evt in enumerate(timeline.bgm_events)
         ]
@@ -145,7 +146,7 @@ class BGMPhase:
                 _close_segment(bgm_id, video_duration, fade_out=0.0)
 
         if not segments:
-            return final_video_path
+            return await self._apply_mastering_if_enabled(output_path)
 
         logger.debug("BGM segments: %s", json.dumps(segments, ensure_ascii=False))
         output_path = self.temp_dir / "final_with_bgm.mp4"
@@ -157,4 +158,26 @@ class BGMPhase:
             audio_params=self.audio_params,
         )
         logger.debug("BGM filter_complex: %s", filter_complex)
+        return await self._apply_mastering_if_enabled(output_path)
+
+    async def _apply_mastering_if_enabled(self, video_path: Path) -> Path:
+        audio_cfg = self.config.get("audio", {}) or {}
+        mastering_cfg = self.config.get("mastering", {}) or {}
+        loudnorm_cfg = mastering_cfg.get("loudnorm")
+        if loudnorm_cfg is None:
+            loudnorm_cfg = audio_cfg.get("master_loudnorm")
+        if loudnorm_cfg is False or loudnorm_cfg is None:
+            return video_path
+        if loudnorm_cfg is True:
+            loudnorm_cfg = {}
+        if not isinstance(loudnorm_cfg, dict):
+            raise ValidationError("'audio.master_loudnorm' must be a boolean or dictionary.")
+
+        output_path = self.temp_dir / "final_mastered.mp4"
+        await apply_master_audio_filter(
+            str(video_path),
+            str(output_path),
+            audio_params=self.audio_params,
+            loudnorm=loudnorm_cfg,
+        )
         return output_path

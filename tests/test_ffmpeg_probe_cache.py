@@ -45,9 +45,17 @@ def test_has_audio_stream_deduplicates_parallel_media_info_probe(
                 stderr="",
             )
 
-        ffmpeg_probe._media_info_memo.clear()
-        ffmpeg_probe._media_info_inflight.clear()
-        monkeypatch.setattr(ffmpeg_probe, "run_ffmpeg_async", fake_run_ffmpeg_async)
+        ffmpeg_probe.clear_probe_caches()
+        monkeypatch.setitem(
+            ffmpeg_probe.get_media_info.__globals__,
+            "run_ffmpeg_async",
+            fake_run_ffmpeg_async,
+        )
+        monkeypatch.setitem(
+            has_audio_stream.__globals__,
+            "get_media_info",
+            ffmpeg_probe.get_media_info,
+        )
 
         results = await asyncio.gather(
             has_audio_stream(str(media)),
@@ -79,9 +87,12 @@ def test_media_duration_deduplicates_parallel_probe(
                 stderr="",
             )
 
-        ffmpeg_probe._duration_memo.clear()
-        ffmpeg_probe._duration_inflight.clear()
-        monkeypatch.setattr(ffmpeg_probe, "run_ffmpeg_async", fake_run_ffmpeg_async)
+        ffmpeg_probe.clear_probe_caches()
+        monkeypatch.setitem(
+            ffmpeg_probe.get_media_duration.__globals__,
+            "run_ffmpeg_async",
+            fake_run_ffmpeg_async,
+        )
 
         results = await asyncio.gather(
             ffmpeg_probe.get_media_duration(str(media)),

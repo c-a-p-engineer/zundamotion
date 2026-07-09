@@ -78,9 +78,22 @@ class SceneStandardRendererMixin:
 
             enter_pad = _max_dur("enter_duration")
             leave_pad = _max_dur("leave_duration")
-            data["pre_duration"] = enter_pad
+            j_cut_cfg = line.get("j_cut")
+            try:
+                j_cut_pad = float(
+                    (j_cut_cfg or {}).get(
+                        "duration",
+                        line.get("audio_delay", 0.0),
+                    )
+                    if isinstance(j_cut_cfg, dict)
+                    else line.get("audio_delay", 0.0)
+                )
+            except Exception:
+                j_cut_pad = 0.0
+            j_cut_pad = max(0.0, j_cut_pad)
+            data["pre_duration"] = enter_pad + j_cut_pad
             data["post_duration"] = leave_pad
-            data["duration"] = float(data.get("duration", 0.0)) + enter_pad + leave_pad
+            data["duration"] = float(data.get("duration", 0.0)) + enter_pad + j_cut_pad + leave_pad
 
         scene_duration = sum(
             line_data_map[f"{scene_id}_{idx + 1}"]["duration"]
@@ -693,6 +706,11 @@ class SceneStandardRendererMixin:
                 duration = line_data["duration"]
                 pre_dur = float(line_data.get("pre_duration", 0.0))
                 line_config = line_data["line_config"]
+                extra_audio_overlays = [
+                    item
+                    for item in (line_data.get("extra_audio_overlays") or [])
+                    if isinstance(item, dict)
+                ]
                 bg_layout = self._resolve_background_layout(line_config)
                 line_bg_image = self._resolve_background_source(line_config, bg_image)
                 if not line_bg_image:
@@ -814,6 +832,7 @@ class SceneStandardRendererMixin:
                         "video_config": self.config.get("video", {}),
                         "line_config": line_config,
                         "image_layer_overlays": line_image_layers,
+                        "extra_audio_overlays": extra_audio_overlays,
                         "hw_kind": self.hw_kind,
                         "video_params": self.video_params.__dict__,
                         "audio_params": self.audio_params.__dict__,
@@ -831,6 +850,7 @@ class SceneStandardRendererMixin:
                             line_config,
                             characters_config=line_config.get("characters", []) or [],
                             image_layer_overlays=line_image_layers,
+                            extra_audio_overlays=extra_audio_overlays,
                         )
                         if clip_path is None:
                             raise PipelineError(
@@ -936,6 +956,7 @@ class SceneStandardRendererMixin:
                     "bgm_config": self.config.get("bgm", {}),
                     "insert_config": effective_insert,
                     "image_layer_overlays": line_image_layers,
+                    "extra_audio_overlays": extra_audio_overlays,
                     "static_chars_in_base": bool(static_char_keys),
                     "static_insert_in_base": static_insert_in_base,
                     "hw_kind": self.hw_kind,
@@ -970,6 +991,7 @@ class SceneStandardRendererMixin:
                         subtitle_line_config=line_config,
                         insert_config=effective_insert,
                         image_layer_overlays=line_image_layers,
+                        extra_audio_overlays=extra_audio_overlays,
                         background_effects=line_config.get("background_effects"),
                         screen_effects=line_config.get("screen_effects"),
                         face_anim=face_anim_list,

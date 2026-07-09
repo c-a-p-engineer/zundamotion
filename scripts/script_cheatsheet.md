@@ -144,6 +144,8 @@ scenes:
 video:
   background_fit: contain      # contain / cover / fit_width / fit_height
 
+export_preset: youtube_1080p   # youtube_1080p / youtube_1440p / shorts_1080x1920 / draft_720p
+
 background:
   default: assets/bg/room.png
   fill_color: "#0F172A"
@@ -151,6 +153,7 @@ background:
 ```
 
 - `video.background_fit` で背景のフィットモードを指定。余白の扱いは `background.fill_color` に従います。縦長キャンバスの比較: [`sample_vertical.yaml`](./sample_vertical.yaml)。
+- `export_preset` は出力サイズ・fps・音声ビットレートの既定値をまとめて設定します。`video.width` などを明示した場合は明示値が優先されます。
 - ルート `background` はシーンで `bg` が未指定の場合のデフォルト。`anchor` / `position` / `fit` はシーンや行ごとにも上書き可能です。
 - 行レベルの `background` でズームやパンを切り替えることで、同じ素材でも構図を変えられます。
 - `defaults.background_persist: true` またはシーンの `background_persist: true` を指定すると、`background.path` を指定した行以降は、省略行でも直前の背景を使い続けます。`false` の場合、省略行はシーンの `bg` またはルート `background.default` に戻ります。
@@ -563,6 +566,7 @@ lines:
 
 - `background_effects` はシーン合成前の背景ストリームに適用され、立ち絵や字幕の座標には影響しません。
 - `bg:shake_bg`: `pad`→`crop` チェーンで背景のみを平行移動します。`amplitude`, `freq`, `easing`, `offset`, `padding` が指定でき、サンプルは [`sample_bg_shake.yaml`](./sample_bg_shake.yaml) を参照してください。
+- `bg:pan_zoom` / `bg:ken_burns`: 背景のみをパン/ズームします。`zoom.from` / `zoom.to` と `pan.from` / `pan.to` を 0.0〜1.0 のフォーカス位置で指定します。
 
 ## 画像レイヤー (`image_layers`)
 
@@ -676,6 +680,7 @@ lines:
 - BGMの start/stop 切り替え例は [`sample_bgm.yaml`](./sample_bgm.yaml) を参照してください。
 - 行ごとの `speed` / `pitch` / `voice_style` は VOICEVOX の音声チューニングに利用します。
 - `defaults.characters.<name>.speaker_id` や行の `speaker_id` で話者を指定してください。
+- `audio.master_loudnorm: true` または `audio.master_loudnorm: {i: -16, lra: 11, tp: -1.5}` で最終音声に `loudnorm` を適用できます。
 
 ## Topic（チャプター）
 

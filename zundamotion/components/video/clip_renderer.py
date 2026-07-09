@@ -41,6 +41,27 @@ def _to_offset_expr(value: Any) -> str:
     return str(value)
 
 
+def _media_speed(value: Any) -> float:
+    try:
+        speed = float(value)
+    except Exception:
+        speed = 1.0
+    return max(0.25, min(4.0, speed))
+
+
+def _atempo_chain(speed: float) -> str:
+    remaining = max(0.25, min(4.0, float(speed)))
+    parts: List[str] = []
+    while remaining > 2.0:
+        parts.append("atempo=2.000000")
+        remaining /= 2.0
+    while remaining < 0.5:
+        parts.append("atempo=0.500000")
+        remaining /= 0.5
+    parts.append(f"atempo={remaining:.6f}")
+    return ",".join(parts)
+
+
 async def render_clip(
     renderer: "VideoRenderer",
     audio_path: Path,
@@ -52,6 +73,7 @@ async def render_clip(
     subtitle_line_config: Optional[Dict[str, Any]] = None,
     insert_config: Optional[Dict[str, Any]] = None,
     image_layer_overlays: Optional[List[Dict[str, Any]]] = None,
+    extra_audio_overlays: Optional[List[Dict[str, Any]]] = None,
     background_effects: Optional[List[Any]] = None,
     screen_effects: Optional[List[Any]] = None,
     subtitle_png_path: Optional[Path] = None,
@@ -208,9 +230,11 @@ async def render_clip(
     insert_ffmpeg_index = -1
     insert_audio_index = -1
     insert_is_image = False
+    insert_speed = 1.0
     insert_path: Optional[Path] = None
     if insert_config:
         insert_path = Path(insert_config["path"])
+        insert_speed = _media_speed(insert_config.get("speed", 1.0))
         insert_is_image = insert_path.suffix.lower() in [
             ".png",
             ".jpg",
@@ -260,6 +284,23 @@ async def render_clip(
             ov_entry = dict(ov)
             ov_entry["_ff_idx"] = ff_idx
             image_layer_inputs.append(ov_entry)
+
+    # 3.6) Extra audio overlays (J/L cut tails, etc.)
+    extra_audio_inputs: List[Dict[str, Any]] = []
+    if extra_audio_overlays:
+        for overlay in extra_audio_overlays:
+            if not isinstance(overlay, dict):
+                continue
+            path_str = overlay.get("path")
+            if not path_str:
+                continue
+            audio_overlay_path = Path(str(path_str))
+            cmd.extend(["-i", str(audio_overlay_path)])
+            ff_idx = len(input_layers)
+            input_layers.append({"type": "audio", "index": ff_idx})
+            entry = dict(overlay)
+            entry["_ff_idx"] = ff_idx
+            extra_audio_inputs.append(entry)
 
     # 4) Characters (optional)
     char_inputs = await collect_character_inputs(
@@ -475,6 +516,12 @@ async def render_clip(
         scale = float(insert_config.get("scale", 1.0))
         anchor = insert_config.get("anchor", "middle_center")
         pos = insert_config.get("position", {"x": "0", "y": "0"})
+        insert_video_input = f"[{insert_ffmpeg_index}:v]"
+        if not insert_is_image and abs(insert_speed - 1.0) > 1e-6:
+            filter_complex_parts.append(
+                f"{insert_video_input}setpts=PTS/{insert_speed:.6f}[insert_speed_v]"
+            )
+            insert_video_input = "[insert_speed_v]"
         x_expr, y_expr = calculate_overlay_position(
             "W",
             "H",
@@ -491,18 +538,18 @@ async def render_clip(
                 # ここに来るのは想定外（uses_alpha_overlay=True でCPUに落ちる想定）
                 # ただ、保険として rgba→hwupload_cuda→scale_cuda
                 filter_complex_parts.append(
-                    f"[{insert_ffmpeg_index}:v]format=rgba,hwupload_cuda,{renderer.scale_filter}=iw*{scale}:ih*{scale}[insert_scaled]"
+                    f"{insert_video_input}format=rgba,hwupload_cuda,{renderer.scale_filter}=iw*{scale}:ih*{scale}[insert_scaled]"
                 )
             else:
                 filter_complex_parts.append(
-                    f"[{insert_ffmpeg_index}:v]format=nv12,hwupload_cuda,{renderer.scale_filter}=iw*{scale}:ih*{scale}[insert_scaled]"
+                    f"{insert_video_input}format=nv12,hwupload_cuda,{renderer.scale_filter}=iw*{scale}:ih*{scale}[insert_scaled]"
                 )
             overlay_streams.append("[insert_scaled]")
             overlay_filters.append(f"overlay_cuda=x={x_expr}:y={y_expr}")
         elif renderer.gpu_overlay_backend == "opencl" and not _force_cpu and (get_hw_filter_mode() != "cpu" or renderer.allow_opencl_overlay_in_cpu_mode):
             # スケールはCPUで前処理 → OpenCL へアップロードして overlay_opencl
             filter_complex_parts.append(
-                f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}[insert_scaled]"
+                f"{insert_video_input}scale=iw*{scale}:ih*{scale}[insert_scaled]"
             )
             filter_complex_parts.append(
                 f"[insert_scaled]format=rgba,hwupload[insert_gpu]"
@@ -511,7 +558,7 @@ async def render_clip(
             overlay_filters.append(f"overlay_opencl=x={x_expr}:y={y_expr}")
         else:
             filter_complex_parts.append(
-                f"[{insert_ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}:flags={renderer.scale_flags}[insert_scaled]"
+                f"{insert_video_input}scale=iw*{scale}:ih*{scale}:flags={renderer.scale_flags}[insert_scaled]"
             )
             overlay_streams.append("[insert_scaled]")
             overlay_filters.append(f"overlay=x={x_expr}:y={y_expr}")
@@ -748,8 +795,11 @@ async def render_clip(
     audio_src = None
     if insert_config and insert_audio_index != -1:
         volume = float(insert_config.get("volume", 1.0))
+        insert_audio_filters = [f"volume={volume}"]
+        if abs(insert_speed - 1.0) > 1e-6:
+            insert_audio_filters.append(_atempo_chain(insert_speed))
         filter_complex_parts.append(
-            f"[{insert_audio_index}:a]volume={volume}[insert_audio_vol]"
+            f"[{insert_audio_index}:a]{','.join(insert_audio_filters)}[insert_audio_vol]"
         )
         if has_speech_audio:
             filter_complex_parts.append(
@@ -766,6 +816,46 @@ async def render_clip(
                 f"anullsrc=channel_layout=stereo:sample_rate={renderer.audio_params.sample_rate}[sil]"
             )
             audio_src = "[sil]"
+
+    if extra_audio_inputs:
+        mix_labels = [audio_src]
+        for extra_idx, overlay in enumerate(extra_audio_inputs):
+            ff_idx = overlay.get("_ff_idx")
+            if ff_idx is None:
+                continue
+            try:
+                source_start = max(0.0, float(overlay.get("source_start", 0.0) or 0.0))
+            except Exception:
+                source_start = 0.0
+            try:
+                overlay_duration = max(0.0, float(overlay.get("duration", duration) or duration))
+            except Exception:
+                overlay_duration = duration
+            try:
+                overlay_start = max(0.0, float(overlay.get("start", 0.0) or 0.0))
+            except Exception:
+                overlay_start = 0.0
+            try:
+                overlay_volume = float(overlay.get("volume", 1.0) or 1.0)
+            except Exception:
+                overlay_volume = 1.0
+            trimmed = f"[extra_audio_trim_{extra_idx}]"
+            delayed = f"[extra_audio_{extra_idx}]"
+            filter_complex_parts.append(
+                f"[{ff_idx}:a]atrim=start={source_start:.6f}:duration={overlay_duration:.6f},"
+                f"asetpts=PTS-STARTPTS,volume={overlay_volume:.6f}{trimmed}"
+            )
+            delay_ms = max(0, int(overlay_start * 1000))
+            filter_complex_parts.append(
+                f"{trimmed}adelay={delay_ms}:all=1{delayed}"
+            )
+            mix_labels.append(delayed)
+        if len(mix_labels) > 1:
+            mixed_label = "[mixed_extra_a]"
+            filter_complex_parts.append(
+                f"{''.join(mix_labels)}amix=inputs={len(mix_labels)}:duration=longest:dropout_transition=0{mixed_label}"
+            )
+            audio_src = mixed_label
 
     delay_ms = max(0, int(audio_delay * 1000))
     filter_complex_parts.append(
@@ -845,6 +935,9 @@ async def render_clip(
                     subtitle_line_config=subtitle_line_config,
                     insert_config=insert_config,
                     image_layer_overlays=image_layer_overlays,
+                    extra_audio_overlays=extra_audio_overlays,
+                    background_effects=background_effects,
+                    screen_effects=screen_effects,
                     subtitle_png_path=subtitle_png_path,
                     face_anim=face_anim,
                     _force_cpu=True,

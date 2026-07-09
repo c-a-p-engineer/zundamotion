@@ -1,0 +1,23 @@
+meta:
+  title: "Smoke minimal"
+  version: 1
+
+video:
+  width: 320
+  height: 180
+  fps: 10
+
+background:
+  default: assets/bg/default.png
+
+defaults:
+  characters_persist: false
+  background_persist: false
+
+scenes:
+  - id: smoke
+    bg: assets/bg/default.png
+    lines:
+      - text: "smoke"
+        speaker_name: "copetan"
+      - wait: 0.2

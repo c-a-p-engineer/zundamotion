@@ -165,6 +165,52 @@ async def apply_audio_filter(
         raise
 
 
+async def apply_master_audio_filter(
+    input_path: str,
+    output_path: str,
+    *,
+    audio_params: AudioParams,
+    loudnorm: Optional[Dict[str, Any]] = None,
+    ffmpeg_path: str = "ffmpeg",
+) -> None:
+    """Apply final mastering filters to the video's audio stream."""
+
+    loudnorm = loudnorm or {}
+    target_i = float(loudnorm.get("i", loudnorm.get("integrated_lufs", -16.0)))
+    target_lra = float(loudnorm.get("lra", 11.0))
+    target_tp = float(loudnorm.get("tp", loudnorm.get("true_peak", -1.5)))
+    filter_chain = (
+        f"loudnorm=I={target_i:.1f}:LRA={target_lra:.1f}:TP={target_tp:.1f}"
+    )
+    cmd = [ffmpeg_path, "-y", *get_profile_flags()]
+    cmd.extend(_threading_flags(ffmpeg_path))
+    cmd.extend([
+        "-i",
+        input_path,
+        "-map",
+        "0:v",
+        "-map",
+        "0:a",
+        "-c:v",
+        "copy",
+        "-af",
+        filter_chain,
+    ])
+    cmd.extend(audio_params.to_ffmpeg_opts())
+    cmd.extend(["-movflags", "+faststart", output_path])
+
+    try:
+        proc = await _run_ffmpeg_async(cmd)
+        logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
+        logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
+        logger.info("Applied master audio filter -> %s", output_path)
+    except subprocess.CalledProcessError as e:
+        logger.error("Error applying master audio filter: %s", e)
+        logger.error(f"FFmpeg stdout:\n{e.stdout}")
+        logger.error(f"FFmpeg stderr:\n{e.stderr}")
+        raise
+
+
 async def add_bgm_segments_to_video(
     video_path: str,
     output_path: str,
