@@ -8,6 +8,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      FFMPEG_CACHE_VERSION: n7.1-linux64-gpl-7.1
 
     steps:
       - name: Checkout
@@ -24,14 +26,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ca-certificates curl fonts-ipafont-gothic xz-utils
 
+      - name: Cache FFmpeg
+        id: cache-ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/ci/ffmpeg
+            .cache/ci/ffmpeg-static.tar.xz
+          key: ffmpeg-${{ runner.os }}-${{ env.FFMPEG_CACHE_VERSION }}
+
       - name: Install FFmpeg 7
         run: |
-          curl -L --fail --retry 3 -o /tmp/ffmpeg-static.tar.xz \
-            https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          mkdir -p .cache/ci
+          if [ ! -x .cache/ci/ffmpeg/bin/ffmpeg ] || [ ! -x .cache/ci/ffmpeg/bin/ffprobe ]; then
+            if [ ! -f .cache/ci/ffmpeg-static.tar.xz ]; then
+              curl -L --fail --retry 5 --retry-delay 5 --retry-all-errors \
+                -o .cache/ci/ffmpeg-static.tar.xz \
+                https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz
+            fi
+            rm -rf .cache/ci/ffmpeg
+            mkdir -p .cache/ci/ffmpeg
+            tar -xJf .cache/ci/ffmpeg-static.tar.xz -C .cache/ci/ffmpeg --strip-components=1
+          fi
           sudo mkdir -p /opt/ffmpeg
-          sudo tar -xJf /tmp/ffmpeg-static.tar.xz -C /opt/ffmpeg --strip-components=1
-          sudo ln -sf /opt/ffmpeg/ffmpeg /usr/local/bin/ffmpeg
-          sudo ln -sf /opt/ffmpeg/ffprobe /usr/local/bin/ffprobe
+          sudo cp -a .cache/ci/ffmpeg/. /opt/ffmpeg/
+          sudo ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
+          sudo ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
           ffmpeg -version | head -n 1
           ffprobe -version | head -n 1
 
