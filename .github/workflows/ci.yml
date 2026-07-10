@@ -33,7 +33,11 @@ jobs:
       - name: Run render smoke tests
         env:
           ZUNDAMOTION_RUN_SMOKE: "1"
+          ZUNDAMOTION_SMOKE_TIMEOUT: "600"
           DISABLE_HWENC: "1"
           HW_FILTER_MODE: cpu
           USE_RAMDISK: "0"
-        run: python -m pytest tests/test_smoke_render_samples.py -m smoke
+        run: |
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+          python -m pytest tests/test_smoke_render_samples.py -m smoke

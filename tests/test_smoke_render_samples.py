@@ -81,6 +81,15 @@ def _stop_process(proc: subprocess.Popen[str]) -> None:
         proc.wait(timeout=5)
 
 
+def _read_tail(path: Path) -> str:
+    if not path.exists():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")[-4000:]
+    except Exception as exc:
+        return f"<failed to read {path}: {exc}>"
+
+
 def _run_ffprobe(output_path: Path) -> dict:
     proc = subprocess.run(
         [
@@ -117,6 +126,8 @@ def test_sample_script_renders_valid_mp4(script_path: str, tmp_path: Path) -> No
     output_path = output_dir / f"{script.stem}.mp4"
     if output_path.exists():
         output_path.unlink()
+    stdout_path = tmp_path / f"{script.stem}.stdout.log"
+    stderr_path = tmp_path / f"{script.stem}.stderr.log"
 
     env = os.environ.copy()
     env.setdefault("DISABLE_HWENC", "1")
@@ -140,30 +151,40 @@ def test_sample_script_renders_valid_mp4(script_path: str, tmp_path: Path) -> No
         "-o",
         str(output_path),
     ]
-    proc = subprocess.Popen(
-        command,
-        cwd=ROOT,
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    deadline = time.monotonic() + _smoke_timeout_seconds()
-    output_valid = False
-    while time.monotonic() < deadline:
-        if _valid_output(output_path):
-            output_valid = True
-            _stop_process(proc)
-            break
-        if proc.poll() is not None:
-            break
-        time.sleep(1.0)
+    with stdout_path.open("w", encoding="utf-8") as stdout_f, stderr_path.open(
+        "w", encoding="utf-8"
+    ) as stderr_f:
+        proc = subprocess.Popen(
+            command,
+            cwd=ROOT,
+            env=env,
+            stdout=stdout_f,
+            stderr=stderr_f,
+            text=True,
+        )
+        deadline = time.monotonic() + _smoke_timeout_seconds()
+        output_valid = False
+        while time.monotonic() < deadline:
+            if _valid_output(output_path):
+                output_valid = True
+                _stop_process(proc)
+                break
+            if proc.poll() is not None:
+                break
+            time.sleep(1.0)
 
-    if proc.poll() is None:
-        _stop_process(proc)
+        if proc.poll() is None:
+            _stop_process(proc)
     if not output_valid:
+        details = (
+            f"command: {' '.join(command)}\n"
+            f"returncode: {proc.returncode}\n"
+            f"stdout tail:\n{_read_tail(stdout_path)}\n"
+            f"stderr tail:\n{_read_tail(stderr_path)}"
+        )
         if proc.returncode != 0:
-            assert False, f"render failed: {script_path}"
-        assert _valid_output(output_path), f"output was not valid: {output_path}"
+            assert False, f"render failed: {script_path}\n{details}"
+        assert _valid_output(output_path), f"output was not valid: {output_path}\n{details}"
 
     metadata = _run_ffprobe(output_path)
     duration = float(metadata.get("format", {}).get("duration") or 0.0)
