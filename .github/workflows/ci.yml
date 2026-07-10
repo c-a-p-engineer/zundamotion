@@ -13,13 +13,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install system dependencies
         run: |
@@ -28,7 +29,7 @@ jobs:
 
       - name: Cache FFmpeg
         id: cache-ffmpeg
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .cache/ci/ffmpeg
@@ -48,10 +49,8 @@ jobs:
             mkdir -p .cache/ci/ffmpeg
             tar -xJf .cache/ci/ffmpeg-static.tar.xz -C .cache/ci/ffmpeg --strip-components=1
           fi
-          sudo mkdir -p /opt/ffmpeg
-          sudo cp -a .cache/ci/ffmpeg/. /opt/ffmpeg/
-          sudo ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
-          sudo ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
+          echo "$PWD/.cache/ci/ffmpeg/bin" >> "$GITHUB_PATH"
+          export PATH="$PWD/.cache/ci/ffmpeg/bin:$PATH"
           ffmpeg -version | head -n 1
           ffprobe -version | head -n 1
 
