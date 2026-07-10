@@ -22,7 +22,18 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg fonts-ipafont-gothic
+          sudo apt-get install -y --no-install-recommends ca-certificates curl fonts-ipafont-gothic xz-utils
+
+      - name: Install FFmpeg 7
+        run: |
+          curl -L --fail --retry 3 -o /tmp/ffmpeg-static.tar.xz \
+            https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          sudo mkdir -p /opt/ffmpeg
+          sudo tar -xJf /tmp/ffmpeg-static.tar.xz -C /opt/ffmpeg --strip-components=1
+          sudo ln -sf /opt/ffmpeg/ffmpeg /usr/local/bin/ffmpeg
+          sudo ln -sf /opt/ffmpeg/ffprobe /usr/local/bin/ffprobe
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
 
       - name: Install Python dependencies
         run: python -m pip install -e ".[dev]"
