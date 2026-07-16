@@ -7,6 +7,7 @@
 | 音声合成 | VOICEVOX音声生成＋キャッシュ | speaker設定に従い音声を生成しキャッシュ共有 | components/audio/generator.py, components/audio/voicevox_client.py |
 | クリップ生成 | 背景画像/動画の正規化とシーン連結 | contain/cover/fit_width等でリサイズし、行ごとのクリップをconcat | utils/ffmpeg_ops.build_background_fit_steps, components/video/renderer.py, components/pipeline_phases/video_phase/scene_renderer.py |
 | キャラ配置 | アンカー＋座標＋スケール配置、座標・スケール移動、揺れ系エフェクト | `move` で行クリップ内の任意座標移動とスケール補間、shake/bob/swayをoverlay式で表現、enter/leave余白計算あり | components/video/clip/movement.py, components/video/clip/effects/resolve.py |
+| キャラ配置 | シーン内の表示状態継承 | `characters_persist: true` では表情だけを変更しても scale/position 等を維持。`scene.character_defaults` と `reset_characters` に対応し、シーン境界では状態を破棄 | components/pipeline_phases/video_phase/character_tracker.py |
 | キャラ配置 | 立ち絵PNG色替えフィルター | 汎用画像フィルターキャッシュを使い、色相・彩度・明度の事前変換、透明度維持、キャッシュ再利用に対応。`targets` による上部/下部/矩形 + 色域指定の部分色替えと、`asset_name` での別名キャラクター間素材共有も可能 | components/video/image_color_filter_cache.py, components/video/character_image_resolver.py |
 | 背景/画面効果 | 背景揺れ・画面揺れ | pad+crop方式でシェイク | components/video/clip/effects/resolve.py |
 | オーバーレイ | 画像レイヤー・前景オーバーレイ・PiP | image_layers/fg_overlays/insertでロゴ・挿入映像を重畳 | components/video/renderer.py, components/pipeline_phases/video_phase/scene_renderer.py |
@@ -18,6 +19,7 @@
 | 字幕エフェクト拡張 | バウンス字幕プラグイン | text:bounce_textで上下バウンド | plugins/builtin/subtitle_text/plugin.py |
 | 進捗/出力補助 | タイムライン出力・ログ（JSON/KV/ファイル） | timeline.md/csv生成、ログ形式切替 | timeline.py, main.py |
 | 性能 | HWエンコーダ自動検出＋スレッド調整 | GPU/CPUを判定し、フィルタ/concatスレッドを自動制御 | utils/ffmpeg_hw.py, components/pipeline_phases/video_phase/scene_renderer.py（auto-tune） |
+| 出力 | 書き出しプリセット | YouTube 1080p/1440p、Shorts、draft の解像度・fps・音声設定を一度解決し、全Phase・Renderer・キャッシュキーで共有 | utils/export_presets.py, utils/ffmpeg_params.py, pipeline.py |
 
 ## 機能優先度表（計画 + 実装状況）
 | カテゴリ | 機能名 | 優先度 | 実装状況 | 用途説明 |
@@ -47,7 +49,7 @@
 | 実務系 | テンプレート / プリセット管理 | 将来候補 | 未実装 | OP/EDやテロップスタイルの再利用 |
 | 実務系 | アセット管理 / プロキシ生成 | 将来候補 | 未実装 | 大容量素材を扱うワークフロー最適化 |
 | 実務系 | 複数シーケンス管理 | 将来候補 | 未実装 | 章ごとにタイムラインを分けて編集 |
-| 実務系 | 書き出しプリセット（解像度/ビットレート） | 将来候補 | 未実装 | 配信プラットフォーム別の最適設定出力 |
+| 実務系 | 書き出しプリセット（解像度/ビットレート） | 将来候補 | 実装済 | 配信プラットフォーム別の最適設定出力。トランジション、concat再エンコード、BGM、loudnorm後も設定を維持 |
 
 ## 設計ドキュメントリンク
 - YAMLスキーマ草案: `docs/design/yaml_schema_draft.md`

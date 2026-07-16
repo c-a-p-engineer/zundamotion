@@ -20,7 +20,7 @@ from zundamotion.utils.ffmpeg_capabilities import (
 from zundamotion.utils.ffmpeg_hw import get_hw_filter_mode
 from zundamotion.utils.ffmpeg_ops import normalize_media
 from zundamotion.utils.ffmpeg_hw import set_hw_filter_mode  # Auto-tuneでのバックオフに使用
-from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
+from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams, resolve_media_params
 from zundamotion.utils.logger import logger, time_log
 from .scene_renderer import SceneRenderer
 
@@ -159,6 +159,9 @@ class VideoPhase:
         cache_manager: CacheManager,
         jobs: str,
         hw_encoder: str = "auto",
+        *,
+        video_params: Optional[VideoParams] = None,
+        audio_params: Optional[AudioParams] = None,
     ):
         hw_kind = await get_hw_encoder_kind_for_video_params(
             hw_encoder=hw_encoder
@@ -214,25 +217,10 @@ class VideoPhase:
             )
             hw_kind = effective_hw_kind
 
-        video_params = VideoParams(
-            width=config.get("video", {}).get("width", 1920),
-            height=config.get("video", {}).get("height", 1080),
-            fps=config.get("video", {}).get("fps", 30),
-            pix_fmt=config.get("video", {}).get("pix_fmt", "yuv420p"),
-            profile=config.get("video", {}).get("profile", "high"),
-            level=config.get("video", {}).get("level", "4.2"),
-            preset=config.get("video", {}).get(
-                "preset", "p5" if hw_kind == "nvenc" else "veryfast"
-            ),
-            cq=config.get("video", {}).get("cq", 23),
-            crf=config.get("video", {}).get("crf", 23),
-        )
-        audio_params = AudioParams(
-            sample_rate=config.get("video", {}).get("audio_sample_rate", 48000),
-            channels=config.get("video", {}).get("audio_channels", 2),
-            codec=config.get("video", {}).get("audio_codec", "libmp3lame"),
-            bitrate_kbps=config.get("video", {}).get("audio_bitrate_kbps", 192),
-        )
+        if video_params is None or audio_params is None:
+            resolved_video_params, resolved_audio_params = resolve_media_params(config)
+            video_params = video_params or resolved_video_params
+            audio_params = audio_params or resolved_audio_params
 
         # jobs/hw_kind から clip_workers を算出して VideoRenderer に伝搬
         pre_clip_workers = cls._determine_clip_workers(jobs, hw_kind)
@@ -267,6 +255,8 @@ class VideoPhase:
             "lines": scene.get("lines", []),
             "items": scene.get("items", []),
             "bg": scene.get("bg"),
+            "characters_persist": scene.get("characters_persist"),
+            "character_defaults": scene.get("character_defaults"),
             "video_filter": scene.get("video_filter"),
             "badge": scene.get("badge"),
             "badges": scene.get("badges"),

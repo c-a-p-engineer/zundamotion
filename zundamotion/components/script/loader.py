@@ -7,6 +7,7 @@ from ..config.io import load_config
 from ..config.merge import merge_configs
 from ..config.validate import validate_config
 from ...plugins.loader import default_plugin_paths, load_plugins_cached
+from ...utils.export_presets import apply_export_preset
 from .resolver import resolve_script
 
 __all__ = ["load_script_and_config", "ValidationError"]
@@ -48,6 +49,14 @@ def load_script_and_config(
             final_config.get("defaults", {}), script_data["defaults"]
         )
 
+    # Presets override template defaults; explicit script video values then override presets.
+    if "export_preset" in script_data:
+        preset_config = apply_export_preset({"export_preset": script_data["export_preset"]})
+        final_config["export_preset"] = script_data["export_preset"]
+        final_config["video"] = merge_configs(
+            final_config.get("video", {}), preset_config.get("video", {})
+        )
+
     # Allow selected top-level sections in script to override global config
     # e.g., subtitle settings (reading_display), video params, bgm defaults, etc.
     for top_key in ("video", "subtitle", "bgm", "background", "system", "transitions"):
@@ -65,6 +74,9 @@ def load_script_and_config(
 
     # Merge line-level defaults and character overrides
     for scene in final_config.get("script", {}).get("scenes", []):
+        characters_persist = bool(
+            scene.get("characters_persist", global_defaults.get("characters_persist", False))
+        )
         for line in scene.get("lines", []):
             current_line_data = line.copy()
 
@@ -91,7 +103,7 @@ def load_script_and_config(
                 processed_characters = []
                 for char_entry in current_line_data["characters"]:
                     char_name = char_entry.get("name")
-                    if char_name and char_name in character_defaults:
+                    if char_name and char_name in character_defaults and not characters_persist:
                         merged_char_entry = merge_configs(
                             character_defaults[char_name], char_entry
                         )

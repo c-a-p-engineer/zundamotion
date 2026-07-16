@@ -5,10 +5,12 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
+import yaml
+
+from zundamotion.utils.export_presets import EXPORT_PRESETS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,22 +56,6 @@ def _tail_text(value: object) -> str:
     return str(value)[-4000:]
 
 
-def _valid_output(path: Path) -> bool:
-    if not path.is_file() or path.stat().st_size <= 0:
-        return False
-    try:
-        metadata = _run_ffprobe(path)
-    except Exception:
-        return False
-    duration = float(metadata.get("format", {}).get("duration") or 0.0)
-    streams = metadata.get("streams") or []
-    return (
-        duration > 0.0
-        and any(stream.get("codec_type") == "video" for stream in streams)
-        and any(stream.get("codec_type") == "audio" for stream in streams)
-    )
-
-
 def _stop_process(proc: subprocess.Popen[str]) -> None:
     if proc.poll() is not None:
         return
@@ -112,6 +98,13 @@ def _run_ffprobe(output_path: Path) -> dict:
     return json.loads(proc.stdout)
 
 
+def _expected_video(script: Path) -> tuple[int, int, int]:
+    data = yaml.safe_load(script.read_text(encoding="utf-8")) or {}
+    video = dict(EXPORT_PRESETS.get(str(data.get("export_preset", "")).lower(), {}).get("video", {}))
+    video.update(data.get("video", {}) or {})
+    return int(video.get("width", 1920)), int(video.get("height", 1080)), int(video.get("fps", 30))
+
+
 @pytest.mark.smoke
 @pytest.mark.skipif(not _smoke_enabled(), reason="set ZUNDAMOTION_RUN_SMOKE=1")
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is required")
@@ -126,8 +119,8 @@ def test_sample_script_renders_valid_mp4(script_path: str, tmp_path: Path) -> No
     output_path = output_dir / f"{script.stem}.mp4"
     if output_path.exists():
         output_path.unlink()
-    stdout_path = tmp_path / f"{script.stem}.stdout.log"
-    stderr_path = tmp_path / f"{script.stem}.stderr.log"
+    stdout_path = output_dir / f"{script.stem}.stdout.log"
+    stderr_path = output_dir / f"{script.stem}.stderr.log"
 
     env = os.environ.copy()
     env.setdefault("DISABLE_HWENC", "1")
@@ -162,33 +155,38 @@ def test_sample_script_renders_valid_mp4(script_path: str, tmp_path: Path) -> No
             stderr=stderr_f,
             text=True,
         )
-        deadline = time.monotonic() + _smoke_timeout_seconds()
-        output_valid = False
-        while time.monotonic() < deadline:
-            if _valid_output(output_path):
-                output_valid = True
-                _stop_process(proc)
-                break
-            if proc.poll() is not None:
-                break
-            time.sleep(1.0)
-
-        if proc.poll() is None:
+        try:
+            proc.wait(timeout=_smoke_timeout_seconds())
+        except subprocess.TimeoutExpired:
             _stop_process(proc)
-    if not output_valid:
+            pytest.fail(
+                f"render timed out: {script_path}\n"
+                f"stdout tail:\n{_read_tail(stdout_path)}\n"
+                f"stderr tail:\n{_read_tail(stderr_path)}"
+            )
+    if proc.returncode != 0:
         details = (
             f"command: {' '.join(command)}\n"
             f"returncode: {proc.returncode}\n"
             f"stdout tail:\n{_read_tail(stdout_path)}\n"
             f"stderr tail:\n{_read_tail(stderr_path)}"
         )
-        if proc.returncode != 0:
-            assert False, f"render failed: {script_path}\n{details}"
-        assert _valid_output(output_path), f"output was not valid: {output_path}\n{details}"
+        pytest.fail(f"render failed: {script_path}\n{details}")
 
+    assert output_path.is_file() and output_path.stat().st_size > 0
     metadata = _run_ffprobe(output_path)
+    (output_dir / "ffprobe-result.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     duration = float(metadata.get("format", {}).get("duration") or 0.0)
     streams = metadata.get("streams") or []
     assert duration > 0.0
     assert any(stream.get("codec_type") == "video" for stream in streams)
     assert any(stream.get("codec_type") == "audio" for stream in streams)
+    video_stream = next(stream for stream in streams if stream.get("codec_type") == "video")
+    expected_width, expected_height, expected_fps = _expected_video(script)
+    assert (video_stream["width"], video_stream["height"]) == (
+        expected_width,
+        expected_height,
+    )
+    assert video_stream["avg_frame_rate"] == f"{expected_fps}/1"

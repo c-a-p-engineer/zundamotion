@@ -137,6 +137,7 @@ scenes:
 - `video.width` / `video.height` は出力キャンバスの解像度。旧 `resolution` キーもサポートされていますが、新規は幅・高さの個別指定を推奨します。縦長レイアウト例: [`sample_vertical.yaml`](./sample_vertical.yaml)。
 - `video.face_anim` を設定すると口パク／瞬き制御が行えます。閾値やフレーム数は [`sample.yaml`](./sample.yaml) を参照。
 - `defaults.characters` で VOICEVOX `speaker_id` や字幕色などキャラクターごとの初期値をまとめて定義できます。
+- `characters_persist: true` の表示状態は「行の明示値 → 同一シーンの直前状態 → `scene.character_defaults` → `defaults.characters` → システム標準値」の順で解決します。
 
 ## 動画キャンバスと背景設定
 
@@ -154,6 +155,7 @@ background:
 
 - `video.background_fit` で背景のフィットモードを指定。余白の扱いは `background.fill_color` に従います。縦長キャンバスの比較: [`sample_vertical.yaml`](./sample_vertical.yaml)。
 - `export_preset` は出力サイズ・fps・音声ビットレートの既定値をまとめて設定します。`video.width` などを明示した場合は明示値が優先されます。
+- 解決した映像・音声値はトランジション、concat再エンコード、BGM、loudnormを含む最終出力まで維持されます。
 - ルート `background` はシーンで `bg` が未指定の場合のデフォルト。`anchor` / `position` / `fit` はシーンや行ごとにも上書き可能です。
 - 行レベルの `background` でズームやパンを切り替えることで、同じ素材でも構図を変えられます。
 - `defaults.background_persist: true` またはシーンの `background_persist: true` を指定すると、`background.path` を指定した行以降は、省略行でも直前の背景を使い続けます。`false` の場合、省略行はシーンの `bg` またはルート `background.default` に戻ります。
@@ -250,6 +252,25 @@ scenes:
 - 1 スライド 1 シーンまで細かくする必要はありません。章、トピック、数枚のスライド単位を目安にします。
 - `characters_persist` と `background_persist` は同一シーン内の継続です。シーンを分けた場合は、各シーン冒頭で必要な `characters` や `bg` を明示してください。
 - `characters_persist: true` のとき、`wait` 行でも直前の立ち絵状態を自動継承します。待機中だけ別の立ち絵にしたい場合に限って `wait` 行へ `characters` を明示します。
+- 表情だけを変更した行では、直前の `scale`、`position`、`anchor`、表示状態、反転、素材名、色フィルターを継承します。`move`、`enter`、`leave` と各 duration は次行へ永続化しません。
+- シーンごとの初期表示は `scene.character_defaults.<name>` で指定できます。`reset_characters: true` は直前状態を破棄し、シーン標準値、グローバル標準値、システム標準値の順で再解決します。
+- 状態はシーンをまたいで継承しません。
+
+```yaml
+scenes:
+  - id: closeup
+    character_defaults:
+      copetan:
+        scale: 1.2
+        anchor: bottom_center
+        position: {x: 0, y: -20}
+    lines:
+      - text: "アップ表示"
+        characters: [{name: copetan, expression: serious}]
+      - text: "標準へリセット"
+        reset_characters: true
+        characters: [{name: copetan, expression: default}]
+```
 - シーン境界で `transition` を指定すると、その境界ごとに遷移処理が入ります。単にキャッシュ粒度を分けたいだけなら、遷移を指定しない通常のシーン分割で十分です。
 
 ### 複数キャラクターの同時発話

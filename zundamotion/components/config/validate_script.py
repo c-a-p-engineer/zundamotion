@@ -85,6 +85,19 @@ def _resolve_scene_lines(scene_id: str, scene: Dict[str, Any]) -> List[Dict[str,
 
 
 def _validate_scene_settings(config: Dict[str, Any], scene: Dict[str, Any], scene_id: str) -> None:
+    character_defaults = scene.get("character_defaults")
+    if character_defaults is not None:
+        if not isinstance(character_defaults, dict):
+            raise ValidationError(f"Scene '{scene_id}' character_defaults must be a dictionary.")
+        for name, value in character_defaults.items():
+            if not isinstance(value, dict):
+                raise ValidationError(
+                    f"Scene '{scene_id}' character_defaults.{name} must be a dictionary."
+                )
+            validate_character_color_filter(
+                value.get("color_filter"),
+                f"scene '{scene_id}' character_defaults.{name}.color_filter",
+            )
     background_cfg = scene.get("background")
     if background_cfg is not None:
         if not isinstance(background_cfg, dict):

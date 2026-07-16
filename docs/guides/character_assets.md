@@ -72,6 +72,14 @@ assets/
 
 `flip_x: true` または `flip_y: true` を指定した場合、差分も同じ向きで反転されます。
 
+## 表情変更と表示状態の継承
+
+`characters_persist: true` の同一シーンでは、表情だけを変更しても直前の `scale`、`position`、`anchor`、`visible`、`z`、反転、`asset_name`、`color_filter` を維持します。口パク・目パチ差分も解決後の同じ scale と position で合成されます。
+
+状態の優先順位は、行の明示値、同一シーン内の直前状態、`scene.character_defaults`、`defaults.characters`、システム標準値の順です。`move`、`enter`、`leave` と各 duration は一時的な命令なので次行へ永続化しません。
+
+`reset_characters: true` を付けると直前状態を破棄し、シーン標準値から再解決します。新しいシーンでは前シーンの状態を引き継ぎません。
+
 ## Copetan 表情セット
 
 | 表情ID | ディレクトリ | ニュアンス | 備考 |

@@ -12,6 +12,63 @@ from zundamotion.components.script.loader import load_script_and_config
 from zundamotion.exceptions import ValidationError
 
 
+def test_export_preset_overrides_template_defaults_but_not_explicit_video(tmp_path):
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump({"script": {"scenes": []}, "defaults": {}, "video": {"width": 1920, "height": 1080, "fps": 30}}),
+        encoding="utf-8",
+    )
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "export_preset": "youtube_1440p",
+                "video": {"fps": 24},
+                "scenes": [{"id": "scene", "lines": [{"wait": 0.1}]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_script_and_config(str(script_path), str(default_config_path))
+    assert (config["video"]["width"], config["video"]["height"], config["video"]["fps"]) == (
+        2560,
+        1440,
+        24,
+    )
+
+
+def test_persistent_character_display_defaults_are_left_for_tracker(tmp_path):
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump({"script": {"scenes": []}, "defaults": {}}), encoding="utf-8"
+    )
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "defaults": {
+                    "characters_persist": True,
+                    "characters": {"alice": {"scale": 0.7, "position": {"x": 10, "y": 0}}},
+                },
+                "scenes": [
+                    {
+                        "id": "scene",
+                        "lines": [
+                            {"text": "first", "characters": [{"name": "alice", "expression": "smile"}]}
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_script_and_config(str(script_path), str(default_config_path))
+    character = config["script"]["scenes"][0]["lines"][0]["characters"][0]
+    assert character == {"name": "alice", "expression": "smile"}
+
+
 def test_voice_layers_inherit_character_defaults(tmp_path):
     default_config_path = tmp_path / "default.yaml"
     default_config_path.write_text(

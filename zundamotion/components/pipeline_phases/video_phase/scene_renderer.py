@@ -120,7 +120,12 @@ class SceneRenderer(
         if scene_cp:
             from .character_tracker import CharacterTracker
 
-            tracker = CharacterTracker(self.video_params.width, self.video_params.height)
+            tracker = CharacterTracker(
+                self.video_params.width,
+                self.video_params.height,
+                global_defaults=self.config.get("defaults", {}).get("characters", {}),
+                scene_defaults=scene.get("character_defaults", {}),
+            )
             for idx, line in enumerate(scene.get("lines", []), start=1):
                 if line.get("reset_characters"):
                     tracker.reset()

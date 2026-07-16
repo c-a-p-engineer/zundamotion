@@ -18,7 +18,7 @@ from .components.script import load_script_and_config
 from .exceptions import PipelineError
 from .timeline import Timeline
 from .plugins.manager import initialize_plugins
-from .utils.ffmpeg_params import AudioParams, VideoParams
+from .utils.ffmpeg_params import AudioParams, VideoParams, resolve_media_params
 from .utils.ffmpeg_probe import get_media_duration
 from .utils.export_presets import apply_export_preset
 from .utils.logger import KVLogger, logger, time_log
@@ -80,8 +80,9 @@ class GenerationPipeline:
             cache_refresh=self.cache_refresh,
         )
         self.timeline = Timeline()
-        self.video_params = video_params if video_params else VideoParams()
-        self.audio_params = audio_params if audio_params else AudioParams()
+        resolved_video, resolved_audio = resolve_media_params(self.config)
+        self.video_params = video_params if video_params is not None else resolved_video
+        self.audio_params = audio_params if audio_params is not None else resolved_audio
         self.stats: Dict[str, Any] = {
             "phases": {},
             "total_duration": 0.0,
@@ -208,6 +209,8 @@ class GenerationPipeline:
                 self.cache_manager,
                 self.jobs,
                 self.hw_encoder,
+                video_params=self.video_params,
+                audio_params=self.audio_params,
             )
             all_clips = await self._run_phase(
                 "VideoPhase", video_phase.run, scenes, line_data_map, self.timeline
@@ -756,14 +759,12 @@ async def run_generation(
         except Exception:
             logger.warning("[PluginLoader] Plugin initialization failed; continuing with built-ins")
 
-    # Create and run the pipeline with default VideoParams and AudioParams
+    # Resolve VideoParams and AudioParams once from the preset-expanded config.
     pipeline = GenerationPipeline(
         config,
         no_cache,
         cache_refresh,
         jobs,
-        video_params=VideoParams(),  # デフォルトのVideoParamsを渡す
-        audio_params=AudioParams(),  # デフォルトのAudioParamsを渡す
         hw_encoder=hw_encoder,
         quality=quality,
         final_copy_only=final_copy_only,

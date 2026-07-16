@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def normalize_preset_for_encoder(preset: str, hw_kind: Optional[str] = None) -> str:
@@ -163,3 +163,30 @@ class AudioParams:
         opts.extend(["-ar", str(self.sample_rate)])
         opts.extend(["-ac", str(self.channels)])
         return opts
+
+
+def resolve_media_params(config: Dict[str, Any]) -> Tuple[VideoParams, AudioParams]:
+    """Resolve the single parameter pair shared by every render phase."""
+    video = config.get("video", {}) or {}
+    return (
+        VideoParams(
+            width=video.get("width", 1920),
+            height=video.get("height", 1080),
+            fps=video.get("fps", 30),
+            pix_fmt=video.get("pix_fmt", "yuv420p"),
+            profile=video.get("profile", "high"),
+            level=video.get("level", "4.2"),
+            preset=video.get("preset", "veryfast"),
+            bitrate_kbps=video.get("bitrate_kbps"),
+            crf=video.get("crf", 23),
+            cq=video.get("cq", 23),
+            global_quality=video.get("global_quality"),
+            qp=video.get("qp"),
+        ),
+        AudioParams(
+            sample_rate=video.get("audio_sample_rate", 48000),
+            channels=video.get("audio_channels", 2),
+            codec=video.get("audio_codec", "libmp3lame"),
+            bitrate_kbps=video.get("audio_bitrate_kbps", 192),
+        ),
+    )

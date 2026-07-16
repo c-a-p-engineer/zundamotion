@@ -10,12 +10,55 @@ video:
 background:
   default: assets/bg/default.png
 
+bgm:
+  path: assets/bgm/intro.wav
+  volume: 0.08
+
 defaults:
-  characters_persist: false
+  characters_persist: true
   background_persist: false
+  characters:
+    copetan:
+      scale: 0.20
+      anchor: bottom_center
+      position: {x: -70, y: 0}
 
 scenes:
-  - id: smoke
+  - id: smoke_character
     bg: assets/bg/default.png
+    character_defaults:
+      copetan:
+        scale: 0.20
+        position: {x: -70, y: 0}
     lines:
-      - wait: 0.2
+      - text: "small smoke"
+        duration: 1.0
+        characters:
+          - name: copetan
+            expression: default
+            visible: true
+        sound_effects:
+          - path: assets/se/rap_fanfare.mp3
+            start_time: 0.0
+            volume: 0.05
+      - text: "expression keeps scale"
+        duration: 1.0
+        characters:
+          - name: copetan
+            expression: smile
+            position: {x: 40, y: 0}
+            move:
+              duration: 0.5
+              easing: ease_out
+      - wait: 0.4
+  - id: smoke_transition
+    bg: assets/bg/room.png
+    transition:
+      type: dissolve
+      duration: 0.2
+    lines:
+      - text: "final smoke"
+        duration: 1.0
+        characters:
+          - name: copetan
+            expression: default

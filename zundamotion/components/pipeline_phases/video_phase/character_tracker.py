@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from copy import deepcopy
+from typing import Any, Dict, List, Optional
+
+from ...config.merge import merge_configs
 
 
 @dataclass
@@ -20,10 +23,18 @@ class CharacterState:
 class CharacterTracker:
     """VNモード用のキャラクター状態トラッカー。"""
 
-    def __init__(self, width: int, height: int) -> None:
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        global_defaults: Optional[Dict[str, Dict[str, Any]]] = None,
+        scene_defaults: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> None:
         self.width = width
         self.height = height
         self._states: Dict[str, Dict[str, Any]] = {}
+        self._global_defaults = global_defaults or {}
+        self._scene_defaults = scene_defaults or {}
 
     def reset(self) -> None:
         self._states.clear()
@@ -37,7 +48,7 @@ class CharacterTracker:
                 self._states.pop(name, None)
                 continue
             previous_state = self._states.get(name, {})
-            state = previous_state.copy()
+            state = self._initial_state(name) if not previous_state else deepcopy(previous_state)
             if isinstance(upd.get("move"), dict):
                 move = dict(upd["move"])
                 if move.get("enabled") is not False and "from" not in move:
@@ -81,6 +92,12 @@ class CharacterTracker:
             )
             state.setdefault("visible", True)
             self._states[name] = state
+
+    def _initial_state(self, name: str) -> Dict[str, Any]:
+        system = CharacterState(name=name).__dict__
+        global_default = self._global_defaults.get(name, {})
+        scene_default = self._scene_defaults.get(name, {})
+        return merge_configs(merge_configs(system, global_default), scene_default)
 
     def snapshot(self) -> List[Dict[str, Any]]:
         snap: List[Dict[str, Any]] = []

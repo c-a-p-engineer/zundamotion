@@ -10,6 +10,7 @@ jobs:
     timeout-minutes: 30
     env:
       FFMPEG_CACHE_VERSION: n7.1-linux64-gpl-7.1
+      PYTHON_VERSION: "3.11"
 
     steps:
       - name: Checkout
@@ -18,7 +19,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: pyproject.toml
 
@@ -71,3 +72,17 @@ jobs:
           ffmpeg -version | head -n 1
           ffprobe -version | head -n 1
           python -m pytest tests/test_smoke_render_samples.py -m smoke
+
+      - name: Upload render smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: smoke-python-${{ env.PYTHON_VERSION }}-render
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            output/test_smoke/*.mp4
+            output/perf/*.json
+            output/test_smoke/*.stdout.log
+            output/test_smoke/*.stderr.log
+            output/test_smoke/ffprobe-result.json
