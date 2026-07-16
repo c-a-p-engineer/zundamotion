@@ -591,6 +591,38 @@ class GenerationPipeline:
                 float(perf_summary.get("face_precache_ms", 0.0) or 0.0),
                 float(perf_summary.get("scene_concat_ms", 0.0) or 0.0),
             )
+            line_clip_summary = perf_summary.get("line_clip") or {}
+            logger.info(
+                "[PerfSummary] line_clip_count=%s cache_hit=%s cache_miss=%s total_ms=%.1f render_ms=%.1f average_ms=%.1f p50_ms=%.1f p95_ms=%.1f max_ms=%.1f",
+                line_clip_summary.get("line_clip_count", 0),
+                line_clip_summary.get("line_clip_cache_hit_count", 0),
+                line_clip_summary.get("line_clip_cache_miss_count", 0),
+                float(line_clip_summary.get("line_clip_total_ms", 0.0) or 0.0),
+                float(line_clip_summary.get("line_clip_render_ms", 0.0) or 0.0),
+                float(line_clip_summary.get("line_clip_average_ms", 0.0) or 0.0),
+                float(line_clip_summary.get("line_clip_p50_ms", 0.0) or 0.0),
+                float(line_clip_summary.get("line_clip_p95_ms", 0.0) or 0.0),
+                float(line_clip_summary.get("line_clip_max_ms", 0.0) or 0.0),
+            )
+            for item in (line_clip_summary.get("slowest") or [])[:10]:
+                features = [
+                    name
+                    for name, enabled in (
+                        ("subtitle", item.get("has_subtitle")),
+                        ("face", item.get("has_face_overlay")),
+                        ("move", item.get("has_move")),
+                        ("effect", item.get("has_effect")),
+                    )
+                    if enabled
+                ]
+                logger.info(
+                    "[PerfSummary] line_clip_slowest scene=%s line=%s time_ms=%.1f cache=%s features=%s",
+                    item.get("scene_id", "-"),
+                    item.get("line_index", "-"),
+                    float(item.get("duration_ms", 0.0) or 0.0),
+                    item.get("cache_status", "-"),
+                    ",".join(features) or "none",
+                )
             av_warnings = perf_summary.get("av_warnings") or {}
             logger.info(
                 "[PerfSummary] av_warnings_total=%s",

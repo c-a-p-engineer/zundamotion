@@ -701,6 +701,7 @@ class SceneStandardRendererMixin:
         async def process_one(idx: int, line: Dict[str, Any]):
             async with sem:
                 import time as _time
+                line_total_started = _time.perf_counter()
                 line_id = f"{scene_id}_{idx}"
                 line_data = line_data_map[line_id]
                 duration = line_data["duration"]
@@ -977,7 +978,32 @@ class SceneStandardRendererMixin:
                     "video_filter": background_config.get("video_filter"),
                 }
 
+                has_subtitle = is_effective_subtitle_text(line_data.get("text"))
+                any_chars = any(
+                    (character or {}).get("visible", False)
+                    for character in (line.get("characters", []) or [])
+                )
+                insert_config = line_config.get("insert") or {}
+                insert_path = str(insert_config.get("path", ""))
+                insert_is_image = insert_path.lower().endswith(
+                    (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+                )
+                has_move = bool(line_config.get("move")) or any(
+                    bool((character or {}).get("move"))
+                    for character in (line.get("characters", []) or [])
+                )
+                has_effect = bool(
+                    line_config.get("background_effects")
+                    or line_config.get("screen_effects")
+                )
+                creator_started: Optional[float] = None
+                creator_finished: Optional[float] = None
+                render_ms = 0.0
+
                 async def clip_creator_func(output_path: Path) -> Path:
+                    nonlocal creator_started, creator_finished, render_ms
+                    creator_started = _time.perf_counter()
+                    render_started = creator_started
                     clip_path = await self.video_renderer.render_clip(
                         audio_path=audio_path,
                         duration=duration,
@@ -1002,15 +1028,18 @@ class SceneStandardRendererMixin:
                         raise PipelineError(
                             f"Clip rendering failed for line: {line_id}"
                         )
+                    creator_finished = _time.perf_counter()
+                    render_ms = (creator_finished - render_started) * 1000.0
                     return clip_path
 
-                _t0 = _time.time()
+                cache_started = _time.perf_counter()
                 clip_path = await self.cache_manager.get_or_create(
                     key_data=video_cache_data,
                     file_name=line_id,
                     extension="mp4",
                     creator_func=clip_creator_func,
                 )
+                cache_finished = _time.perf_counter()
                 fg_overlays = await self._resolve_visual_overlays(
                     line,
                     scope_id=line_id,
@@ -1019,51 +1048,73 @@ class SceneStandardRendererMixin:
                     clip_path = await self.video_renderer.apply_foreground_overlays(
                         clip_path, fg_overlays
                     )
+                total_finished = _time.perf_counter()
+                total_ms = (total_finished - line_total_started) * 1000.0
+                cache_status = "miss" if creator_started is not None else "hit"
+                cache_lookup_ms = (
+                    (creator_started - cache_started) * 1000.0
+                    if creator_started is not None
+                    else (cache_finished - cache_started) * 1000.0
+                )
+                cache_store_ms = (
+                    max(0.0, (cache_finished - creator_finished) * 1000.0)
+                    if creator_finished is not None
+                    else 0.0
+                )
+                prepare_ms = max(0.0, (cache_started - line_total_started) * 1000.0)
                 # Collect lightweight samples for auto-tune
+                if (
+                    self.phase.auto_tune_enabled
+                    and not getattr(self.phase, "parallel_scene_rendering", False)
+                    and len(self.phase._profile_samples) < self.phase.profile_limit
+                ):
+                    self.phase._profile_samples.append(
+                        {
+                            "cpu_overlay": has_subtitle or any_chars or insert_is_image,
+                            "elapsed": total_ms / 1000.0,
+                        }
+                    )
                 try:
-                    if (
-                        self.phase.auto_tune_enabled
-                        and not getattr(self.phase, "parallel_scene_rendering", False)
-                        and len(self.phase._profile_samples) < self.phase.profile_limit
-                    ):
-                        # Heuristic: subtitle or visible characters or image insert implies CPU overlay
-                        has_subtitle = is_effective_subtitle_text(line_data.get("text"))
-                        any_chars = any(
-                            (c or {}).get("visible", False)
-                            for c in (line.get("characters", []) or [])
-                        )
-                        ins = line_config.get("insert") or {}
-                        ins_path = str(ins.get("path", ""))
-                        ins_is_image = ins_path.lower().endswith(
-                            (".png", ".jpg", ".jpeg", ".bmp", ".webp")
-                        )
-                        cpu_overlay = has_subtitle or any_chars or ins_is_image
-                        elapsed = _time.time() - _t0
-                        self.phase._profile_samples.append(
-                            {
-                                "cpu_overlay": cpu_overlay,
-                                "elapsed": elapsed,
-                            }
-                        )
-                    # Also record full diagnostic sample (independent of profiling caps)
-                    try:
-                        perf_stats.incr("line_clips")
-                        perf_stats.add_ms("video_line_clip_ms", elapsed * 1000.0)
-                        self.phase._clip_samples_all.append(
-                            {
-                                "scene": scene_id,
-                                "line": idx,
-                                "elapsed": elapsed,
-                                "subtitle": has_subtitle,
-                                "chars": any_chars,
-                                "insert_img": ins_is_image,
-                                "is_bg_video": is_bg_video,
-                            }
-                        )
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                    task = asyncio.current_task()
+                    worker_id = task.get_name() if task is not None else "async-main"
+                    perf_stats.record_line_clip(
+                        {
+                            "scene_id": scene_id,
+                            "line_index": idx,
+                            "clip_id": line_id,
+                            "duration_ms": total_ms,
+                            "cache_status": cache_status,
+                            "worker_id": worker_id,
+                            "render_path": str(clip_path),
+                            "has_subtitle": has_subtitle,
+                            "has_face_overlay": bool(face_anim_list),
+                            "has_move": has_move,
+                            "has_effect": has_effect,
+                            "cache_lookup_ms": cache_lookup_ms,
+                            "render_ms": render_ms,
+                            "prepare_ms": prepare_ms,
+                            "cache_store_ms": cache_store_ms,
+                        }
+                    )
+                    self.phase._clip_samples_all.append(
+                        {
+                            "scene": scene_id,
+                            "line": idx,
+                            "elapsed": total_ms / 1000.0,
+                            "subtitle": has_subtitle,
+                            "chars": any_chars,
+                            "insert_img": insert_is_image,
+                            "is_bg_video": line_is_bg_video,
+                            "cache": cache_status,
+                        }
+                    )
+                except Exception as measurement_error:
+                    logger.warning(
+                        "Failed to record line clip performance scene=%s line=%s: %s",
+                        scene_id,
+                        idx,
+                        measurement_error,
+                    )
                 results[idx - 1] = clip_path
 
         tasks = [process_one(idx, line) for idx, line in lines]

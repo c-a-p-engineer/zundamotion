@@ -391,12 +391,83 @@ async def concat_videos_safe(
     context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Concat by stream copy, falling back to copied video plus AAC audio."""
+    prepared_paths = list(input_paths)
+    temporary_audio_paths: List[str] = []
     fallback_reason = "copy_failed"
     copy_is_safe = len(input_paths) <= 1
     if len(input_paths) > 1:
         infos = await asyncio.gather(
             *(get_media_info(path, caller="concat_copy_safety") for path in input_paths)
         )
+        has_audio_flags = [bool(info.get("audio")) for info in infos]
+        if any(has_audio_flags) and not all(has_audio_flags):
+            final_audio = AudioParams(
+                sample_rate=audio_params.sample_rate,
+                channels=audio_params.channels,
+                codec="aac",
+                bitrate_kbps=audio_params.bitrate_kbps,
+            )
+            channel_layout = (
+                "mono"
+                if final_audio.channels == 1
+                else "stereo"
+                if final_audio.channels == 2
+                else f"{final_audio.channels}c"
+            )
+            try:
+                for index, (path, has_audio) in enumerate(zip(input_paths, has_audio_flags)):
+                    if has_audio:
+                        continue
+                    duration = await get_media_duration(path, caller="concat_silent_audio")
+                    digest = hashlib.sha256(path.encode("utf-8")).hexdigest()[:12]
+                    normalized = os.path.join(
+                        os.path.dirname(os.path.abspath(output_path)) or ".",
+                        f".concat_silent_{index}_{digest}.mp4",
+                    )
+                    cmd = [
+                        ffmpeg_path,
+                        "-y",
+                        *get_profile_flags(),
+                        "-i",
+                        path,
+                        "-f",
+                        "lavfi",
+                        "-t",
+                        f"{duration:.6f}",
+                        "-i",
+                        f"anullsrc=r={final_audio.sample_rate}:cl={channel_layout}",
+                        "-map",
+                        "0:v:0",
+                        "-map",
+                        "1:a:0",
+                        "-c:v",
+                        "copy",
+                        *final_audio.to_ffmpeg_opts(),
+                        "-shortest",
+                        "-t",
+                        f"{duration:.6f}",
+                        "-avoid_negative_ts",
+                        "make_zero",
+                        normalized,
+                    ]
+                    await _run_ffmpeg_async(
+                        cmd,
+                        context={
+                            **(context or {}),
+                            "operation": "concat_add_silent_audio",
+                            "output_path": normalized,
+                        },
+                    )
+                    prepared_paths[index] = normalized
+                    temporary_audio_paths.append(normalized)
+                infos = await asyncio.gather(
+                    *(get_media_info(path, caller="concat_silent_audio_safety") for path in prepared_paths)
+                )
+            except Exception:
+                for path in temporary_audio_paths:
+                    if os.path.exists(path):
+                        os.remove(path)
+                raise
         audio_codecs = {
             str((info.get("audio") or {}).get("codec_name") or "").lower()
             for info in infos
@@ -412,7 +483,7 @@ async def concat_videos_safe(
     if copy_is_safe:
         try:
             await concat_videos_copy(
-                input_paths,
+                prepared_paths,
                 output_path,
                 ffmpeg_path,
                 movflags_faststart=movflags_faststart,
@@ -425,17 +496,18 @@ async def concat_videos_safe(
             return "copy"
         except Exception as exc:
             fallback_reason = type(exc).__name__
-    logger.warning(
+    log_concat_path = logger.info if fallback_reason == "lossy_audio_encoder_delay" else logger.warning
+    log_concat_path(
         "[ConcatPath] mode=audio_reencode reason=%s output=%s",
         fallback_reason,
         output_path,
     )
 
     out_dir = os.path.dirname(os.path.abspath(output_path)) or "."
-    digest = hashlib.sha256("\n".join(input_paths).encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.sha256("\n".join(prepared_paths).encode("utf-8")).hexdigest()[:16]
     list_path = os.path.join(out_dir, f".ffconcat_audio_{digest}.txt")
     with open(list_path, "w", encoding="utf-8") as stream:
-        for path in input_paths:
+        for path in prepared_paths:
             stream.write(f"file '{os.path.abspath(path)}'\n")
 
     final_audio = AudioParams(
@@ -490,6 +562,9 @@ async def concat_videos_safe(
     finally:
         if os.path.exists(list_path):
             os.remove(list_path)
+        for path in temporary_audio_paths:
+            if os.path.exists(path):
+                os.remove(path)
 
 
 async def _copy_segment(
@@ -804,16 +879,19 @@ async def apply_transition_local(
         transition_note = " (freeze-before-transition)"
 
     try:
-        await concat_videos_copy(
+        concat_mode = await concat_videos_safe(
             parts,
             output_path,
+            audio_params,
             ffmpeg_path,
+            movflags_faststart=True,
             context={**context, "operation": "transition_parts_concat"},
         )
         logger.info(
-            "Applied local '%s' transition: copied %d part(s), re-encoded boundary %.2fs%s -> %s",
+            "Applied local '%s' transition: concat=%s parts=%d, re-encoded boundary %.2fs%s -> %s",
             transition_type,
-            max(0, len(parts) - 1),
+            concat_mode,
+            len(parts),
             duration + wait_padding * 2.0,
             transition_note,
             output_path,
@@ -840,10 +918,12 @@ async def apply_transition_local(
                 retry_parts = list(parts)
                 retry_parts[-1] = encoded_suffix_path
                 try:
-                    await concat_videos_copy(
+                    await concat_videos_safe(
                         retry_parts,
                         output_path,
+                        audio_params,
                         ffmpeg_path,
+                        movflags_faststart=True,
                         context={**context, "operation": "transition_parts_concat_retry"},
                     )
                     logger.info(

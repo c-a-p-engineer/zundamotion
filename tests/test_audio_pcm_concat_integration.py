@@ -93,3 +93,49 @@ def test_pcm_intermediates_and_three_clip_concat_have_monotonic_dts(tmp_path: Pa
         assert summary["duration_delta"] <= 0.1
 
     asyncio.run(_run())
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is required")
+@pytest.mark.skipif(shutil.which("ffprobe") is None, reason="ffprobe is required")
+def test_safe_concat_adds_silence_for_audio_less_transition_part(tmp_path: Path):
+    async def _run() -> None:
+        params = AudioParams(codec="aac", sample_rate=48000, channels=2, bitrate_kbps=128)
+        paths: list[str] = []
+        for index in range(3):
+            path = tmp_path / f"part-{index}.mp4"
+            command = [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=160x90:r=10:d=0.4",
+            ]
+            if index != 1:
+                command.extend(
+                    [
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "anullsrc=r=48000:cl=stereo",
+                        "-map",
+                        "0:v:0",
+                        "-map",
+                        "1:a:0",
+                        *params.to_ffmpeg_opts(),
+                        "-shortest",
+                    ]
+                )
+            command.extend(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", "0.4", str(path)])
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            assert "non-monotonic dts" not in result.stderr.lower()
+            paths.append(str(path))
+
+        output = tmp_path / "mixed-audio-presence.mp4"
+        mode = await concat_videos_safe(paths, str(output), params)
+        assert mode == "audio_reencode"
+        summary = await validate_final_media(str(output), params)
+        assert summary["audio_codec"] == "aac"
+        assert summary["duration_delta"] <= 0.1
+
+    asyncio.run(_run())

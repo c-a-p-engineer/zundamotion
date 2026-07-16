@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from zundamotion.utils.perf_stats import PerfStats
 
 
@@ -88,3 +90,55 @@ def test_perf_stats_to_dict_keeps_existing_metrics_and_adds_p0_fields() -> None:
     assert data["ffprobe"]["top_paths"][0]["path"] == "a.mp4"
     assert data["ffprobe"]["top_callers"][0]["caller"] == "transition_input_probe"
     assert data["ffprobe"]["cache_hits_by_caller"]["transition_input_probe"] == 1
+
+
+def _line_item(index: int, cache_status: str = "miss") -> dict:
+    return {
+        "scene_id": f"scene_{index % 4}",
+        "line_index": index + 1,
+        "clip_id": f"clip_{index}",
+        "duration_ms": float(index + 1) * 10.0,
+        "cache_status": cache_status,
+        "worker_id": f"worker-{index % 3}",
+        "render_path": f"clip_{index}.mp4",
+        "has_subtitle": True,
+        "has_face_overlay": index % 2 == 0,
+        "has_move": False,
+        "has_effect": False,
+        "cache_lookup_ms": 1.0,
+        "render_ms": 0.0 if cache_status == "hit" else float(index + 1) * 8.0,
+        "prepare_ms": 1.0,
+        "cache_store_ms": 1.0 if cache_status == "miss" else 0.0,
+    }
+
+
+def test_line_clip_summary_records_single_worker_nonzero_values() -> None:
+    perf = PerfStats()
+    perf.record_line_clip(_line_item(0))
+
+    data = perf.to_dict()
+
+    assert data["video_line_clip_ms"] == 10.0
+    assert data["line_clip_count"] == 1
+    assert data["line_clip_render_ms"] == 8.0
+    assert data["line_clip"]["items"][0]["clip_id"] == "clip_0"
+
+
+def test_line_clip_summary_is_thread_safe_for_44_parallel_records() -> None:
+    perf = PerfStats()
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(
+            executor.map(
+                perf.record_line_clip,
+                [_line_item(index, "hit" if index % 3 == 0 else "miss") for index in range(44)],
+            )
+        )
+
+    summary = perf.to_dict()["line_clip"]
+
+    assert summary["line_clip_count"] == 44
+    assert summary["line_clip_cache_hit_count"] == 15
+    assert summary["line_clip_cache_miss_count"] == 29
+    assert summary["line_clip_total_ms"] > 0
+    assert len(summary["slowest"]) == 10
+    assert summary["slowest"][0]["clip_id"] == "clip_43"

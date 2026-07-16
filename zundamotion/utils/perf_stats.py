@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
 from collections import Counter, defaultdict
@@ -49,12 +50,43 @@ class PerfStats:
         self.ffprobe_calls_detail: list[Dict[str, Any]] = []
         self.ffprobe_cache_hits_detail: list[Dict[str, Any]] = []
         self.scene_cache_events: list[Dict[str, Any]] = []
+        self.line_clip_items: list[Dict[str, Any]] = []
+        self._lock = threading.RLock()
 
     def incr(self, name: str, value: int = 1) -> None:
-        self.counters[name] = int(self.counters.get(name, 0)) + int(value)
+        with self._lock:
+            self.counters[name] = int(self.counters.get(name, 0)) + int(value)
 
     def add_ms(self, name: str, value: float) -> None:
-        self.timings_ms[name] = float(self.timings_ms.get(name, 0.0)) + float(value)
+        with self._lock:
+            self.timings_ms[name] = float(self.timings_ms.get(name, 0.0)) + float(value)
+
+    def record_line_clip(self, item: Dict[str, Any]) -> None:
+        """行クリップ取得の内訳を競合なく集約する。"""
+        normalized = dict(item)
+        for key in (
+            "duration_ms",
+            "cache_lookup_ms",
+            "render_ms",
+            "prepare_ms",
+            "cache_store_ms",
+        ):
+            normalized[key] = round(float(normalized.get(key, 0.0) or 0.0), 1)
+        with self._lock:
+            self.line_clip_items.append(normalized)
+            self.counters["line_clips"] = int(self.counters.get("line_clips", 0)) + 1
+            self.timings_ms["video_line_clip_ms"] = float(
+                self.timings_ms.get("video_line_clip_ms", 0.0)
+            ) + normalized["duration_ms"]
+            self.timings_ms["video_line_clip_render_ms"] = float(
+                self.timings_ms.get("video_line_clip_render_ms", 0.0)
+            ) + normalized["render_ms"]
+            self.timings_ms["video_line_clip_cache_lookup_ms"] = float(
+                self.timings_ms.get("video_line_clip_cache_lookup_ms", 0.0)
+            ) + normalized["cache_lookup_ms"]
+            self.timings_ms["video_line_clip_cache_store_ms"] = float(
+                self.timings_ms.get("video_line_clip_cache_store_ms", 0.0)
+            ) + normalized["cache_store_ms"]
 
     def set_phase_ms(self, phase_name: str, value: float) -> None:
         self.phase_ms[phase_name] = float(value)
@@ -271,6 +303,51 @@ class PerfStats:
             "misses": misses,
         }
 
+    @staticmethod
+    def _percentile(values: list[float], ratio: float) -> float:
+        if not values:
+            return 0.0
+        ordered = sorted(values)
+        position = (len(ordered) - 1) * ratio
+        lower = int(position)
+        upper = min(len(ordered) - 1, lower + 1)
+        weight = position - lower
+        return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
+
+    def _build_line_clip_summary(self) -> Dict[str, Any]:
+        with self._lock:
+            items = [dict(item) for item in self.line_clip_items]
+        durations = [float(item.get("duration_ms", 0.0) or 0.0) for item in items]
+        total_ms = sum(durations)
+        cache_hits = sum(1 for item in items if item.get("cache_status") == "hit")
+        cache_misses = len(items) - cache_hits
+        top = sorted(
+            items,
+            key=lambda item: float(item.get("duration_ms", 0.0) or 0.0),
+            reverse=True,
+        )[:10]
+        return {
+            "line_clip_count": len(items),
+            "line_clip_cache_hit_count": cache_hits,
+            "line_clip_cache_miss_count": cache_misses,
+            "line_clip_total_ms": round(total_ms, 1),
+            "line_clip_render_ms": round(
+                sum(float(item.get("render_ms", 0.0) or 0.0) for item in items), 1
+            ),
+            "line_clip_cache_lookup_ms": round(
+                sum(float(item.get("cache_lookup_ms", 0.0) or 0.0) for item in items), 1
+            ),
+            "line_clip_cache_store_ms": round(
+                sum(float(item.get("cache_store_ms", 0.0) or 0.0) for item in items), 1
+            ),
+            "line_clip_average_ms": round(total_ms / len(items), 1) if items else 0.0,
+            "line_clip_p50_ms": round(self._percentile(durations, 0.50), 1),
+            "line_clip_p95_ms": round(self._percentile(durations, 0.95), 1),
+            "line_clip_max_ms": round(max(durations), 1) if durations else 0.0,
+            "items": items,
+            "slowest": top,
+        }
+
     def to_dict(self) -> Dict[str, Any]:
         data: Dict[str, Any] = dict(self.counters)
         data["run_id"] = self.run_id
@@ -283,6 +360,11 @@ class PerfStats:
         data["subtitle_burn"] = self._build_subtitle_burn_summary()
         data["ffprobe"] = self._build_ffprobe_summary()
         data["scene_cache"] = self._build_scene_cache_summary()
+        line_clips = self._build_line_clip_summary()
+        data["line_clip"] = line_clips
+        for key, value in line_clips.items():
+            if key not in {"items", "slowest"}:
+                data[key] = value
         return data
 
     def write_json(self, output_path: Path) -> None:
@@ -313,6 +395,12 @@ def add_ms(name: str, value: float) -> None:
     stats = current_perf_stats()
     if stats is not None:
         stats.add_ms(name, value)
+
+
+def record_line_clip(item: Dict[str, Any]) -> None:
+    stats = current_perf_stats()
+    if stats is not None:
+        stats.record_line_clip(item)
 
 
 def record_scene_cache_event(

@@ -43,21 +43,23 @@ def test_apply_transition_local_copies_consumed_next_suffix(monkeypatch, tmp_pat
     async def fake_apply_transition(*args, **kwargs):
         return None
 
-    async def fake_concat_videos_copy(
+    async def fake_concat_videos_safe(
         input_paths,
         output_path,
+        audio_params,
         ffmpeg_path="ffmpeg",
-        movflags_faststart=True,
+        movflags_faststart=False,
         context=None,
     ):
         calls["concat"].append(list(input_paths))
+        return "audio_reencode"
 
     monkeypatch.setattr(ffmpeg_ops, "get_media_duration", fake_get_media_duration)
     monkeypatch.setattr(ffmpeg_ops, "_copy_segment", fake_copy_segment)
     monkeypatch.setattr(ffmpeg_ops, "_encode_segment", fake_encode_segment)
     monkeypatch.setattr(ffmpeg_ops, "_create_freeze_tail", fake_create_freeze_tail)
     monkeypatch.setattr(ffmpeg_ops, "apply_transition", fake_apply_transition)
-    monkeypatch.setattr(ffmpeg_ops, "concat_videos_copy", fake_concat_videos_copy)
+    monkeypatch.setattr(ffmpeg_ops, "concat_videos_safe", fake_concat_videos_safe)
 
     asyncio.run(
         ffmpeg_ops.apply_transition_local(
