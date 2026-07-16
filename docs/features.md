@@ -15,6 +15,8 @@
 | 字幕 | PNG字幕焼き込み＋SRT/ASS出力、バウンス効果 | SubtitlePNGRendererでスタイル適用、text:bounce_text効果あり | components/subtitles, plugins/builtin/subtitle_text/plugin.py, main.py CLI `--subtitle-file` |
 | トランジション | xfade＋音声acrossfade（scene.transition） | fade/dissolve/wipe/zoom等のxfade typeを指定可能 | utils/ffmpeg_ops.apply_transition, components/pipeline_phases/finalize_phase.py |
 | BGM/SE | BGMミックス（音量・フェード・ディレイ）＋複数SE合成 | amixでBGMと映像音声を混合、fade in/out・delay対応 | utils/ffmpeg_audio.add_bgm_to_video, mix_audio_tracks, components/pipeline_phases/bgm_phase.py |
+| 音声形式 | 中間PCM WAV・最終AAC-LC | 無音、VOICEVOX加工、voice_layers、SE、音声filterはpcm_s16le WAV。行/シーンのPTSを0始点に正規化し、最終MP4をAAC-LCで検証。利用者向け設定は `scripts/script_cheatsheet.md` の「BGM と音声チューニング」を参照 | utils/ffmpeg_params.py, utils/ffmpeg_audio.py, utils/ffmpeg_probe.py |
+| 連結 | DTS安全なscene/字幕断片concat | 安全な入力はstream copy。AAC encoder delay/paddingを含む複数入力は映像copy＋音声AAC再エンコード | utils/ffmpeg_ops.concat_videos_safe |
 | エフェクト拡張 | プラグイン式オーバーレイ効果 | blur/vignette/eq/hue/curves/unsharp/lut3d/rotate等を登録・適用 | plugins/builtin/overlay_basic/plugin.py, components/video/overlay_effects.py |
 | 字幕エフェクト拡張 | バウンス字幕プラグイン | text:bounce_textで上下バウンド | plugins/builtin/subtitle_text/plugin.py |
 | 進捗/出力補助 | タイムライン出力・ログ（JSON/KV/ファイル） | timeline.md/csv生成、ログ形式切替 | timeline.py, main.py |

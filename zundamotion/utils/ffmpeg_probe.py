@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional, TypedDict
 
 from .ffmpeg_runner import run_ffmpeg_async
 from .logger import logger
+from .ffmpeg_params import AudioParams
 
 _media_info_memo: Dict[tuple, "MediaInfo"] = {}
 _media_info_inflight: Dict[tuple, "asyncio.Task[MediaInfo]"] = {}
@@ -347,3 +348,78 @@ async def get_media_duration(file_path: str, caller: Optional[str] = None) -> fl
     except Exception as e:
         logger.error(f"Failed to get media duration for {file_path}: {e}")
         raise
+
+
+async def validate_final_media(
+    file_path: str,
+    audio_params: AudioParams,
+    *,
+    start_tolerance: float = 0.1,
+    duration_tolerance: float = 0.1,
+) -> Dict[str, Any]:
+    """Validate final MP4 stream format and practical A/V synchronization."""
+    result = await run_ffmpeg_async(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration,start_time:stream=codec_type,codec_name,sample_rate,channels,start_time,duration",
+            "-of",
+            "json",
+            file_path,
+        ],
+        context={
+            "phase": "FinalizeValidation",
+            "operation": "validate_final_media",
+            "path": file_path,
+        },
+    )
+    payload = json.loads(result.stdout)
+    streams = payload.get("streams") or []
+    video = next((item for item in streams if item.get("codec_type") == "video"), None)
+    audio = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    if video is None or audio is None:
+        raise ValueError(f"Final media must contain video and audio streams: {file_path}")
+    if str(audio.get("codec_name") or "").lower() != "aac":
+        raise ValueError(f"Final MP4 audio must be AAC: {audio.get('codec_name')}")
+    if int(audio.get("sample_rate") or 0) != int(audio_params.sample_rate):
+        raise ValueError(f"Unexpected final sample rate: {audio.get('sample_rate')}")
+    if int(audio.get("channels") or 0) != int(audio_params.channels):
+        raise ValueError(f"Unexpected final channel count: {audio.get('channels')}")
+
+    format_duration = float((payload.get("format") or {}).get("duration") or 0.0)
+    if format_duration <= 0.0:
+        raise ValueError(f"Final media duration must be positive: {file_path}")
+    video_start = float(video.get("start_time") or 0.0)
+    audio_start = float(audio.get("start_time") or 0.0)
+    if abs(video_start - audio_start) > float(start_tolerance):
+        raise ValueError(
+            f"A/V start mismatch {abs(video_start - audio_start):.6f}s exceeds {start_tolerance:.6f}s"
+        )
+    video_duration = float(video.get("duration") or format_duration)
+    audio_duration = float(audio.get("duration") or format_duration)
+    duration_delta = abs(video_duration - audio_duration)
+    if duration_delta > float(duration_tolerance):
+        raise ValueError(
+            f"A/V duration mismatch {duration_delta:.6f}s exceeds {duration_tolerance:.6f}s"
+        )
+    summary = {
+        "audio_codec": "aac",
+        "sample_rate": int(audio_params.sample_rate),
+        "channels": int(audio_params.channels),
+        "duration": format_duration,
+        "video_start": video_start,
+        "audio_start": audio_start,
+        "duration_delta": duration_delta,
+    }
+    logger.info(
+        "[FinalMedia] codec=%s sample_rate=%s channels=%s start_delta=%.6f duration_delta=%.6f path=%s",
+        summary["audio_codec"],
+        summary["sample_rate"],
+        summary["channels"],
+        abs(video_start - audio_start),
+        duration_delta,
+        file_path,
+    )
+    return summary

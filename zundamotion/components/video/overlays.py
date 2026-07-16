@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 from importlib import import_module
 
 from ...utils.ffmpeg_probe import get_media_duration
-from ...utils.ffmpeg_ops import concat_videos_copy
+from ...utils.ffmpeg_ops import concat_videos_safe
 from ...utils.filter_presets import get_video_filter_chain
 from ...utils.logger import logger
 from ...utils import perf_stats
@@ -39,6 +39,23 @@ class OverlayMixin:
         # 1〜2フレーム級の断片は trim/atrim の丸め誤差で失敗しやすい。
         # 字幕ギャップの見た目への影響は小さいため、最低でも 2 フレーム分を要求する。
         return max(MIN_EXACT_SEGMENT_DURATION, 2.0 / float(fps))
+
+    def _should_use_subtitle_segment_mode(
+        self,
+        ranges: List[Dict[str, Any]],
+        *,
+        base_duration: float,
+        gap_threshold: float,
+    ) -> bool:
+        """十分なcopy対象gapか複数chunkがある場合だけsegment経路を使う。"""
+        if not ranges:
+            return False
+        if len(ranges) > 1:
+            return True
+        edge_threshold = max(float(gap_threshold), self._min_exact_segment_duration())
+        leading_gap = max(0.0, float(ranges[0]["start"]))
+        trailing_gap = max(0.0, float(base_duration) - float(ranges[-1]["end"]))
+        return leading_gap >= edge_threshold or trailing_gap >= edge_threshold
 
     def _max_cuda_subtitle_overlays(self) -> int:
         video_cfg = getattr(self, "video_config", {}) or {}
@@ -798,10 +815,10 @@ class OverlayMixin:
                 timing_stats["gap_duration"],
                 timing_stats["longest_zone"],
             )
-            if ranges and (
-                ranges[0]["start"] > 0.05
-                or ranges[-1]["end"] < float(base_dur) - 0.05
-                or len(ranges) > 1
+            if self._should_use_subtitle_segment_mode(
+                ranges,
+                base_duration=float(base_dur),
+                gap_threshold=gap_threshold,
             ):
                 perf_stats.incr("subtitle_chunks", len(ranges))
                 logger.info(
@@ -816,6 +833,7 @@ class OverlayMixin:
                 gap_count = 0
                 exact_gap_duration = 0.0
                 reencoded_gap_duration = 0.0
+                gap_fallback_reason = "none"
                 slowest_chunk_ms = 0.0
                 for seg_idx, item in enumerate(ranges):
                     start = float(item["start"])
@@ -828,12 +846,22 @@ class OverlayMixin:
                             start,
                             gap_duration,
                         )
-                        copied = await self._cut_video_segment_exact(
-                            base_video,
-                            self.temp_dir / f"{base_video.stem}_sub_gap_{seg_idx:03d}.mp4",
-                            cursor,
-                            gap_duration,
-                        )
+                        try:
+                            copied = await self._cut_video_segment_exact(
+                                base_video,
+                                self.temp_dir / f"{base_video.stem}_sub_gap_{seg_idx:03d}.mp4",
+                                cursor,
+                                gap_duration,
+                            )
+                        except Exception as err:
+                            copied = None
+                            gap_fallback_reason = f"exact_cut_failed:{type(err).__name__}"
+                            logger.warning(
+                                "[SubtitleGap] exact cut failed start=%.3f duration=%.3f (%s); falling back to full subtitle burn",
+                                cursor,
+                                gap_duration,
+                                err,
+                            )
                         if copied:
                             gap_count += 1
                             exact_gap_duration += gap_duration
@@ -897,12 +925,22 @@ class OverlayMixin:
                         float(base_dur),
                         gap_duration,
                     )
-                    copied = await self._cut_video_segment_exact(
-                        base_video,
-                        self.temp_dir / f"{base_video.stem}_sub_gap_tail.mp4",
-                        cursor,
-                        gap_duration,
-                    )
+                    try:
+                        copied = await self._cut_video_segment_exact(
+                            base_video,
+                            self.temp_dir / f"{base_video.stem}_sub_gap_tail.mp4",
+                            cursor,
+                            gap_duration,
+                        )
+                    except Exception as err:
+                        copied = None
+                        gap_fallback_reason = f"exact_cut_failed:{type(err).__name__}"
+                        logger.warning(
+                            "[SubtitleGap] exact tail cut failed start=%.3f duration=%.3f (%s); falling back to full subtitle burn",
+                            cursor,
+                            gap_duration,
+                            err,
+                        )
                     if copied:
                         gap_count += 1
                         exact_gap_duration += gap_duration
@@ -915,31 +953,45 @@ class OverlayMixin:
                     exact_gap_duration + reencoded_gap_duration,
                     exact_gap_duration,
                     reencoded_gap_duration,
-                    "none" if reencoded_gap_duration <= 0.0 else "exact_segment_returned_none",
+                    gap_fallback_reason
+                    if gap_fallback_reason != "none"
+                    else (
+                        "none"
+                        if reencoded_gap_duration <= 0.0
+                        else "exact_segment_returned_none"
+                    ),
                     slowest_chunk_ms,
                 )
 
-                try:
-                    await concat_videos_copy(
-                        [str(path.resolve()) for path in segment_paths],
-                        str(output_path),
-                        self.ffmpeg_path,
-                        context={
-                            "phase": "VideoPhase",
-                            "operation": "subtitle_scene_concat",
-                            "scene_id": resolved_scene_id,
-                            "output_path": str(output_path),
-                        },
-                    )
-                    self.subtitle_overlay_stats_history.append(
-                        dict(self.subtitle_overlay_stats)
-                    )
-                    return output_path
-                except Exception as err:
+                if reencoded_gap_duration > 0.0:
                     logger.warning(
-                        "[SubtitleOverlay] Segment concat failed (%s). Falling back to full subtitle burn.",
-                        err,
+                        "[SubtitleOverlay] Segment gap extraction was incomplete (%.3fs, reason=%s). Falling back to full subtitle burn.",
+                        reencoded_gap_duration,
+                        gap_fallback_reason,
                     )
+                else:
+                    try:
+                        await concat_videos_safe(
+                            [str(path.resolve()) for path in segment_paths],
+                            str(output_path),
+                            self.audio_params,
+                            self.ffmpeg_path,
+                            context={
+                                "phase": "VideoPhase",
+                                "operation": "subtitle_scene_concat",
+                                "scene_id": resolved_scene_id,
+                                "output_path": str(output_path),
+                            },
+                        )
+                        self.subtitle_overlay_stats_history.append(
+                            dict(self.subtitle_overlay_stats)
+                        )
+                        return output_path
+                    except Exception as err:
+                        logger.warning(
+                            "[SubtitleOverlay] Segment concat failed (%s). Falling back to full subtitle burn.",
+                            err,
+                        )
 
         self.subtitle_overlay_stats["chunks"] = 1
         perf_stats.incr("subtitle_chunks", 1)

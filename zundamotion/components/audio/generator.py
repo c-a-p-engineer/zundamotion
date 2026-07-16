@@ -8,7 +8,12 @@ import httpx
 from ...cache import CacheManager  # CacheManagerをインポート
 from ...exceptions import CacheError
 from ...utils.ffmpeg_params import AudioParams
-from ...utils.ffmpeg_audio import create_silent_audio, mix_audio_tracks
+from ...utils.ffmpeg_audio import (
+    AUDIO_MIX_VERSION,
+    INTERMEDIATE_AUDIO_FORMAT_VERSION,
+    create_silent_audio,
+    mix_audio_tracks,
+)
 
 from ...utils.logger import logger  # loggerをインポート
 from .voicevox_client import generate_voice, get_engine_version, get_speakers_info
@@ -29,6 +34,7 @@ class AudioGenerator:
             "VOICEVOX_URL", self.voice_config.get("url", "http://127.0.0.1:50021")
         )
         self.audio_params = audio_params
+        self.intermediate_audio_params = audio_params.for_intermediate()
         self.cache_manager = cache_manager  # インスタンス変数として保持
         self._speaker_info_cache: Optional[Dict[int, Dict[str, Any]]] = None
         self._engine_version_cache: Optional[str] = None
@@ -229,7 +235,7 @@ class AudioGenerator:
                 await create_silent_audio(
                     str(silent_path),
                     0.001,
-                    self.audio_params,
+                    self.intermediate_audio_params,
                 )
                 return silent_path, voice_usage, layer_voice_segments
 
@@ -239,7 +245,7 @@ class AudioGenerator:
                 audio_tracks_to_mix,
                 str(mixed_wav_path),
                 total_duration=total_duration,
-                audio_params=self.audio_params,
+                audio_params=self.intermediate_audio_params,
             )
             return mixed_wav_path, voice_usage, layer_voice_segments
 
@@ -296,7 +302,9 @@ class AudioGenerator:
                 "voicevox_engine_version": engine_version,
                 "dictionary_hash": dictionary_hash,
                 "voicevox_url": self.voicevox_url,
-                "audio_params": self.audio_params.__dict__,  # AudioParamsもキャッシュキーに含める
+                "audio_params": self.intermediate_audio_params.__dict__,
+                "intermediate_audio_format_version": INTERMEDIATE_AUDIO_FORMAT_VERSION,
+                "audio_mix_version": AUDIO_MIX_VERSION,
             }
 
             async def creator_func(output_path: Path) -> Path:
@@ -361,7 +369,7 @@ class AudioGenerator:
                 await create_silent_audio(
                     str(speech_wav_path),
                     silent_duration,
-                    self.audio_params,
+                    self.intermediate_audio_params,
                 )
                 speech_duration = silent_duration
         else:
@@ -385,7 +393,7 @@ class AudioGenerator:
             await create_silent_audio(
                 str(speech_wav_path),
                 silent_duration,
-                self.audio_params,
+                self.intermediate_audio_params,
             )
             speech_duration = silent_duration
 
@@ -417,7 +425,7 @@ class AudioGenerator:
             audio_tracks_to_mix,
             str(mixed_wav_path),
             total_duration=max_end_time,
-            audio_params=self.audio_params,
+            audio_params=self.intermediate_audio_params,
         )
 
         return mixed_wav_path, voice_usage, layer_voice_segments

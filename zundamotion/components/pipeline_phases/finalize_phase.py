@@ -22,6 +22,7 @@ from zundamotion.utils.ffmpeg_ops import (
     apply_transition,
     compare_media_params,
     concat_videos_copy,
+    concat_videos_safe,
 )
 from zundamotion.utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from zundamotion.utils.logger import logger, time_log
@@ -292,9 +293,10 @@ class FinalizePhase:
             )
             try:
                 # Final output should be faststart-enabled for better streaming
-                await concat_videos_copy(
+                mode = await concat_videos_safe(
                     input_video_str_paths,
                     str(output_video_path),
+                    self.audio_params,
                     movflags_faststart=True,
                     context={
                         "phase": "FinalizePhase",
@@ -303,7 +305,9 @@ class FinalizePhase:
                     },
                 )
                 logger.info(
-                    f"FinalizePhase: Successfully concatenated videos using -c copy to {output_video_path}"
+                    "FinalizePhase: Successfully concatenated videos using %s to %s",
+                    mode,
+                    output_video_path,
                 )
                 return output_video_path
             except Exception as e:

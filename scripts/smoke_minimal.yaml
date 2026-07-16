@@ -50,6 +50,15 @@ scenes:
             move:
               duration: 0.5
               easing: ease_out
+      - text: "voice layers use PCM"
+        duration: 0.8
+        voice_layers:
+          - speaker_name: copetan
+            text: "layer one"
+          - speaker_name: copetan
+            text: "layer two"
+            start_time: 0.1
+            volume: 0.5
       - wait: 0.4
   - id: smoke_transition
     bg: assets/bg/room.png

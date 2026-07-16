@@ -18,13 +18,15 @@ def test_finalize_phase_uses_distinct_output_paths(monkeypatch, tmp_path: Path) 
         async def fake_compare_media_params(_paths: list[str]) -> bool:
             return True
 
-        async def fake_concat_videos_copy(
+        async def fake_concat_videos_safe(
             _inputs: list[str],
             output_path: str,
+            _audio_params,
             movflags_faststart: bool = True,
             context=None,
-        ) -> None:
+        ) -> str:
             Path(output_path).write_bytes(b"mp4")
+            return "copy"
 
         monkeypatch.setattr(
             "zundamotion.components.pipeline_phases.finalize_phase.get_media_duration",
@@ -35,8 +37,8 @@ def test_finalize_phase_uses_distinct_output_paths(monkeypatch, tmp_path: Path) 
             fake_compare_media_params,
         )
         monkeypatch.setattr(
-            "zundamotion.components.pipeline_phases.finalize_phase.concat_videos_copy",
-            fake_concat_videos_copy,
+            "zundamotion.components.pipeline_phases.finalize_phase.concat_videos_safe",
+            fake_concat_videos_safe,
         )
 
         phase = FinalizePhase(

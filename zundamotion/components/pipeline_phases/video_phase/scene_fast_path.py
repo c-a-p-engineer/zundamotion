@@ -680,17 +680,24 @@ class SceneFastPathMixin:
             )
             null_audio_index = next_input_index
             filter_parts.append(
-                f"[{null_audio_index}:a]atrim=duration={scene_duration:.3f}[scene_fast_audio]"
+                f"[{null_audio_index}:a]atrim=duration={scene_duration:.3f},"
+                "asetpts=PTS-STARTPTS[scene_fast_audio]"
             )
+
+        filter_parts.append(f"{current_stream}setpts=PTS-STARTPTS[scene_fast_video_out]")
+        filter_parts.append(
+            "[scene_fast_audio]aresample=async=1:first_pts=0,"
+            "asetpts=PTS-STARTPTS[scene_fast_audio_out]"
+        )
 
         cmd.extend(
             [
                 "-filter_complex",
                 ";".join(filter_parts),
                 "-map",
-                current_stream,
+                "[scene_fast_video_out]",
                 "-map",
-                "[scene_fast_audio]",
+                "[scene_fast_audio_out]",
             ]
         )
         cmd.extend(self.video_params.to_ffmpeg_opts(self.hw_kind))

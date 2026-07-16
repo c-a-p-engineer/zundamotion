@@ -52,6 +52,12 @@ def _validate_plugins_config(cfg: Dict[str, Any]) -> None:
 
 def _validate_video_config(config: Dict[str, Any]) -> None:
     video_cfg = config.get("video", {}) or {}
+    audio_codec = video_cfg.get("audio_codec")
+    if audio_codec is not None and str(audio_codec).strip().lower() != "aac":
+        raise ValidationError(
+            "'video.audio_codec' must be 'aac' for MP4 output; "
+            "PCM is used automatically for intermediate WAV files."
+        )
     fit_mode = video_cfg.get("background_fit")
     if fit_mode is None:
         return

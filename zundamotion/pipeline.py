@@ -19,7 +19,7 @@ from .exceptions import PipelineError
 from .timeline import Timeline
 from .plugins.manager import initialize_plugins
 from .utils.ffmpeg_params import AudioParams, VideoParams, resolve_media_params
-from .utils.ffmpeg_probe import get_media_duration
+from .utils.ffmpeg_probe import get_media_duration, validate_final_media
 from .utils.export_presets import apply_export_preset
 from .utils.logger import KVLogger, logger, time_log
 from .utils import perf_stats
@@ -294,6 +294,7 @@ class GenerationPipeline:
                 )
             # 最終的な動画をoutput_pathにコピー
             shutil.copy(final_video_path, output_path)
+            await validate_final_media(output_path, self.audio_params)
             if isinstance(logger, KVLogger):
                 logger.kv_info(
                     f"Final video saved to {output_path}",

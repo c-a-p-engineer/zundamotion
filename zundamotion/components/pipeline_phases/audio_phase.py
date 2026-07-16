@@ -19,7 +19,11 @@ from zundamotion.utils.subtitle_text import (
 )
 from zundamotion.utils.ffmpeg_params import AudioParams
 from zundamotion.utils.ffmpeg_probe import get_audio_duration
-from zundamotion.utils.ffmpeg_audio import apply_audio_filter
+from zundamotion.utils.ffmpeg_audio import (
+    AUDIO_MIX_VERSION,
+    INTERMEDIATE_AUDIO_FORMAT_VERSION,
+    apply_audio_filter,
+)
 from zundamotion.utils.text_processing import parse_reading_markup
 from zundamotion.utils.logger import logger, time_log
 from zundamotion.utils.face_anim import (
@@ -360,6 +364,9 @@ class AudioPhase:
                     "text": read_text,
                     "line_config": line,
                     "voice_config": self.config.get("voice", {}),
+                    "intermediate_audio_params": self.audio_params.for_intermediate().__dict__,
+                    "intermediate_audio_format_version": INTERMEDIATE_AUDIO_FORMAT_VERSION,
+                    "audio_mix_version": AUDIO_MIX_VERSION,
                 }
                 needs_line_audio_cache = bool(
                     line.get("audio_filter")
@@ -387,7 +394,8 @@ class AudioPhase:
                     filter_key = {
                         **audio_cache_data,
                         "audio_filter": audio_filter,
-                        "audio_params": self.audio_params.__dict__,
+                        "audio_params": self.audio_params.for_intermediate().__dict__,
+                        "intermediate_audio_format_version": INTERMEDIATE_AUDIO_FORMAT_VERSION,
                     }
 
                     async def _filter_creator(output_path: Path) -> Path:
@@ -395,7 +403,7 @@ class AudioPhase:
                             str(audio_path),
                             str(output_path),
                             audio_filter,
-                            self.audio_params,
+                            self.audio_params.for_intermediate(),
                         )
                         return output_path
 

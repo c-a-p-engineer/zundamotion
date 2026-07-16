@@ -129,6 +129,26 @@ def test_subtitle_png_chunks_split_continuous_ranges_by_count():
     assert chunks[1]["start"] == 3.0
 
 
+def test_subtitle_segment_mode_ignores_small_container_tail_gap():
+    dummy = _DummyOverlay()
+
+    assert not dummy._should_use_subtitle_segment_mode(
+        [{"start": 0.0, "end": 20.8, "subtitles": [{}]}],
+        base_duration=20.89,
+        gap_threshold=0.20,
+    )
+
+
+def test_subtitle_segment_mode_keeps_meaningful_tail_gap_optimization():
+    dummy = _DummyOverlay()
+
+    assert dummy._should_use_subtitle_segment_mode(
+        [{"start": 0.0, "end": 20.6, "subtitles": [{}]}],
+        base_duration=20.89,
+        gap_threshold=0.20,
+    )
+
+
 def test_subtitle_png_chunks_do_not_split_overlapping_subtitles():
     subtitles = [
         {"text": "a", "start": 0.0, "duration": 2.0, "line_config": {}},

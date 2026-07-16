@@ -184,9 +184,22 @@ def test_sample_script_renders_valid_mp4(script_path: str, tmp_path: Path) -> No
     assert any(stream.get("codec_type") == "video" for stream in streams)
     assert any(stream.get("codec_type") == "audio" for stream in streams)
     video_stream = next(stream for stream in streams if stream.get("codec_type") == "video")
+    audio_stream = next(stream for stream in streams if stream.get("codec_type") == "audio")
     expected_width, expected_height, expected_fps = _expected_video(script)
     assert (video_stream["width"], video_stream["height"]) == (
         expected_width,
         expected_height,
     )
     assert video_stream["avg_frame_rate"] == f"{expected_fps}/1"
+    assert audio_stream["codec_name"] == "aac"
+    assert int(audio_stream["sample_rate"]) == 48000
+    assert int(audio_stream["channels"]) == 2
+    video_start = float(video_stream.get("start_time") or 0.0)
+    audio_start = float(audio_stream.get("start_time") or 0.0)
+    assert abs(video_start - audio_start) <= 0.1
+    video_duration = float(video_stream.get("duration") or duration)
+    audio_duration = float(audio_stream.get("duration") or duration)
+    assert abs(video_duration - audio_duration) <= 0.1
+    stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace").lower()
+    assert "non-monotonic dts" not in stderr_text
+    assert "non monotonically increasing dts" not in stderr_text

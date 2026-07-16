@@ -786,7 +786,9 @@ async def render_clip(
         filter_complex_parts.append(f"{current_video_stream}null[final_v]")
     else:
         # CPU 経路（または NVENC 以外）は従来通り yuv420p へ確定
-        filter_complex_parts.append(f"{current_video_stream}format=yuv420p[final_v]")
+        filter_complex_parts.append(
+            f"{current_video_stream}setpts=PTS-STARTPTS,format=yuv420p[final_v]"
+        )
 
     # --- Audio --------------------------------------------------------------
     # has_audio_stream is async; ensure we await it to get a boolean
@@ -795,7 +797,7 @@ async def render_clip(
     audio_src = None
     if insert_config and insert_audio_index != -1:
         volume = float(insert_config.get("volume", 1.0))
-        insert_audio_filters = [f"volume={volume}"]
+        insert_audio_filters = ["asetpts=PTS-STARTPTS", f"volume={volume}"]
         if abs(insert_speed - 1.0) > 1e-6:
             insert_audio_filters.append(_atempo_chain(insert_speed))
         filter_complex_parts.append(
@@ -803,14 +805,22 @@ async def render_clip(
         )
         if has_speech_audio:
             filter_complex_parts.append(
-                f"[{speech_audio_index}:a][insert_audio_vol]amix=inputs=2:duration=longest:dropout_transition=0[mixed_a]"
+                f"[{speech_audio_index}:a]aresample={renderer.audio_params.sample_rate},"
+                "asetpts=PTS-STARTPTS[speech_norm]"
+            )
+            filter_complex_parts.append(
+                "[speech_norm][insert_audio_vol]amix=inputs=2:duration=longest:dropout_transition=0[mixed_a]"
             )
             audio_src = "[mixed_a]"
         else:
             audio_src = "[insert_audio_vol]"
     else:
         if has_speech_audio:
-            audio_src = f"[{speech_audio_index}:a]"
+            filter_complex_parts.append(
+                f"[{speech_audio_index}:a]aresample={renderer.audio_params.sample_rate},"
+                "asetpts=PTS-STARTPTS[speech_norm]"
+            )
+            audio_src = "[speech_norm]"
         else:
             filter_complex_parts.append(
                 f"anullsrc=channel_layout=stereo:sample_rate={renderer.audio_params.sample_rate}[sil]"
@@ -859,7 +869,8 @@ async def render_clip(
 
     delay_ms = max(0, int(audio_delay * 1000))
     filter_complex_parts.append(
-        f"{audio_src}adelay={delay_ms}:all=1,apad=pad_dur={duration}[final_a]"
+        f"{audio_src}asetpts=PTS-STARTPTS,adelay={delay_ms}:all=1,"
+        f"apad=whole_dur={duration},atrim=duration={duration},asetpts=PTS-STARTPTS[final_a]"
     )
     audio_map = "[final_a]"
 

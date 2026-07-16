@@ -262,3 +262,13 @@ def test_validate_config_accepts_targeted_character_color_filter() -> None:
             "script": {"scenes": []},
         }
     )
+
+
+def test_validate_config_rejects_non_aac_final_mp4_audio() -> None:
+    with pytest.raises(ValidationError, match="audio_codec.*aac"):
+        validate_config(
+            {
+                "video": {"audio_codec": "libmp3lame"},
+                "script": {"scenes": []},
+            }
+        )

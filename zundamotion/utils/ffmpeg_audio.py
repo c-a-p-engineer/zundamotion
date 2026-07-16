@@ -15,6 +15,10 @@ from .logger import logger
 from .filter_presets import get_audio_filter_chain
 
 
+INTERMEDIATE_AUDIO_FORMAT_VERSION = "pcm_s16le_wav_v1"
+AUDIO_MIX_VERSION = "pcm_mix_v1"
+
+
 async def has_audio_stream(file_path: str) -> bool:
     """動画に音声ストリームが存在するか判定する。"""
     media_info = await get_media_info(file_path)
@@ -28,7 +32,8 @@ async def create_silent_audio(
     ffmpeg_path: str = "ffmpeg",
 ) -> None:
     """指定秒数の無音WAVを生成する。"""
-    cl = "mono" if audio_params.channels == 1 else "stereo"
+    intermediate = audio_params.for_intermediate()
+    cl = "mono" if intermediate.channels == 1 else "stereo"
     cmd = [
         ffmpeg_path,
         "-y",
@@ -36,11 +41,11 @@ async def create_silent_audio(
         "-f",
         "lavfi",
         "-i",
-        f"anullsrc=r={audio_params.sample_rate}:cl={cl}",
+        f"anullsrc=r={intermediate.sample_rate}:cl={cl}",
         "-t",
         str(duration),
     ]
-    cmd.extend(audio_params.to_ffmpeg_opts())
+    cmd.extend(intermediate.to_ffmpeg_opts())
     cmd.append(output_path)
     try:
         await _run_ffmpeg_async(cmd)
@@ -131,9 +136,12 @@ async def apply_audio_filter(
     ffmpeg_path: str = "ffmpeg",
 ) -> None:
     """Apply a preset audio filter to a WAV file."""
+    intermediate = audio_params.for_intermediate()
     chain = get_audio_filter_chain(preset)
     if not chain:
-        cmd = [ffmpeg_path, "-y", "-i", input_path, output_path]
+        cmd = [ffmpeg_path, "-y", "-i", input_path]
+        cmd.extend(intermediate.to_ffmpeg_opts())
+        cmd.append(output_path)
         await _run_ffmpeg_async(cmd)
         return
 
@@ -146,11 +154,11 @@ async def apply_audio_filter(
         "-filter:a",
         ",".join(chain),
         "-ar",
-        str(audio_params.sample_rate),
+        str(intermediate.sample_rate),
         "-ac",
-        str(audio_params.channels),
+        str(intermediate.channels),
         "-c:a",
-        "pcm_s16le",
+        intermediate.codec,
         output_path,
     ]
     try:
@@ -308,8 +316,9 @@ async def mix_audio_tracks(
     audio_params: AudioParams,
     ffmpeg_path: str = "ffmpeg",
 ) -> None:
-    """複数の音声（パス, 開始秒, 音量）をミックスしてMP3で出力する。"""
+    """複数の音声（パス, 開始秒, 音量）をPCM WAVへミックスする。"""
     try:
+        intermediate = audio_params.for_intermediate()
         cmd = [ffmpeg_path, "-y"]
         cmd.extend(_threading_flags(ffmpeg_path))
         for track in audio_tracks:
@@ -322,25 +331,21 @@ async def mix_audio_tracks(
         parts.append(f"{mix_in}amix=inputs={len(audio_tracks)}:dropout_transition=0[aout]")
 
         cmd.extend(["-filter_complex", ";".join(parts), "-map", "[aout]"])
-        cmd.extend([
-            "-c:a",
-            "libmp3lame",
-            "-b:a",
-            f"{audio_params.bitrate_kbps}k",
-            "-ar",
-            str(audio_params.sample_rate),
-            "-ac",
-            str(audio_params.channels),
-            "-t",
-            str(total_duration),
-            output_path,
-        ])
+        cmd.extend(intermediate.to_ffmpeg_opts())
+        cmd.extend(["-t", str(total_duration), output_path])
 
         logger.debug(f"FFmpeg command: {' '.join(cmd)}")
         proc = await _run_ffmpeg_async(cmd)
         logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
         logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
-        logger.info(f"Successfully mixed audio tracks to {output_path}")
+        logger.info(
+            "[AudioFormat] operation=mix codec=%s sample_rate=%s channels=%s version=%s output=%s",
+            intermediate.codec,
+            intermediate.sample_rate,
+            intermediate.channels,
+            AUDIO_MIX_VERSION,
+            output_path,
+        )
     except subprocess.CalledProcessError as e:
         logger.error(f"Error mixing audio tracks: {e}")
         logger.error(f"FFmpeg stdout:\n{e.stdout}")

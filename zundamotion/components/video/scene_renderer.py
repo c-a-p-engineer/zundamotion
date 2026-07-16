@@ -595,9 +595,15 @@ async def render_wait_clip(
         filter_parts.extend(screen_snippet.filter_chain)
         current_video_stream = screen_snippet.output_label
 
-    filter_parts.append(f"{current_video_stream}format=yuv420p[final_v]")
+    filter_parts.append(
+        f"{current_video_stream}setpts=PTS-STARTPTS,format=yuv420p[final_v]"
+    )
 
-    audio_map = "1:a"
+    filter_parts.append(
+        f"[1:a]aresample={renderer.audio_params.sample_rate},"
+        "asetpts=PTS-STARTPTS[wait_audio_norm]"
+    )
+    audio_map = "wait_audio_norm"
     if extra_audio_inputs:
         mix_labels = [f"[{audio_map}]"]
         for extra_idx, overlay in enumerate(extra_audio_inputs):
@@ -635,8 +641,15 @@ async def render_wait_clip(
             )
             audio_map = "[wait_final_a]"
 
+    normalized_audio_map = "[wait_output_a]"
+    source_audio_map = audio_map if str(audio_map).startswith("[") else f"[{audio_map}]"
+    filter_parts.append(
+        f"{source_audio_map}apad=whole_dur={duration},atrim=duration={duration},"
+        "asetpts=PTS-STARTPTS[wait_output_a]"
+    )
+
     cmd.extend(["-filter_complex", ";".join(filter_parts)])
-    cmd.extend(["-map", "[final_v]", "-map", audio_map])
+    cmd.extend(["-map", "[final_v]", "-map", normalized_audio_map])
     cmd.extend(["-t", str(duration)])
     cmd.extend(renderer.video_params.to_ffmpeg_opts(renderer.hw_kind))
     cmd.extend(renderer.audio_params.to_ffmpeg_opts())

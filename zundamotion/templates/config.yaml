@@ -30,6 +30,10 @@ video:
   width: 1920
   height: 1080
   fps: 30
+  audio_codec: aac            # Final MP4 audio. Intermediate WAV is always pcm_s16le.
+  audio_sample_rate: 48000
+  audio_channels: 2
+  audio_bitrate_kbps: 192
   background_fit: stretch     # stretch | contain | cover | fit_width | fit_height
   # Performance tuning
   auto_tune: true             # Profile initial clips and adjust threads/workers

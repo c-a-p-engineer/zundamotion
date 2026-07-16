@@ -104,6 +104,7 @@ video:
   width: 1920
   height: 1080
   fps: 30
+  audio_bitrate_kbps: 160
   resolution: {width: 1920, height: 1080}
 
 defaults:
@@ -681,6 +682,28 @@ fg_overlays:
 サンプル: [`sample_overlay_static_image_effect.yaml`](./sample_overlay_static_image_effect.yaml), [`sample_overlay_blink.yaml`](./sample_overlay_blink.yaml)。
 
 ## BGM と音声チューニング
+
+音声形式は用途別に固定されます。VOICEVOX後の加工、無音、`voice_layers`、SEミックス、行フィルターなどの中間 `.wav` は `pcm_s16le`、指定sample rate・channelsです。最終MP4はAAC-LCです。`video.audio_codec` を明示する場合は `aac` のみ指定でき、MP3やPCMをMP4最終音声として指定すると検証エラーになります。
+
+最終MP4と中間音声に共通する基本設定は `video` で指定します。
+
+| 項目名 | 意味 | 設定可能値 | デフォルト値 |
+| --- | --- | --- | --- |
+| `audio_codec` | 最終MP4へ格納する音声コーデック | `aac`。最終MP4ではAAC-LCのみ対応 | `aac` |
+| `audio_sample_rate` | 1秒あたりの音声サンプル数（Hz）。中間PCM WAVと最終AACの両方へ適用 | FFmpegが対応する正の整数。通常は `48000`、素材互換を優先する場合は `44100` | `48000` |
+| `audio_channels` | 中間・最終音声のチャンネル数 | 正の整数。通常はmonoの `1` またはstereoの `2` | `2` |
+| `audio_bitrate_kbps` | 最終AACの目標ビットレート（kbps）。中間PCM WAVには適用されない | 正の整数。音声中心の動画では `128`、`160`、`192` など | `192` |
+
+省略時は上記デフォルト値が使われます。書き出しプリセットを指定した場合はプリセット値が先に適用され、YAMLで明示した値がプリセットを上書きします。`draft` プリセットの音声ビットレートは `128` kbps、その他の標準プリセットは `192` kbpsです。
+
+既存動画でよく使う `160` kbpsへ合わせる場合は、差分だけを指定できます。AAC・48 kHz・stereoを明示する必要はありません。
+
+```yaml
+video:
+  audio_bitrate_kbps: 160
+```
+
+各行クリップは映像・音声ともPTS 0始点へ正規化されます。複数クリップのconcatは、安全な場合だけstream copyを使用し、AACのencoder delay/paddingが境界にある場合は映像をcopyしたまま音声だけAACへ再エンコードします。
 
 ```yaml
 bgm:

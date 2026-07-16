@@ -43,6 +43,18 @@ DEFAULT_BACKGROUND_ANCHOR = "middle_center"
 DEFAULT_BACKGROUND_FILL_COLOR = "#000000"
 
 
+class TimestampWarningError(RuntimeError):
+    """Raised when FFmpeg reports unsafe DTS ordering during concat."""
+
+
+def _contains_dts_warning(stderr: str) -> bool:
+    normalized = str(stderr or "").lower()
+    return (
+        "non-monotonic dts" in normalized
+        or "non monotonically increasing dts" in normalized
+    )
+
+
 def _to_expr(value: Any) -> str:
     """Convert numeric/string offsets into FFmpeg expression fragments."""
 
@@ -355,6 +367,11 @@ async def concat_videos_copy(
             thr,
             output_path,
         )
+        if _contains_dts_warning(proc.stderr):
+            raise TimestampWarningError(
+                f"Unsafe DTS ordering detected while concatenating {output_path}"
+            )
+        return proc
     except subprocess.CalledProcessError as e:
         logger.error(f"Error concatenating videos with -c copy: {e}")
         logger.error(f"FFmpeg stdout:\n{e.stdout}")
@@ -363,6 +380,116 @@ async def concat_videos_copy(
     finally:
         if os.path.exists(list_file_path):
             os.remove(list_file_path)
+
+
+async def concat_videos_safe(
+    input_paths: List[str],
+    output_path: str,
+    audio_params: AudioParams,
+    ffmpeg_path: str = "ffmpeg",
+    movflags_faststart: bool = False,
+    context: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Concat by stream copy, falling back to copied video plus AAC audio."""
+    fallback_reason = "copy_failed"
+    copy_is_safe = len(input_paths) <= 1
+    if len(input_paths) > 1:
+        infos = await asyncio.gather(
+            *(get_media_info(path, caller="concat_copy_safety") for path in input_paths)
+        )
+        audio_codecs = {
+            str((info.get("audio") or {}).get("codec_name") or "").lower()
+            for info in infos
+        }
+        # Lossy frame encoders carry priming/padding at every clip boundary.
+        # Their container durations can overlap even when every clip starts at PTS 0.
+        copy_is_safe = not bool(audio_codecs & {"aac", "mp3"})
+        fallback_reason = (
+            "lossy_audio_encoder_delay"
+            if not copy_is_safe
+            else "copy_failed"
+        )
+    if copy_is_safe:
+        try:
+            await concat_videos_copy(
+                input_paths,
+                output_path,
+                ffmpeg_path,
+                movflags_faststart=movflags_faststart,
+                context=context,
+            )
+            logger.info(
+                "[ConcatPath] mode=copy reason=safe_inputs output=%s dts_warnings=0",
+                output_path,
+            )
+            return "copy"
+        except Exception as exc:
+            fallback_reason = type(exc).__name__
+    logger.warning(
+        "[ConcatPath] mode=audio_reencode reason=%s output=%s",
+        fallback_reason,
+        output_path,
+    )
+
+    out_dir = os.path.dirname(os.path.abspath(output_path)) or "."
+    digest = hashlib.sha256("\n".join(input_paths).encode("utf-8")).hexdigest()[:16]
+    list_path = os.path.join(out_dir, f".ffconcat_audio_{digest}.txt")
+    with open(list_path, "w", encoding="utf-8") as stream:
+        for path in input_paths:
+            stream.write(f"file '{os.path.abspath(path)}'\n")
+
+    final_audio = AudioParams(
+        sample_rate=audio_params.sample_rate,
+        channels=audio_params.channels,
+        codec="aac",
+        bitrate_kbps=audio_params.bitrate_kbps,
+    )
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        *get_profile_flags(),
+        "-fflags",
+        "+genpts",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        list_path,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0",
+        "-c:v",
+        "copy",
+        "-af",
+        f"aresample={final_audio.sample_rate}:async=1:first_pts=0,asetpts=PTS-STARTPTS",
+    ]
+    cmd.extend(final_audio.to_ffmpeg_opts())
+    cmd.extend(["-avoid_negative_ts", "make_zero"])
+    if movflags_faststart:
+        cmd.extend(["-movflags", "+faststart"])
+    cmd.append(output_path)
+    try:
+        proc = await _run_ffmpeg_async(
+            cmd,
+            context={**(context or {}), "operation": f"{(context or {}).get('operation', 'concat')}_audio_reencode"},
+        )
+        if _contains_dts_warning(proc.stderr):
+            raise TimestampWarningError(
+                f"DTS warning remained after audio re-encode: {output_path}"
+            )
+        logger.info(
+            "[ConcatPath] mode=audio_reencode codec=%s sample_rate=%s channels=%s output=%s dts_warnings=0",
+            final_audio.codec,
+            final_audio.sample_rate,
+            final_audio.channels,
+            output_path,
+        )
+        return "audio_reencode"
+    finally:
+        if os.path.exists(list_path):
+            os.remove(list_path)
 
 
 async def _copy_segment(

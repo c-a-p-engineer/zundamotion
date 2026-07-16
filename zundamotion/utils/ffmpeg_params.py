@@ -152,17 +152,31 @@ class AudioParams:
 
     sample_rate: int = 48000
     channels: int = 2
-    codec: str = "libmp3lame"
+    codec: str = "aac"
     bitrate_kbps: int = 192
 
     def to_ffmpeg_opts(self) -> List[str]:
         """現在の設定をFFmpegの引数へ変換する。"""
-        opts: List[str] = []
-        opts.extend(["-c:a", "libmp3lame"])
-        opts.extend(["-b:a", f"{self.bitrate_kbps}k"])
+        codec = str(self.codec or "aac").strip().lower()
+        if codec not in {"aac", "libmp3lame", "pcm_s16le"}:
+            raise ValueError(f"Unsupported audio codec: {self.codec}")
+        opts: List[str] = ["-c:a", codec]
+        if codec == "aac":
+            opts.extend(["-profile:a", "aac_low", "-b:a", f"{self.bitrate_kbps}k"])
+        elif codec == "libmp3lame":
+            opts.extend(["-b:a", f"{self.bitrate_kbps}k"])
         opts.extend(["-ar", str(self.sample_rate)])
         opts.extend(["-ac", str(self.channels)])
         return opts
+
+    def for_intermediate(self) -> "AudioParams":
+        """Return the canonical PCM WAV settings used before MP4 muxing."""
+        return AudioParams(
+            sample_rate=self.sample_rate,
+            channels=self.channels,
+            codec="pcm_s16le",
+            bitrate_kbps=self.bitrate_kbps,
+        )
 
 
 def resolve_media_params(config: Dict[str, Any]) -> Tuple[VideoParams, AudioParams]:
@@ -186,7 +200,7 @@ def resolve_media_params(config: Dict[str, Any]) -> Tuple[VideoParams, AudioPara
         AudioParams(
             sample_rate=video.get("audio_sample_rate", 48000),
             channels=video.get("audio_channels", 2),
-            codec=video.get("audio_codec", "libmp3lame"),
+            codec=video.get("audio_codec", "aac"),
             bitrate_kbps=video.get("audio_bitrate_kbps", 192),
         ),
     )

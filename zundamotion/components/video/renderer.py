@@ -10,7 +10,7 @@ from ...utils.ffmpeg_ops import (
     BACKGROUND_FIT_STRETCH,
     DEFAULT_BACKGROUND_ANCHOR,
     DEFAULT_BACKGROUND_FILL_COLOR,
-    concat_videos_copy,
+    concat_videos_safe,
 )
 from ...utils.ffmpeg_capabilities import (
     has_cuda_filters,
@@ -448,8 +448,15 @@ class VideoRenderer(OverlayMixin):
             f"[Concat] Concatenating {len(clip_paths)} clips -> {output_path} using -c copy."
         )
         try:
-            await concat_videos_copy(
-                [str(p.resolve()) for p in clip_paths], output_path
+            await concat_videos_safe(
+                [str(p.resolve()) for p in clip_paths],
+                output_path,
+                self.audio_params,
+                context={
+                    "phase": "VideoPhase",
+                    "operation": "scene_line_concat",
+                    "output_path": output_path,
+                },
             )
         except Exception as e:
             print(f"[Error] -c copy concat failed for {output_path}: {e}")
