@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from zundamotion.utils import ffmpeg_ops
 from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
@@ -83,3 +84,38 @@ def test_apply_transition_local_copies_consumed_next_suffix(monkeypatch, tmp_pat
         ("second.mp4", str(tmp_path / "out_suffix.mp4"), 0.5, 19.5),
     ]
     assert calls["concat"]
+
+
+def test_safe_concat_logs_structured_transition_decision(monkeypatch, tmp_path, caplog):
+    async def fake_get_media_info(path: str, caller: str | None = None):
+        return {
+            "video": {"codec_name": "h264"},
+            "audio": {"codec_name": "pcm_s16le"},
+        }
+
+    async def fake_concat_copy(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(ffmpeg_ops, "get_media_info", fake_get_media_info)
+    monkeypatch.setattr(ffmpeg_ops, "concat_videos_copy", fake_concat_copy)
+    caplog.set_level(logging.INFO, logger="zundamotion")
+
+    mode = asyncio.run(
+        ffmpeg_ops.concat_videos_safe(
+            ["opening.mp4", "boundary.mp4", "main.mp4"],
+            str(tmp_path / "joined.mp4"),
+            AudioParams(),
+            context={
+                "operation": "transition_parts_concat",
+                "from_scene": "opening",
+                "to_scene": "main",
+            },
+        )
+    )
+
+    assert mode == "copy"
+    message = "\n".join(caplog.messages)
+    assert "[TransitionConcat]" in message
+    assert "from_scene=opening to_scene=main" in message
+    assert "mode=copy reason=safe_inputs" in message
+    assert "video_codec=h264 audio_codec=pcm_s16le dts_warnings=0" in message

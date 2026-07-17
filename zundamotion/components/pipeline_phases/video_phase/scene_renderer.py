@@ -12,6 +12,7 @@ from typing import Any, Dict, List
 from tqdm import tqdm
 
 from ....utils.logger import logger
+from ....utils import perf_stats
 from .badge_tracker import BadgeTracker
 from .scene_cache import SceneCacheMixin
 from .scene_fast_path import SceneFastPathMixin
@@ -175,6 +176,7 @@ class SceneRenderer(
             extension="mp4",
         )
         if cached_scene_video_path:
+            self._record_skipped_line_clips(scene_id)
             sub_key = self._cache_key_short(scene_sub_hash_data)
             self._record_scene_cache_event(
                 scene_id=scene_id,
@@ -200,6 +202,7 @@ class SceneRenderer(
             extension="mp4",
         )
         if cached_legacy_scene_video_path:
+            self._record_skipped_line_clips(scene_id)
             legacy_key = self._cache_key_short(scene_hash_data)
             self._record_scene_cache_event(
                 scene_id=scene_id,
@@ -223,6 +226,7 @@ class SceneRenderer(
                 extension="mp4",
             )
             if cached_scene_video_path:
+                self._record_skipped_line_clips(scene_id)
                 legacy_sub_key = self._cache_key_short(scene_hash_data)
                 self._record_scene_cache_event(
                     scene_id=scene_id,
@@ -263,3 +267,16 @@ class SceneRenderer(
             )
 
         return await self._render_scene_internal(scene, scene_cp, bg_default, scene_hash_data)
+
+    def _record_skipped_line_clips(self, scene_id: str) -> None:
+        count = 0
+        for index, _line in enumerate(self.scene.get("lines", []), start=1):
+            line_data = self.line_data_map.get(f"{scene_id}_{index}") or {}
+            if line_data.get("type") != "image_layer":
+                count += 1
+        perf_stats.record_line_clips_skipped_by_scene_cache(count)
+        logger.info(
+            "[LineClipMetrics] scene=%s status=not_executed skipped_by_scene_cache=%d",
+            scene_id,
+            count,
+        )

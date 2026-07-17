@@ -51,6 +51,15 @@ class PerfStats:
         self.ffprobe_cache_hits_detail: list[Dict[str, Any]] = []
         self.scene_cache_events: list[Dict[str, Any]] = []
         self.line_clip_items: list[Dict[str, Any]] = []
+        self.cache_execution_mode = "normal"
+        self.invalidated_cache: Dict[str, Any] = {
+            "scenes": [],
+            "transitions": [],
+            "finalize": False,
+            "removed_files": 0,
+        }
+        self.line_clips_skipped_by_scene_cache = 0
+        self.filter_diag: Dict[str, Any] = {"status": "not_executed", "reason": None}
         self._lock = threading.RLock()
 
     def incr(self, name: str, value: int = 1) -> None:
@@ -87,6 +96,37 @@ class PerfStats:
             self.timings_ms["video_line_clip_cache_store_ms"] = float(
                 self.timings_ms.get("video_line_clip_cache_store_ms", 0.0)
             ) + normalized["cache_store_ms"]
+
+    def record_line_clips_skipped_by_scene_cache(self, count: int) -> None:
+        with self._lock:
+            self.line_clips_skipped_by_scene_cache += max(0, int(count))
+
+    def record_cache_invalidation(
+        self, *, target_type: str, target: str, removed: int
+    ) -> None:
+        with self._lock:
+            self.cache_execution_mode = "targeted_miss"
+            if target_type == "scene" and target not in self.invalidated_cache["scenes"]:
+                self.invalidated_cache["scenes"].append(target)
+            elif target_type == "transition" and target not in self.invalidated_cache["transitions"]:
+                self.invalidated_cache["transitions"].append(target)
+            elif target_type == "finalize":
+                self.invalidated_cache["finalize"] = True
+            self.invalidated_cache["removed_files"] += max(0, int(removed))
+
+    def load_cache_invalidation(self, marker: Dict[str, Any]) -> None:
+        with self._lock:
+            self.cache_execution_mode = "targeted_miss"
+            self.invalidated_cache = {
+                "scenes": list(marker.get("scenes") or []),
+                "transitions": list(marker.get("transitions") or []),
+                "finalize": bool(marker.get("finalize", False)),
+                "removed_files": max(0, int(marker.get("removed_files", 0) or 0)),
+            }
+
+    def record_filter_diag(self, *, status: str, reason: Optional[str] = None) -> None:
+        with self._lock:
+            self.filter_diag = {"status": str(status), "reason": reason}
 
     def set_phase_ms(self, phase_name: str, value: float) -> None:
         self.phase_ms[phase_name] = float(value)
@@ -327,6 +367,8 @@ class PerfStats:
             reverse=True,
         )[:10]
         return {
+            "status": "executed" if items else "not_executed",
+            "line_clips_skipped_by_scene_cache": self.line_clips_skipped_by_scene_cache,
             "line_clip_count": len(items),
             "line_clip_cache_hit_count": cache_hits,
             "line_clip_cache_miss_count": cache_misses,
@@ -357,6 +399,15 @@ class PerfStats:
         data["phase_ms"] = {key: round(value, 1) for key, value in self.phase_ms.items()}
         data["total_wall_ms"] = round((time.perf_counter() - self.started_at) * 1000.0, 1)
         data["av_warnings"] = self._build_av_warning_summary()
+        data["av_warnings_total"] = int(data["av_warnings"]["total"])
+        data["cache_execution_mode"] = self.cache_execution_mode
+        data["invalidated_cache"] = dict(self.invalidated_cache)
+        data["watchdog"] = {
+            "status": "external",
+            "terminated": False,
+            "checks": 0,
+        }
+        data["filter_diag"] = dict(self.filter_diag)
         data["subtitle_burn"] = self._build_subtitle_burn_summary()
         data["ffprobe"] = self._build_ffprobe_summary()
         data["scene_cache"] = self._build_scene_cache_summary()
@@ -401,6 +452,28 @@ def record_line_clip(item: Dict[str, Any]) -> None:
     stats = current_perf_stats()
     if stats is not None:
         stats.record_line_clip(item)
+
+
+def record_line_clips_skipped_by_scene_cache(count: int) -> None:
+    stats = current_perf_stats()
+    if stats is not None:
+        stats.record_line_clips_skipped_by_scene_cache(count)
+
+
+def record_cache_invalidation(*, target_type: str, target: str, removed: int) -> None:
+    stats = current_perf_stats()
+    if stats is not None:
+        stats.record_cache_invalidation(
+            target_type=target_type,
+            target=target,
+            removed=removed,
+        )
+
+
+def record_filter_diag(*, status: str, reason: Optional[str] = None) -> None:
+    stats = current_perf_stats()
+    if stats is not None:
+        stats.record_filter_diag(status=status, reason=reason)
 
 
 def record_scene_cache_event(

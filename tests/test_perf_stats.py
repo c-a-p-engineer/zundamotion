@@ -142,3 +142,14 @@ def test_line_clip_summary_is_thread_safe_for_44_parallel_records() -> None:
     assert summary["line_clip_total_ms"] > 0
     assert len(summary["slowest"]) == 10
     assert summary["slowest"][0]["clip_id"] == "clip_43"
+
+
+def test_line_clip_summary_distinguishes_scene_cache_skip_from_zero_ms() -> None:
+    perf = PerfStats()
+    perf.record_line_clips_skipped_by_scene_cache(86)
+
+    summary = perf.to_dict()["line_clip"]
+
+    assert summary["status"] == "not_executed"
+    assert summary["line_clip_count"] == 0
+    assert summary["line_clips_skipped_by_scene_cache"] == 86

@@ -233,6 +233,7 @@ class VideoPhase:
             hw_kind=hw_kind,
             video_params=video_params,
             audio_params=audio_params,
+            hw_encoder=hw_encoder,
             clip_workers=pre_clip_workers,
         )
         instance = cls(

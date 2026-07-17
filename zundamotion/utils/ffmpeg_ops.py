@@ -391,10 +391,12 @@ async def concat_videos_safe(
     context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Concat by stream copy, falling back to copied video plus AAC audio."""
+    context = dict(context or {})
     prepared_paths = list(input_paths)
     temporary_audio_paths: List[str] = []
     fallback_reason = "copy_failed"
     copy_is_safe = len(input_paths) <= 1
+    infos: List[Dict[str, Any]] = []
     if len(input_paths) > 1:
         infos = await asyncio.gather(
             *(get_media_info(path, caller="concat_copy_safety") for path in input_paths)
@@ -493,6 +495,7 @@ async def concat_videos_safe(
                 "[ConcatPath] mode=copy reason=safe_inputs output=%s dts_warnings=0",
                 output_path,
             )
+            _log_transition_concat(context, "copy", "safe_inputs", infos)
             return "copy"
         except Exception as exc:
             fallback_reason = type(exc).__name__
@@ -558,6 +561,7 @@ async def concat_videos_safe(
             final_audio.channels,
             output_path,
         )
+        _log_transition_concat(context, "audio_reencode", fallback_reason, infos)
         return "audio_reencode"
     finally:
         if os.path.exists(list_path):
@@ -565,6 +569,39 @@ async def concat_videos_safe(
         for path in temporary_audio_paths:
             if os.path.exists(path):
                 os.remove(path)
+
+
+def _log_transition_concat(
+    context: Dict[str, Any],
+    mode: str,
+    reason: str,
+    infos: List[Dict[str, Any]],
+) -> None:
+    """Emit one structured transition concat decision after DTS-safe completion."""
+    operation = str(context.get("operation", ""))
+    if not operation.startswith("transition_parts_concat"):
+        return
+    video_codecs = sorted(
+        {
+            str((info.get("video") or {}).get("codec_name") or "none")
+            for info in infos
+        }
+    )
+    audio_codecs = sorted(
+        {
+            str((info.get("audio") or {}).get("codec_name") or "none")
+            for info in infos
+        }
+    )
+    logger.info(
+        "[TransitionConcat] from_scene=%s to_scene=%s mode=%s reason=%s video_codec=%s audio_codec=%s dts_warnings=0",
+        context.get("from_scene", context.get("scene_id", "unknown")),
+        context.get("to_scene", "unknown"),
+        mode,
+        reason,
+        ",".join(video_codecs) or "unknown",
+        ",".join(audio_codecs) or "none",
+    )
 
 
 async def _copy_segment(
@@ -676,7 +713,14 @@ async def _create_freeze_tail(
     """Create a silent still-video clip from a frame of input_path."""
     freeze_duration = max(0.02, float(freeze_duration))
     if source_time is None:
-        start = max(0.0, float(source_duration) - 0.08)
+        info = await get_media_info(input_path, caller="transition_freeze_tail")
+        video_duration = float(
+            (info.get("video") or {}).get("duration") or source_duration
+        )
+        # Container duration may follow AAC padding and outlive the video stream.
+        # Seek far enough inside the real video tail to always decode a frame.
+        frame_margin = max(0.10, 2.0 / max(1, int(video_params.fps)))
+        start = max(0.0, video_duration - frame_margin)
     else:
         start = max(0.0, float(source_time))
     hw_kind = await get_hw_encoder_kind_for_video_params(ffmpeg_path, hw_encoder)

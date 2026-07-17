@@ -593,6 +593,11 @@ class GenerationPipeline:
             )
             line_clip_summary = perf_summary.get("line_clip") or {}
             logger.info(
+                "[PerfSummary] line_clip_metrics=%s line_clips_skipped_by_scene_cache=%s",
+                line_clip_summary.get("status", "not_executed"),
+                line_clip_summary.get("line_clips_skipped_by_scene_cache", 0),
+            )
+            logger.info(
                 "[PerfSummary] line_clip_count=%s cache_hit=%s cache_miss=%s total_ms=%.1f render_ms=%.1f average_ms=%.1f p50_ms=%.1f p95_ms=%.1f max_ms=%.1f",
                 line_clip_summary.get("line_clip_count", 0),
                 line_clip_summary.get("line_clip_cache_hit_count", 0),

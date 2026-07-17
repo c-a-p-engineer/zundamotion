@@ -5,11 +5,12 @@ import hashlib
 import inspect
 import json
 import os
+import re
 import shutil
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterable, Optional, Set
 
 from .exceptions import CacheError
 from .utils.ffmpeg_params import AudioParams, VideoParams
@@ -512,6 +513,7 @@ class CacheManager:
         self, key_data: Dict[str, Any], file_name: str, extension: str
     ) -> Optional[Path]:
         """キャッシュ済みファイルの存在を確認し、パスを返す。"""
+        self._consume_pending_invalidation()
         if self.no_cache:
             return None
         cache_key = self._generate_hash(key_data)
@@ -530,6 +532,134 @@ class CacheManager:
         logger.info(f"Cache MISS for {file_name}.{extension} (key: {cache_key[:8]})")
         perf_stats.incr("cache_miss")
         return None
+
+    @staticmethod
+    def _validate_cache_target(value: str, label: str) -> str:
+        """Validate an identifier before using it in an exact cache filename pattern."""
+        normalized = str(value)
+        if not normalized or "/" in normalized or "\\" in normalized:
+            raise ValueError(f"{label} must be a non-empty filename-safe identifier")
+        return normalized
+
+    def _invalidate_exact_patterns(self, patterns: Iterable[re.Pattern[str]]) -> list[Path]:
+        """Delete files whose complete filename matches an approved cache pattern."""
+        compiled = tuple(patterns)
+        removed: list[Path] = []
+        for path in self.cache_dir.iterdir():
+            if not path.is_file() or not any(pattern.fullmatch(path.name) for pattern in compiled):
+                continue
+            path.unlink(missing_ok=True)
+            removed.append(path)
+        return removed
+
+    @property
+    def _invalidation_marker_path(self) -> Path:
+        return self.cache_dir / ".targeted_invalidation.json"
+
+    def _record_targeted_invalidation(
+        self, *, target_type: str, target: str, removed: int
+    ) -> None:
+        if perf_stats.current_perf_stats() is not None:
+            perf_stats.record_cache_invalidation(
+                target_type=target_type, target=target, removed=removed
+            )
+            return
+        marker = {"scenes": [], "transitions": [], "finalize": False, "removed_files": 0}
+        try:
+            if self._invalidation_marker_path.exists():
+                marker.update(json.loads(self._invalidation_marker_path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError):
+            pass
+        if target_type == "scene" and target not in marker["scenes"]:
+            marker["scenes"].append(target)
+        elif target_type == "transition" and target not in marker["transitions"]:
+            marker["transitions"].append(target)
+        elif target_type == "finalize":
+            marker["finalize"] = True
+        marker["removed_files"] = int(marker.get("removed_files", 0)) + max(0, int(removed))
+        self._invalidation_marker_path.write_text(
+            json.dumps(marker, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+        )
+
+    def _consume_pending_invalidation(self) -> None:
+        stats = perf_stats.current_perf_stats()
+        marker_path = self._invalidation_marker_path
+        if stats is None or not marker_path.exists():
+            return
+        try:
+            marker = json.loads(marker_path.read_text(encoding="utf-8"))
+            stats.load_cache_invalidation(marker)
+            marker_path.unlink(missing_ok=True)
+        except (OSError, ValueError, TypeError) as err:
+            logger.warning("[CacheInvalidation] failed to consume marker: %s", err)
+
+    def invalidate_scene(self, scene_id: str, layers: Set[str]) -> list[Path]:
+        """Invalidate selected cache layers for one scene without substring matching."""
+        scene = re.escape(self._validate_cache_target(scene_id, "scene_id"))
+        requested = set(layers)
+        supported = {"base", "subtitle", "line_clips"}
+        unknown = requested - supported
+        if unknown:
+            raise ValueError(f"Unsupported scene cache layer(s): {sorted(unknown)}")
+
+        sha = r"[0-9a-f]{64}"
+        patterns: list[re.Pattern[str]] = []
+        if "base" in requested:
+            patterns.append(re.compile(rf"scene_{scene}_base_{sha}\.[^.]+"))
+        if "subtitle" in requested:
+            patterns.append(re.compile(rf"scene_{scene}_sub_{sha}\.[^.]+"))
+        if "line_clips" in requested:
+            patterns.append(re.compile(rf"{scene}_[0-9]+_{sha}\.[^.]+"))
+        removed = self._invalidate_exact_patterns(patterns)
+        logger.info(
+            "[CacheInvalidation] type=scene scene_id=%s layers=%s removed=%d",
+            scene_id,
+            ",".join(sorted(requested)) or "none",
+            len(removed),
+        )
+        self._record_targeted_invalidation(
+            target_type="scene", target=str(scene_id), removed=len(removed)
+        )
+        return removed
+
+    def invalidate_transition(
+        self,
+        from_scene: str,
+        to_scene: str,
+        *,
+        transition_index: int,
+    ) -> list[Path]:
+        """Invalidate one indexed transition boundary and its local intermediates."""
+        self._validate_cache_target(from_scene, "from_scene")
+        self._validate_cache_target(to_scene, "to_scene")
+        if transition_index < 0:
+            raise ValueError("transition_index must be zero or greater")
+        prefix = rf"finalize_transition_{transition_index:03d}_{transition_index + 1:03d}"
+        pattern = re.compile(
+            rf"{prefix}_[0-9a-f]{{64}}(?:_(?:boundary|head2|prefix|suffix|tail1))?\.[^.]+"
+        )
+        removed = self._invalidate_exact_patterns([pattern])
+        target = f"{from_scene}->{to_scene}"
+        logger.info(
+            "[CacheInvalidation] type=transition target=%s index=%d removed=%d",
+            target,
+            transition_index,
+            len(removed),
+        )
+        self._record_targeted_invalidation(
+            target_type="transition", target=target, removed=len(removed)
+        )
+        return removed
+
+    def invalidate_finalize(self) -> list[Path]:
+        """Invalidate final concat caches only."""
+        pattern = re.compile(r"finalize_concat_[0-9a-f]{64}\.[^.]+")
+        removed = self._invalidate_exact_patterns([pattern])
+        logger.info("[CacheInvalidation] type=finalize removed=%d", len(removed))
+        self._record_targeted_invalidation(
+            target_type="finalize", target="finalize", removed=len(removed)
+        )
+        return removed
 
     def cache_file(
         self,

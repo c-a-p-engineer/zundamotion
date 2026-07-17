@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -36,6 +37,7 @@ from .face_overlay_cache import FaceOverlayCache
 from .overlays import OverlayMixin
 from .threading import build_ffmpeg_thread_flags
 from ...utils.logger import logger
+from ...utils import perf_stats
 
 
 class VideoRenderer(OverlayMixin):
@@ -129,6 +131,13 @@ class VideoRenderer(OverlayMixin):
         )
 
     @classmethod
+    def _skip_gpu_filter_smokes(cls, hw_encoder: str) -> bool:
+        return str(hw_encoder).lower() == "cpu" or (
+            os.getenv("DISABLE_HWENC", "0") == "1"
+            and get_hw_filter_mode() == "cpu"
+        )
+
+    @classmethod
     async def create(
         cls,
         config: Dict[str, Any],
@@ -139,10 +148,12 @@ class VideoRenderer(OverlayMixin):
         video_params: Optional[VideoParams] = None,
         audio_params: Optional[AudioParams] = None,
         clip_workers: Optional[int] = None,
+        hw_encoder: str = "auto",
     ):
         ffmpeg_path = config.get("ffmpeg_path", "ffmpeg")
         vcfg = config.get("video", {}) if isinstance(config, dict) else {}
-        cpu_filter_mode = get_hw_filter_mode() == "cpu"
+        skip_gpu_smokes = cls._skip_gpu_filter_smokes(hw_encoder)
+        cpu_filter_mode = get_hw_filter_mode() == "cpu" or skip_gpu_smokes
         # フィルタ存在チェックに加えて実行スモークテストで確度を上げる
         if cpu_filter_mode:
             has_cuda_filters_listed = False
@@ -274,6 +285,10 @@ class VideoRenderer(OverlayMixin):
         )
         # Emit a one-shot diagnostics table for filters/smokes
         try:
+            if skip_gpu_smokes:
+                logger.info("[FilterDiag] skipped reason=cpu_mode")
+                perf_stats.record_filter_diag(status="skipped", reason="cpu_mode")
+                return inst
             diag = await get_filter_diagnostics(
                 ffmpeg_path,
                 include_opencl_smokes=(not cpu_filter_mode) or allow_opencl_cpu,
@@ -294,8 +309,9 @@ class VideoRenderer(OverlayMixin):
                 int(bool(smo.get("opencl_filters"))),
                 int(bool(smo.get("opencl_scale_only"))),
             )
+            perf_stats.record_filter_diag(status="executed", reason=None)
         except Exception:
-            pass
+            perf_stats.record_filter_diag(status="failed", reason="diagnostic_error")
         return inst
 
     def ffmpeg_thread_flags(self) -> List[str]:

@@ -6,6 +6,113 @@ import zundamotion.cache as cache_module
 from zundamotion.cache import CacheManager
 
 
+_SHA_A = "a" * 64
+_SHA_B = "b" * 64
+
+
+def _seed_cache(cache: CacheManager, *names: str) -> None:
+    for name in names:
+        (cache.cache_dir / name).write_bytes(b"cache")
+
+
+def _cache_names(cache: CacheManager) -> set[str]:
+    return {path.name for path in cache.cache_dir.iterdir() if not path.name.startswith(".")}
+
+
+def test_invalidate_scene_removes_only_requested_scene(tmp_path: Path) -> None:
+    cache = CacheManager(tmp_path / "cache")
+    _seed_cache(
+        cache,
+        f"scene_demo_base_{_SHA_A}.mp4",
+        f"scene_demo_sub_{_SHA_A}.mp4",
+        f"demo_1_{_SHA_A}.mp4",
+        f"scene_demo2_base_{_SHA_A}.mp4",
+    )
+
+    cache.invalidate_scene("demo", {"base", "subtitle", "line_clips"})
+
+    assert _cache_names(cache) == {
+        f"scene_demo2_base_{_SHA_A}.mp4"
+    }
+
+
+def test_invalidate_scene_keeps_other_scene_cache(tmp_path: Path) -> None:
+    cache = CacheManager(tmp_path / "cache")
+    _seed_cache(cache, f"scene_one_base_{_SHA_A}.mp4", f"scene_two_base_{_SHA_A}.mp4")
+
+    cache.invalidate_scene("one", {"base"})
+
+    assert (cache.cache_dir / f"scene_two_base_{_SHA_A}.mp4").exists()
+
+
+def test_invalidate_scene_subtitle_only(tmp_path: Path) -> None:
+    cache = CacheManager(tmp_path / "cache")
+    _seed_cache(cache, f"scene_demo_base_{_SHA_A}.mp4", f"scene_demo_sub_{_SHA_A}.mp4")
+
+    cache.invalidate_scene("demo", {"subtitle"})
+
+    assert (cache.cache_dir / f"scene_demo_base_{_SHA_A}.mp4").exists()
+    assert not (cache.cache_dir / f"scene_demo_sub_{_SHA_A}.mp4").exists()
+
+
+def test_invalidate_scene_base_only(tmp_path: Path) -> None:
+    cache = CacheManager(tmp_path / "cache")
+    _seed_cache(cache, f"scene_demo_base_{_SHA_A}.mp4", f"scene_demo_sub_{_SHA_A}.mp4")
+
+    cache.invalidate_scene("demo", {"base"})
+
+    assert not (cache.cache_dir / f"scene_demo_base_{_SHA_A}.mp4").exists()
+    assert (cache.cache_dir / f"scene_demo_sub_{_SHA_A}.mp4").exists()
+
+
+def test_invalidate_scene_line_clips_only(tmp_path: Path) -> None:
+    cache = CacheManager(tmp_path / "cache")
+    _seed_cache(cache, f"demo_1_{_SHA_A}.mp4", f"demo_20_{_SHA_B}.mp4", f"scene_demo_base_{_SHA_A}.mp4")
+
+    cache.invalidate_scene("demo", {"line_clips"})
+
+    assert _cache_names(cache) == {
+        f"scene_demo_base_{_SHA_A}.mp4"
+    }
+
+
+def test_invalidate_transition_only(tmp_path: Path) -> None:
+    cache = CacheManager(tmp_path / "cache")
+    _seed_cache(
+        cache,
+        f"finalize_transition_000_001_{_SHA_A}.mp4",
+        f"finalize_transition_000_001_{_SHA_A}_boundary.mp4",
+        f"finalize_transition_001_002_{_SHA_B}.mp4",
+        f"finalize_concat_{_SHA_A}.mp4",
+    )
+
+    cache.invalidate_transition("opening", "main", transition_index=0)
+
+    assert _cache_names(cache) == {
+        f"finalize_transition_001_002_{_SHA_B}.mp4",
+        f"finalize_concat_{_SHA_A}.mp4",
+    }
+
+
+def test_invalidate_finalize_only(tmp_path: Path) -> None:
+    cache = CacheManager(tmp_path / "cache")
+    _seed_cache(cache, f"finalize_concat_{_SHA_A}.mp4", f"finalize_transition_000_001_{_SHA_A}.mp4")
+
+    cache.invalidate_finalize()
+
+    assert _cache_names(cache) == {
+        f"finalize_transition_000_001_{_SHA_A}.mp4"
+    }
+
+
+def test_invalidate_missing_target_is_safe(tmp_path: Path) -> None:
+    cache = CacheManager(tmp_path / "cache")
+
+    assert cache.invalidate_scene("missing", {"base", "subtitle", "line_clips"}) == []
+    assert cache.invalidate_transition("missing", "other", transition_index=99) == []
+    assert cache.invalidate_finalize() == []
+
+
 def test_cache_refresh_invalidates_each_key_only_once(tmp_path: Path) -> None:
     async def _run() -> None:
         cache = CacheManager(tmp_path / "cache", cache_refresh=True)

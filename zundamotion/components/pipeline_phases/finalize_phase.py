@@ -128,6 +128,9 @@ class FinalizePhase:
                 next_path = processed_paths[i + 1]
                 next_duration = scene_durations[i + 1] if i + 1 < len(scene_durations) else 0.0
                 scene = scenes[i] if i < len(scenes) else {}
+                next_scene = scenes[i + 1] if i + 1 < len(scenes) else {}
+                from_scene_id = str(scene.get("id", f"scene_{i}"))
+                to_scene_id = str(next_scene.get("id", f"scene_{i + 1}"))
                 transition_cfg = scene.get("transition") if isinstance(scene, dict) else None
 
                 if transition_cfg:
@@ -157,6 +160,8 @@ class FinalizePhase:
                     transition_key_data = {
                         "type": "finalize_transition_boundary",
                         "version": "20260510_v1",
+                        "from_scene": from_scene_id,
+                        "to_scene": to_scene_id,
                         "current": self._file_signature(current),
                         "next": self._file_signature(next_path),
                         "transition": {
@@ -187,7 +192,9 @@ class FinalizePhase:
                             context={
                                 "phase": "FinalizePhase",
                                 "operation": "transition_boundary",
-                                "scene_id": str(scene.get("id", f"scene_{i}")),
+                                "scene_id": from_scene_id,
+                                "from_scene": from_scene_id,
+                                "to_scene": to_scene_id,
                                 "transition_index": i,
                             },
                         )

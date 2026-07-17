@@ -126,6 +126,14 @@ class SceneStandardRendererMixin:
                 extension="mp4",
             )
             if cached_base_scene_path:
+                perf_stats.record_line_clips_skipped_by_scene_cache(
+                    sum(
+                        1
+                        for index, _line in lines
+                        if (self.line_data_map.get(f"{scene_id}_{index}") or {}).get("type")
+                        != "image_layer"
+                    )
+                )
                 base_key = self._cache_key_short(scene_base_hash_data)
                 self._record_scene_cache_event(
                     scene_id=scene_id,
