@@ -332,6 +332,81 @@ def test_scene_renderer_reuses_cached_base_before_subtitle_burn(
     asyncio.run(_run())
 
 
+def test_scene_renderer_ignores_old_cache_files_without_deleting_them(
+    tmp_path: Path,
+) -> None:
+    async def _run() -> None:
+        audio_path = tmp_path / "audio.wav"
+        audio_path.write_bytes(b"audio")
+        scene = {"id": "demo", "lines": [{"text": "new render"}]}
+        line_data_map = {
+            "demo_1": {
+                "type": "talk",
+                "text": "new render",
+                "audio_path": audio_path,
+                "duration": 1.0,
+                "line_config": {},
+            }
+        }
+        cache_manager = _DummyCacheManager(tmp_path / "cache")
+        old_key = {"scene": "demo", "subtitle_config": {}}
+        old_scene = cache_manager.get_cache_path(
+            key_data=old_key,
+            file_name="scene_demo",
+            extension="mp4",
+        )
+        old_sub = cache_manager.get_cache_path(
+            key_data=old_key,
+            file_name="scene_demo_sub",
+            extension="mp4",
+        )
+        old_scene.write_bytes(b"old-scene")
+        old_sub.write_bytes(b"old-sub")
+        phase = SimpleNamespace(
+            config={
+                "background": {"default": "assets/bg/sample.png"},
+                "subtitle": {},
+                "system": {"cache_scene_base_video": True},
+                "video": {},
+            },
+            cache_manager=cache_manager,
+            video_renderer=_DummyVideoRenderer(tmp_path),
+            temp_dir=tmp_path,
+            hw_kind=None,
+            video_params=VideoParams(width=320, height=180, fps=30),
+            audio_params=AudioParams(),
+            video_extensions={".mp4", ".mov", ".webm", ".avi", ".mkv"},
+            _norm_char_entries=lambda _line: {},
+            clip_workers=1,
+            auto_tune_enabled=False,
+            parallel_scene_rendering=False,
+            _profile_samples=[],
+            profile_limit=4,
+            _clip_samples_all=[],
+            _retuned=False,
+        )
+        renderer = SceneRenderer(
+            phase=phase,
+            scene=scene,
+            scene_hash_data=old_key,
+            scene_idx=0,
+            total_scenes=1,
+            line_data_map=line_data_map,
+            timeline=None,
+            pbar_scenes=_DummyPbar(),
+        )
+
+        outputs = await renderer.render_scene()
+
+        assert outputs != [old_scene]
+        assert outputs != [old_sub]
+        assert old_scene.read_bytes() == b"old-scene"
+        assert old_sub.read_bytes() == b"old-sub"
+        assert all(call["file_name"] != "scene_demo" for call in cache_manager.get_calls)
+
+    asyncio.run(_run())
+
+
 def test_scene_renderer_scene_cache_key_stays_stable_after_character_persist_mutation(
     tmp_path: Path,
 ) -> None:

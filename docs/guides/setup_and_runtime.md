@@ -12,10 +12,15 @@
 
 ## 必要なもの
 
-- Python
+- 最新安定版の CPython 3.14 系（公式推奨・動作保証対象、パッチ版は固定しない）
+- CPython 3.10 以上（互換実行対象。3.10〜3.13は動作保証・継続的な互換性維持の対象外）
 - FFmpeg / ffprobe
 - VOICEVOX Engine
-- 必要に応じて Docker / Dev Container
+- Docker / Dev Container（再現可能な公式推奨環境）
+
+Python 3.10〜3.13はDocker GPUイメージなどでの互換実行を許容しますが、公式の動作保証対象外です。alpha / beta / RC / dev 版も公式サポート対象外です。
+
+Python 3.10では依存パッケージの対応範囲に合わせ、`rembg 2.0.69` と `onnxruntime 1.23.2` を自動選択します。Python 3.11以上では最新の固定版を使います。
 
 ## セットアップ
 

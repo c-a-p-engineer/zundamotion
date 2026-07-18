@@ -1,7 +1,7 @@
 # =========================================================
-# CPU + FFmpeg(prebuilt) + Python3.13（Ubuntu 22.04）
+# CPU + FFmpeg(prebuilt) + Python 3.14（Debian Bookworm）
 # =========================================================
-FROM ubuntu:22.04
+FROM python:3.14-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -9,31 +9,20 @@ ENV DEBIAN_FRONTEND=noninteractive
 # 基本ツール
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y \
-    curl unzip git xz-utils ca-certificates gnupg2 software-properties-common \
- && apt-get clean
+    curl unzip git xz-utils ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------
 # 日本語フォント（IPAゴシック）
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y \
     fonts-ipafont-gothic \
- && apt-get clean
-
-# ---------------------------------------------------------
-# Python 3.13
-# ---------------------------------------------------------
-RUN add-apt-repository ppa:deadsnakes/ppa -y \
- && apt-get update \
- && apt-get install -y --no-install-recommends \
-    python3.13 python3.13-venv python3.13-dev \
- && apt-get clean
+ && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------
 # venv / pip
 # ---------------------------------------------------------
-RUN python3.13 -m ensurepip --upgrade \
- && python3.13 -m pip install --no-cache-dir --upgrade pip setuptools wheel \
- && python3.13 -m venv /opt/pyenv \
+RUN python -m venv /opt/pyenv \
  && /opt/pyenv/bin/pip install --no-cache-dir --upgrade pip
 
 ENV PATH="/opt/pyenv/bin:${PATH}"
@@ -59,7 +48,7 @@ RUN curl -L -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" \
  && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
  && rm -f /tmp/ffmpeg.tar.xz
 
-ENV LD_LIBRARY_PATH="/opt/ffmpeg/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/ffmpeg/lib"
 RUN echo "/opt/ffmpeg/lib" > /etc/ld.so.conf.d/ffmpeg.conf && ldconfig
 
 # CPU版なので NVENC 確認は不要
@@ -74,4 +63,4 @@ WORKDIR /workspace
 # ---------------------------------------------------------
 # 動作確認
 # ---------------------------------------------------------
-RUN python3.13 --version && python --version && pip --version
+RUN python --version && pip --version

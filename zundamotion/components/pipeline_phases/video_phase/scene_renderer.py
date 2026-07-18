@@ -18,6 +18,7 @@ from .scene_cache import SceneCacheMixin
 from .scene_fast_path import SceneFastPathMixin
 from .scene_preparation import ScenePreparationMixin
 from .scene_standard_renderer import SceneStandardRendererMixin
+from .character_render_state import SCENE_STATE_RESOLUTION_VERSION
 
 
 class SceneRenderer(
@@ -67,7 +68,9 @@ class SceneRenderer(
         bg_default = self.config.get("background", {}).get("default")
         pbar_scenes = self.pbar_scenes
         scene_hash_data = copy.deepcopy(self.scene_hash_data)
-        scene_hash_data["scene_render_version"] = "20260502_subtitle_render_mode_v1"
+        scene_hash_data.setdefault(
+            "scene_state_resolution_version", SCENE_STATE_RESOLUTION_VERSION
+        )
         scene_base_hash_data = self._scene_base_cache_data(scene_hash_data)
         scene_sub_hash_data = self._scene_subtitle_cache_data(
             scene_hash_data,
@@ -167,9 +170,6 @@ class SceneRenderer(
                     if isinstance(line_config, dict):
                         line_config["background"] = {"path": current_bg}
 
-        generate_no_sub_video = bool(
-            self.config.get("system", {}).get("generate_no_sub_video", False)
-        )
         cached_scene_video_path = self.cache_manager.get_cached_path(
             key_data=scene_sub_hash_data,
             file_name=f"scene_{scene_id}_sub",
@@ -195,53 +195,6 @@ class SceneRenderer(
             )
             pbar_scenes.update(1)
             return [cached_scene_video_path]
-
-        cached_legacy_scene_video_path = self.cache_manager.get_cached_path(
-            key_data=scene_hash_data,
-            file_name=f"scene_{scene_id}",
-            extension="mp4",
-        )
-        if cached_legacy_scene_video_path:
-            self._record_skipped_line_clips(scene_id)
-            legacy_key = self._cache_key_short(scene_hash_data)
-            self._record_scene_cache_event(
-                scene_id=scene_id,
-                layer="legacy",
-                status="HIT",
-                key=legacy_key,
-            )
-            logger.info(
-                "[SceneCache] scene=%s layer=legacy HIT key=%s file=%s",
-                scene_id,
-                legacy_key,
-                cached_legacy_scene_video_path.name,
-            )
-            pbar_scenes.update(1)
-            return [cached_legacy_scene_video_path]
-
-        if generate_no_sub_video:
-            cached_scene_video_path = self.cache_manager.get_cached_path(
-                key_data=scene_hash_data,
-                file_name=f"scene_{scene_id}_sub",
-                extension="mp4",
-            )
-            if cached_scene_video_path:
-                self._record_skipped_line_clips(scene_id)
-                legacy_sub_key = self._cache_key_short(scene_hash_data)
-                self._record_scene_cache_event(
-                    scene_id=scene_id,
-                    layer="legacy_sub",
-                    status="HIT",
-                    key=legacy_sub_key,
-                )
-                logger.info(
-                    "[SceneCache] scene=%s layer=legacy_sub HIT key=%s file=%s",
-                    scene_id,
-                    legacy_sub_key,
-                    cached_scene_video_path.name,
-                )
-                pbar_scenes.update(1)
-                return [cached_scene_video_path]
 
         sub_key = self._cache_key_short(scene_sub_hash_data)
         self._record_scene_cache_event(

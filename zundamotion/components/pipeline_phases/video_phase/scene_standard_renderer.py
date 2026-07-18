@@ -342,18 +342,8 @@ class SceneStandardRendererMixin:
                         common_keys &= set(m.keys())
                     for key in sorted(common_keys):
                         ov = per_line_char_maps[0][key]
-                        p = Path(ov["path"])  # expr 固定のはず
-                        if not p.exists():
-                            # default フォールバック（新/旧いずれか）
-                            name, _expr, _s, _a, _x, _y = key
-                            alt1 = Path(f"assets/characters/{name}/default/base.png")
-                            alt2 = Path(f"assets/characters/{name}/default.png")
-                            if alt1.exists():
-                                ov = {**ov, "path": str(alt1)}
-                            elif alt2.exists():
-                                ov = {**ov, "path": str(alt2)}
-                            else:
-                                continue
+                        if not Path(ov["path"]).exists():
+                            continue
                         static_overlays.append(ov)
                         static_char_keys.add(key)
 
@@ -559,53 +549,6 @@ class SceneStandardRendererMixin:
                     if not ("wait" in l or l.get("type") == "wait")
                 ]
                 if talk_lines2:
-                    def _norm_char_entries(line: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:
-                        entries: Dict[tuple, Dict[str, Any]] = {}
-                        for ch in line.get("characters", []) or []:
-                            if not ch.get("visible", False):
-                                continue
-                            name = ch.get("name")
-                            expr = ch.get("expression", "default")
-                            try:
-                                scale = round(float(ch.get("scale", 1.0)), 2)
-                            except Exception:
-                                scale = 1.0
-                            anchor = str(ch.get("anchor", "bottom_center")).lower()
-                            pos_raw = ch.get("position", {"x": "0", "y": "0"}) or {}
-                            def _q(v):
-                                try:
-                                    return f"{float(v):.2f}"
-                                except Exception:
-                                    return str(v)
-                            pos = {"x": _q(pos_raw.get("x", "0")), "y": _q(pos_raw.get("y", "0"))}
-                            key = (
-                                name,
-                                expr,
-                                float(scale),
-                                str(anchor),
-                                str(pos.get("x", "0")),
-                                str(pos.get("y", "0")),
-                            )
-                            base_dir = Path(f"assets/characters/{name}")
-                            for c in [
-                                base_dir / expr / "base.png",
-                                base_dir / f"{expr}.png",
-                                base_dir / "default" / "base.png",
-                                base_dir / "default.png",
-                            ]:
-                                try:
-                                    if c.exists():
-                                        entries[key] = {
-                                            "path": str(c),
-                                            "scale": scale,
-                                            "anchor": anchor,
-                                            "position": {"x": pos.get("x", "0"), "y": pos.get("y", "0")},
-                                        }
-                                        break
-                                except Exception:
-                                    pass
-                        return entries
-
                     def _insert_image_overlay(line: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                         ins = line.get("insert") or {}
                         p = ins.get("path")
@@ -621,7 +564,7 @@ class SceneStandardRendererMixin:
                             }
                         return None
 
-                    maps = [_norm_char_entries(l) for l in talk_lines2]
+                    maps = [self._norm_char_entries(l) for l in talk_lines2]
                     run_start: Optional[int] = None
                     run_sig = None
                     for i, m in enumerate(maps):
@@ -904,15 +847,13 @@ class SceneStandardRendererMixin:
                         if not ch.get("visible", False):
                             eff_chars.append(ch)
                             continue
-                        key = (
-                            ch.get("name"),
-                            ch.get("expression", "default"),
-                            float(ch.get("scale", 1.0)),
-                            str(ch.get("anchor", "bottom_center")),
-                            str((ch.get("position", {}) or {}).get("x", "0")),
-                            str((ch.get("position", {}) or {}).get("y", "0")),
+                        entry_keys = set(
+                            self._norm_char_entries({"characters": [ch]}).keys()
                         )
-                        if key in static_char_keys or (run_base and key in run_base.get("char_keys", set())):
+                        if entry_keys & static_char_keys or (
+                            run_base
+                            and entry_keys & run_base.get("char_keys", set())
+                        ):
                             continue
                         eff_chars.append(ch)
                     effective_characters = eff_chars

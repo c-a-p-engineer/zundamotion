@@ -16,18 +16,30 @@ class SceneCacheMixin:
 
     def _scene_base_cache_data(self, scene_hash_data: Dict[str, Any]) -> Dict[str, Any]:
         """Build cache data for the no-subtitle scene layer."""
-        base_data = {
-            key: value
-            for key, value in scene_hash_data.items()
-            if key != "subtitle_config"
-        }
+        base_data = self._without_subtitle_only_fields(scene_hash_data)
         base_data.update(
             {
                 "scene_cache_layer": "base_no_subtitle",
-                "scene_base_cache_version": "20260510_scene_base_v1",
+                "scene_base_cache_version": "20260717_scene_base_v2",
             }
         )
         return base_data
+
+    @classmethod
+    def _without_subtitle_only_fields(cls, value: Any) -> Any:
+        """Remove fields that affect only the subtitle-burned layer."""
+
+        if isinstance(value, dict):
+            return {
+                key: cls._without_subtitle_only_fields(item)
+                for key, item in value.items()
+                if key not in {"subtitle", "subtitle_config", "subtitle_text"}
+            }
+        if isinstance(value, list):
+            return [cls._without_subtitle_only_fields(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(cls._without_subtitle_only_fields(item) for item in value)
+        return value
 
     def _scene_subtitle_cache_data(
         self,
@@ -38,7 +50,7 @@ class SceneCacheMixin:
         return {
             **scene_hash_data,
             "scene_cache_layer": "subtitle_burned",
-            "scene_subtitle_cache_version": "20260510_scene_sub_v1",
+            "scene_subtitle_cache_version": "20260717_scene_sub_v2",
             "scene_base_cache_key": self.cache_manager._generate_hash(
                 scene_base_hash_data
             ),

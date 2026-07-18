@@ -211,7 +211,7 @@ mkdir -p /workspace/output
 `your-project/.devcontainer/Dockerfile.cpu`
 
 ```dockerfile
-FROM python:3.11-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1

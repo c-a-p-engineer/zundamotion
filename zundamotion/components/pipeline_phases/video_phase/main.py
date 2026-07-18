@@ -23,6 +23,12 @@ from zundamotion.utils.ffmpeg_hw import set_hw_filter_mode  # Auto-tuneでのバ
 from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams, resolve_media_params
 from zundamotion.utils.logger import logger, time_log
 from .scene_renderer import SceneRenderer
+from .character_render_state import (
+    SCENE_STATE_RESOLUTION_VERSION,
+    character_state_fingerprint,
+    resolve_character_render_state,
+    static_character_entry,
+)
 
 class VideoPhase:
     def __init__(
@@ -251,12 +257,37 @@ class VideoPhase:
 
     def _generate_scene_hash(self, scene: Dict[str, Any]) -> Dict[str, Any]:
         """Generates a dictionary for scene hash based on its content and relevant config."""
+        defaults = self.config.get("defaults", {}) or {}
+        character_config = self.config.get("characters", {}) or {}
+        character_states = []
+        for line in scene.get("lines", []) or []:
+            character_states.append(
+                [
+                    character_state_fingerprint(
+                        resolve_character_render_state(character, character_config)
+                    )
+                    for character in (line.get("characters", []) or [])
+                    if isinstance(character, dict)
+                ]
+            )
         return {
+            "scene_state_resolution_version": SCENE_STATE_RESOLUTION_VERSION,
             "id": scene.get("id"),
             "lines": scene.get("lines", []),
             "items": scene.get("items", []),
             "bg": scene.get("bg"),
-            "characters_persist": scene.get("characters_persist"),
+            "characters_persist": bool(
+                scene.get("characters_persist", defaults.get("characters_persist", False))
+            ),
+            "background_persist": bool(
+                scene.get("background_persist", defaults.get("background_persist", False))
+            ),
+            "default_characters": defaults.get("characters", {}),
+            "character_render_defaults": {
+                "default_scale": character_config.get("default_scale", 1.0),
+                "default_anchor": character_config.get("default_anchor", "bottom_center"),
+            },
+            "character_render_states": character_states,
             "character_defaults": scene.get("character_defaults"),
             "video_filter": scene.get("video_filter"),
             "badge": scene.get("badge"),
@@ -275,67 +306,21 @@ class VideoPhase:
             "audio_params": self.audio_params.__dict__,  # 追加
         }
 
-    @staticmethod
-    def _norm_char_entries(line: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:
+    def _norm_char_entries(self, line: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """Extracts static character overlay entries from a line configuration.
 
         Characters with dynamic enter/leave animations are excluded to avoid
         duplicating them in the scene base. The returned dictionary maps
         normalized character keys to overlay configuration.
         """
-        entries: Dict[tuple, Dict[str, Any]] = {}
+        entries: Dict[str, Dict[str, Any]] = {}
         for ch in line.get("characters", []) or []:
-            if not ch.get("visible", False):
+            if not isinstance(ch, dict):
                 continue
-            if ch.get("enter") or ch.get("leave"):
-                continue
-            name = ch.get("name")
-            expr = ch.get("expression", "default")
-            try:
-                scale = round(float(ch.get("scale", 1.0)), 2)
-            except Exception:
-                scale = 1.0
-            anchor = str(ch.get("anchor", "bottom_center")).lower()
-            pos_raw = ch.get("position", {"x": "0", "y": "0"}) or {}
-
-            def _q(v: Any) -> str:
-                try:
-                    return f"{float(v):.2f}"
-                except Exception:
-                    return str(v)
-
-            pos = {"x": _q(pos_raw.get("x", "0")), "y": _q(pos_raw.get("y", "0"))}
-            key = (
-                name,
-                expr,
-                float(scale),
-                str(anchor),
-                str(pos.get("x", "0")),
-                str(pos.get("y", "0")),
-            )
-            base_dir = Path(f"assets/characters/{name}")
-            candidates = [
-                base_dir / expr / "base.png",  # new: <name>/<expr>/base.png
-                base_dir / f"{expr}.png",  # legacy: <name>/{expr}.png
-                base_dir / "default" / "base.png",  # new default: <name>/default/base.png
-                base_dir / "default.png",  # legacy default: <name>/default.png
-            ]
-            chosen = None
-            for c in candidates:
-                try:
-                    if c.exists():
-                        chosen = c
-                        break
-                except Exception:
-                    pass
-            if chosen is None:
-                continue
-            entries[key] = {
-                "path": str(chosen),
-                "scale": scale,
-                "anchor": anchor,
-                "position": {"x": pos.get("x", "0"), "y": pos.get("y", "0")},
-            }
+            entry = static_character_entry(ch, self.config.get("characters", {}) or {})
+            if entry is not None:
+                key, overlay = entry
+                entries[key] = overlay
         return entries
 
     @staticmethod

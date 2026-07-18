@@ -10,7 +10,7 @@ jobs:
     timeout-minutes: 30
     env:
       FFMPEG_CACHE_VERSION: n7.1-linux64-gpl-7.1
-      PYTHON_VERSION: "3.11"
+      PYTHON_VERSION: "3.14"
 
     steps:
       - name: Checkout
@@ -59,7 +59,21 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Run unit tests
-        run: python -m pytest -m "not smoke"
+        run: python -m pytest -m "not smoke" --ignore=tests/test_audio_pcm_concat_integration.py
+
+      - name: Run FFmpeg integration tests
+        run: python -m pytest tests/test_audio_pcm_concat_integration.py
+
+      - name: Build wheel and source distribution
+        run: python -m build
+
+      - name: Upload Python 3.14 distributions
+        uses: actions/upload-artifact@v6
+        with:
+          name: packages-python-${{ env.PYTHON_VERSION }}
+          if-no-files-found: error
+          retention-days: 7
+          path: dist/*
 
       - name: Run render smoke tests
         env:
