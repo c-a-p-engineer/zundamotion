@@ -60,6 +60,21 @@ system:
   - `0` で停滞検知を無効化
 - CPU フィルタ経路では `-filter_threads` / `-filter_complex_threads` を保守的にキャップ
 
+## CPU / GPU 固定ベンチマーク
+
+Python 3.14 と GPU が使えるコンテナで、同じ短い台本を CPU、GPU エンコード + CPU
+フィルタ、GPU エンコード + CUDA フィルタの順に比較できます。
+
+```bash
+python scripts/benchmark_cpu_gpu.py
+```
+
+結果は `output/benchmarks/cpu-gpu-fixed-benchmark.json`、各実行ログは同じ
+ディレクトリの `smoke-*.log` に保存されます。JSON には経過時間、出力サイズ、
+ストリーム開始時刻・長さ、A/V 開始オフセット、DTS 警告数、GPU 使用率とレンダラー
+CPU 使用率のサンプル、FFmpeg プロセス数を残します。比較対象の条件を変えないため、
+このスクリプトは `--no-cache`、`--jobs 1`、`FFMPEG_PROFILE_MODE=1` を固定します。
+
 ## 自動チューニング
 
 - `video.auto_tune: true` で先頭クリップを軽く計測

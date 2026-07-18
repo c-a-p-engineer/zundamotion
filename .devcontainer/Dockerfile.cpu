@@ -63,4 +63,7 @@ WORKDIR /workspace
 # ---------------------------------------------------------
 # 動作確認
 # ---------------------------------------------------------
-RUN python --version && pip --version
+RUN python --version \
+ && pip --version \
+ && ffmpeg -version \
+ && ffprobe -version

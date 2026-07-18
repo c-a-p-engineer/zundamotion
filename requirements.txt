@@ -6,10 +6,3 @@ pysubs2==1.8.0
 Pillow==12.1.0
 httpx==0.28.1
 tenacity==9.1.2
-
-# AI 背景除去 (rembg)
-# Python 3.10は、3.11以降を要求する新しいrembg/onnxruntimeを使用できない。
-rembg==2.0.69; python_version < "3.11"
-rembg==2.0.76; python_version >= "3.11"
-onnxruntime==1.23.2; python_version < "3.11"
-onnxruntime==1.27.0; python_version >= "3.11"

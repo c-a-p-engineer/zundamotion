@@ -522,9 +522,16 @@ class SubtitleGenerator:
 
         if use_cuda:
             # GPU: メイン側/字幕側ともに GPU フレームへ upload → overlay_cuda
-            # in_label が CPU のまま来ても自衛的に GPU 化（重複しても副作用なし）
+            # 最初の入力は CPU フレームだが、2 枚目以降は直前の overlay_cuda 出力
+            # (CUDA フレーム) である。CUDA フレームへ format/hwupload_cuda を重ねると
+            # FFmpeg が CPU 形式への暗黙変換を試みて失敗するため、一度 download して
+            # 明示的に upload し直す。
+            if index == 1:
+                background_input = f"[{in_label}]format=nv12,hwupload_cuda"
+            else:
+                background_input = f"[{in_label}]hwdownload,format=nv12,hwupload_cuda"
             filter_parts: list[str] = [
-                f"[{in_label}]format=nv12,hwupload_cuda[bg_gpu_{index}]",
+                f"{background_input}[bg_gpu_{index}]",
             ]
             filter_parts.extend(effect_filters)
             rgba_label = f"sub_rgba_{index}"

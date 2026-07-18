@@ -19,6 +19,7 @@ defaults:
   background_persist: false
   characters:
     copetan:
+      speaker_id: 3
       scale: 0.20
       anchor: bottom_center
       position: {x: -70, y: 0}
@@ -32,6 +33,7 @@ scenes:
         position: {x: -70, y: 0}
     lines:
       - text: "small smoke"
+        speaker_name: copetan
         duration: 1.0
         characters:
           - name: copetan
@@ -42,6 +44,7 @@ scenes:
             start_time: 0.0
             volume: 0.05
       - text: "expression keeps scale"
+        speaker_name: copetan
         duration: 1.0
         characters:
           - name: copetan
@@ -67,6 +70,7 @@ scenes:
       duration: 0.2
     lines:
       - text: "final smoke"
+        speaker_name: copetan
         duration: 1.0
         characters:
           - name: copetan

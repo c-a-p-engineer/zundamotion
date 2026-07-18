@@ -67,6 +67,21 @@ jobs:
       - name: Build wheel and source distribution
         run: python -m build
 
+      - name: Verify clean wheel installation
+        run: |
+          python -m venv /tmp/zundamotion-wheel-test
+          /tmp/zundamotion-wheel-test/bin/python -m pip install --upgrade pip
+          /tmp/zundamotion-wheel-test/bin/python -m pip install dist/*.whl
+          /tmp/zundamotion-wheel-test/bin/zundamotion --help
+          /tmp/zundamotion-wheel-test/bin/python - <<'PY'
+          from importlib.resources import files
+
+          from zundamotion.plugins.loader import builtin_plugin_paths, load_plugins_cached
+
+          assert files("zundamotion").joinpath("templates/config.yaml").is_file()
+          assert load_plugins_cached(builtin_plugin_paths())
+          PY
+
       - name: Upload Python 3.14 distributions
         uses: actions/upload-artifact@v6
         with:

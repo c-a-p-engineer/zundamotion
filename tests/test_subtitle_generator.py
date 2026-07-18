@@ -77,6 +77,28 @@ def test_build_subtitle_overlay_accepts_numeric_subtitle_xy(tmp_path):
     assert "overlay=x='48':y='96'" in snippet
 
 
+def test_build_subtitle_overlay_reuploads_cuda_output_between_subtitles(tmp_path):
+    generator = SubtitleGenerator({}, CacheManager(tmp_path / "cache"))
+
+    async def fake_render(*_args, **_kwargs):
+        return tmp_path / "subtitle.png", {"w": 320, "h": 96}
+
+    generator.png_renderer.render = fake_render  # type: ignore[method-assign]
+
+    _extra_input, snippet = asyncio.run(
+        generator.build_subtitle_overlay(
+            text="字幕",
+            duration=1.5,
+            line_config={},
+            in_label="with_subtitle_1",
+            index=2,
+            allow_cuda=True,
+        )
+    )
+
+    assert "[with_subtitle_1]hwdownload,format=nv12,hwupload_cuda[bg_gpu_2]" in snippet
+
+
 def test_resolve_render_mode_for_line_configs_defaults_to_png_for_simple_style(tmp_path):
     generator = SubtitleGenerator(
         {"subtitle": {"background": {"show": True, "color": "#000000"}}},

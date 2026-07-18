@@ -100,22 +100,6 @@ assets/
 - 最低限 `default/base.png` を用意する。
 - 口パクや目パチを使うなら `default/mouth/` と `default/eyes/` も用意する。
 
-## 背景除去
-
-写真や複雑な背景では AI ベースの除去が有効です。
-
-- ファイル: `tools/remove_bg_ai.py`
-- 依存: `pip install rembg`
-
-```bash
-python ./tools/remove_bg_ai.py \
-  --input /workspace/assets/characters/engy/default \
-  --output /workspace/assets/characters/engy/default \
-  --model isnet-anime \
-  --force-gpu \
-  --recursive
-```
-
 ## 生成依頼プロンプト例
 
 ```text
@@ -130,15 +114,4 @@ python ./tools/remove_bg_ai.py \
 2. 1 を元にして、口だけ少し開く
 3. 1 を元にして、口だけ喋り中の形にする
 4. 1 を元にして、目だけ閉じる
-```
-
-## 背景透過 PNG 作成コマンド例
-
-```bash
-python ./tools/remove_bg_ai.py \
-  --input /workspace/assets/characters/engy/default \
-  --output /workspace/assets/characters/engy/default \
-  --model isnet-anime \
-  --force-gpu \
-  --recursive
 ```

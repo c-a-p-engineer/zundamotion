@@ -100,7 +100,7 @@ class VideoParams:
                 opts.extend(["-cq", "23"])
             try:
                 if os.getenv("NVENC_FAST", "0") == "1":
-                    opts.extend(["-rc-lookahead", "0", "-bf", "0", "-spatial_aq", "0", "-temporal_aq", "0"])
+                    opts.extend(["-rc-lookahead", "0", "-bf", "0", "-spatial-aq", "0", "-temporal-aq", "0"])
             except Exception:
                 pass
         elif hw_kind == "qsv":

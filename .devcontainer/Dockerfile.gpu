@@ -1,5 +1,5 @@
 # =========================================================
-# CUDA + FFmpeg (NVENC + libmp3lame) + Python 3.10（Ubuntu 22.04）
+# CUDA + FFmpeg (NVENC + libmp3lame) + Python 3.14（Ubuntu 22.04）
 # =========================================================
 FROM nvidia/cuda:13.0.0-devel-ubuntu22.04
 
@@ -20,12 +20,22 @@ RUN apt-get update && apt-get install -y \
  && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------
-# Python 3.10（Ubuntu 22.04標準）
+# Python 3.14
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-venv python-is-python3 \
+    gnupg2 curl software-properties-common \
+ && add-apt-repository ppa:deadsnakes/ppa -y \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+    python3.14 python3.14-venv python3.14-dev \
  && rm -rf /var/lib/apt/lists/*
 
+RUN python3.14 -m ensurepip --upgrade \
+ && python3.14 -m pip install --no-cache-dir --upgrade pip setuptools wheel \
+ && python3.14 -m venv /opt/pyenv \
+ && /opt/pyenv/bin/pip install --no-cache-dir --upgrade pip
+
+ENV PATH="/opt/pyenv/bin:${PATH}"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
 # ---------------------------------------------------------
@@ -44,9 +54,11 @@ RUN pip install --upgrade pip \
 #    (overlay_cuda/scale_cuda/scale_npp/overlay_opencl/scale_opencl) depends on the build.
 #  - If CUDA filters are missing in your environment, consider switching to a different
 #    artifact (e.g. specific version tag) or building FFmpeg with --enable-cuda-nvcc --enable-libnpp --enable-nonfree.
-ARG FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl-shared.tar.xz"
 # 最高性能重視の既定: 自前ビルドで CUDA/OpenCL フィルタと NVENC を確実化
 ARG BUILD_FFMPEG_FROM_SOURCE=1
+# NVIDIA 550+ のホストドライバで実 NVENC できる SDK に固定する。master を追うと
+# Docker ホストより新しいドライバを要求して CPU フォールバックする場合がある。
+ARG NV_CODEC_HEADERS_VERSION=n12.2.72.0
 
 # 依存は最小限（mp3lameライブラリを保険で導入）
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -61,7 +73,7 @@ RUN if [ "$BUILD_FFMPEG_FROM_SOURCE" = "1" ]; then \
         libvulkan-dev libdrm-dev libx11-dev libxext-dev libxfixes-dev \
         libssl-dev ocl-icd-opencl-dev opencl-headers clinfo ; \
       # NVENC ヘッダ（ffnvcodec）
-      git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers; \
+      git clone --depth 1 --branch "${NV_CODEC_HEADERS_VERSION}" https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers; \
       make -C /tmp/nv-codec-headers install; \
       git clone --depth 1 https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg-src; \
       cd /tmp/ffmpeg-src; \
@@ -113,4 +125,4 @@ WORKDIR /workspace
 # ---------------------------------------------------------
 # 動作確認
 # ---------------------------------------------------------
-RUN python3 --version && python --version && pip --version
+RUN python --version && pip --version && ffmpeg -version && ffprobe -version

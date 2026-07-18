@@ -12,15 +12,12 @@
 
 ## 必要なもの
 
-- 最新安定版の CPython 3.14 系（公式推奨・動作保証対象、パッチ版は固定しない）
-- CPython 3.10 以上（互換実行対象。3.10〜3.13は動作保証・継続的な互換性維持の対象外）
+- 最新安定版の CPython 3.14 系（パッチ版は固定しない）
 - FFmpeg / ffprobe
 - VOICEVOX Engine
 - Docker / Dev Container（再現可能な公式推奨環境）
 
-Python 3.10〜3.13はDocker GPUイメージなどでの互換実行を許容しますが、公式の動作保証対象外です。alpha / beta / RC / dev 版も公式サポート対象外です。
-
-Python 3.10では依存パッケージの対応範囲に合わせ、`rembg 2.0.69` と `onnxruntime 1.23.2` を自動選択します。Python 3.11以上では最新の固定版を使います。
+Python 3.13以前と3.15以降の未検証版、alpha / beta / RC / dev 版は公式サポート対象外です。
 
 ## セットアップ
 
@@ -49,6 +46,10 @@ GPU を使う場合:
 - `.env` で `ZUNDA_DOCKER=Dockerfile.gpu` を指定
 - ホスト側で NVIDIA Container Toolkit と GPU ドライバを有効化
 - コンテナ内で `nvidia-smi` と `ffmpeg -filters` の確認を実施
+
+CPU 用・GPU 用の公式 Dockerfile はどちらも CPython 3.14 系を使います。GPU
+Dockerfile は CUDA ベースイメージ上に Python 3.14 の仮想環境を作るため、ホストの
+`python3` の版には依存しません。
 
 Docker ログで追いたい場合:
 
@@ -101,6 +102,9 @@ pip --version
 ffmpeg -hide_banner -encoders | grep -E 'libx264|libx265'
 ffmpeg -hide_banner -filters | grep -E 'overlay_opencl|scale_opencl' || true
 ```
+
+この手順でも `python --version` が 3.14 系であることを確認してください。異なる
+Python 版での実行は動作保証対象外です。
 
 ## 基本実行
 
@@ -188,9 +192,14 @@ Dev Container では Docker Compose により VOICEVOX Engine が起動し、通
 nvidia-smi
 ldconfig -p | rg libnvidia-encode
 ffmpeg -hide_banner -encoders | rg nvenc
+python scripts/verify_gpu_runtime.py --skip-render
 ```
 
 `libnvidia-encode.so.1` が見つからない場合は、Docker 起動時に `--gpus all` と `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video` または `all` を指定してください。
+
+`scripts/verify_gpu_runtime.py` は Python 3.14、GPU 認識、NVENC、CUDA/OpenCL
+フィルタを確認します。`--skip-render` を外すと短い H.264/AAC 動画も生成し、NVENC
+選択と DTS 警告の有無を `output/gpu-smoke/gpu-smoke.report.json` に記録します。
 
 ## 速度優先で回すとき
 

@@ -14,6 +14,17 @@ def test_video_params_does_not_pass_x264_preset_to_nvenc():
     assert opts[opts.index("-preset") + 1] == "p2"
 
 
+def test_nvenc_fast_uses_ffmpeg_hyphenated_aq_options(monkeypatch):
+    monkeypatch.setenv("NVENC_FAST", "1")
+
+    opts = VideoParams(preset="veryfast").to_ffmpeg_opts("nvenc")
+
+    assert "-spatial-aq" in opts
+    assert "-temporal-aq" in opts
+    assert "-spatial_aq" not in opts
+    assert "-temporal_aq" not in opts
+
+
 def test_video_params_maps_nvenc_preset_to_x264_when_cpu():
     opts = VideoParams(preset="p1").to_ffmpeg_opts(None)
 
