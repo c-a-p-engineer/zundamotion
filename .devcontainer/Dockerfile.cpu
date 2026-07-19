@@ -42,14 +42,13 @@ RUN git clone --filter=blob:none https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpe
  && make -j"$(nproc)" && make install \
  && ln -sf /opt/ffmpeg/bin/ffmpeg  /usr/local/bin/ffmpeg \
  && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
- && mkdir -p /opt/zundamotion-build-info \
- && printf '%s\n' "${FFMPEG_COMMIT}" > /opt/zundamotion-build-info/ffmpeg-commit.txt \
- && /opt/ffmpeg/bin/ffmpeg -buildconf > /opt/zundamotion-build-info/ffmpeg-configure.txt \
- && python --version > /opt/zundamotion-build-info/runtime.txt \
  && rm -rf /tmp/ffmpeg-src
 
 ENV LD_LIBRARY_PATH="/opt/ffmpeg/lib"
 RUN echo "/opt/ffmpeg/lib" > /etc/ld.so.conf.d/ffmpeg.conf && ldconfig
+
+COPY scripts/write_build_info.py /usr/local/bin/write_build_info.py
+RUN python /usr/local/bin/write_build_info.py --profile cpu --ffmpeg-commit "${FFMPEG_COMMIT}"
 
 # FFmpegより後に置き、Python依存の更新でFFmpegを再ビルドしない。
 COPY requirements.txt .

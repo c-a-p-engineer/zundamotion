@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Write reproducible, runtime-derived FFmpeg build metadata."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Callable
+
+DEFAULT_OUTPUT = Path("/opt/zundamotion-build-info/build-info.json")
+CommandRunner = Callable[[list[str]], str]
+
+
+def run_command(command: list[str]) -> str:
+    """Run a command and return its combined UTF-8 output."""
+    completed = subprocess.run(
+        command,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+    )
+    return completed.stdout
+
+
+def contains_capability(listing: str, capability: str) -> bool:
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(capability)}(?![A-Za-z0-9_])", listing) is not None
+
+
+def build_payload(
+    *,
+    profile: str,
+    ffmpeg_commit: str,
+    nv_codec_headers: str | None,
+    cuda_base_image: str | None,
+    command_runner: CommandRunner = run_command,
+) -> dict[str, object]:
+    """Collect installed capabilities so metadata reflects the built image."""
+    ffmpeg_version = command_runner(["ffmpeg", "-version"]).splitlines()[0]
+    buildconf = command_runner(["ffmpeg", "-buildconf"])
+    encoders = command_runner(["ffmpeg", "-hide_banner", "-encoders"])
+    filters = command_runner(["ffmpeg", "-hide_banner", "-filters"])
+    python_version = command_runner([sys.executable, "--version"]).strip()
+    configure_options = re.findall(r"--[A-Za-z0-9_-]+(?:=[^\s]+)?", buildconf)
+
+    return {
+        "profile": profile,
+        "ffmpeg": {
+            "requested_commit": ffmpeg_commit,
+            "version": ffmpeg_version,
+            "configure_options": configure_options,
+            "encoders": {
+                name: contains_capability(encoders, name)
+                for name in ("libx264", "libx265", "h264_nvenc", "hevc_nvenc")
+            },
+            "filters": {
+                "libfreetype": "--enable-libfreetype" in configure_options,
+                **{
+                    name: contains_capability(filters, name)
+                    for name in (
+                        "overlay_cuda",
+                        "scale_cuda",
+                        "scale_npp",
+                        "overlay_opencl",
+                        "scale_opencl",
+                    )
+                },
+            },
+        },
+        "python": {"version": python_version},
+        "cuda": {
+            "base_image": cuda_base_image,
+            "nv_codec_headers": nv_codec_headers,
+        },
+    }
+
+
+def write_build_info(output: Path, payload: dict[str, object]) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=("cpu", "gpu"), required=True)
+    parser.add_argument("--ffmpeg-commit", required=True)
+    parser.add_argument("--nv-codec-headers")
+    parser.add_argument("--cuda-base-image")
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    payload = build_payload(
+        profile=args.profile,
+        ffmpeg_commit=args.ffmpeg_commit,
+        nv_codec_headers=args.nv_codec_headers,
+        cuda_base_image=args.cuda_base_image,
+    )
+    write_build_info(args.output, payload)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

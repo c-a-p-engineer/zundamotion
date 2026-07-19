@@ -132,14 +132,10 @@ cp -r vendor/zundamotion/scripts/. scripts/
 `your-project/.devcontainer/.env.example`
 
 ```dotenv
-# CPU を標準にしています。GPU を使う場合は Dockerfile.gpu に切り替えてください。
-ZUNDA_DOCKER=Dockerfile.cpu
-
 # VOICEVOX は標準で CPU イメージです。
 VOICEVOX_IMAGE=voicevox/voicevox_engine:cpu-ubuntu22.04-latest
 
-# GPU 例
-# ZUNDA_DOCKER=Dockerfile.gpu
+# GPU VOICEVOX を使う場合だけ切り替えます。
 # VOICEVOX_IMAGE=voicevox/voicevox_engine:nvidia-ubuntu24.04-latest
 ```
 
@@ -172,7 +168,7 @@ services:
   app:
     build:
       context: ..
-      dockerfile: .devcontainer/${ZUNDA_DOCKER:-Dockerfile.cpu}
+      dockerfile: .devcontainer/Dockerfile.cpu
     working_dir: /workspace
     volumes:
       - ..:/workspace
@@ -223,19 +219,25 @@ RUN apt-get update \
     fonts-ipafont-gothic \
     git \
     xz-utils \
+    build-essential pkg-config yasm nasm \
+    libfreetype6-dev libmp3lame-dev libssl-dev libx264-dev libx265-dev libnuma-dev \
  && rm -rf /var/lib/apt/lists/*
 
 COPY vendor/zundamotion /tmp/zundamotion
 COPY vendor/zundamotion/requirements.txt /tmp/requirements.txt
 
-ARG FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl-shared.tar.xz"
+ARG FFMPEG_COMMIT=db69d06eeeab4f46da15030a80d539efb4503ca8
 
-RUN curl -L -o /tmp/ffmpeg.tar.xz "${FFMPEG_URL}" \
- && mkdir -p /opt/ffmpeg \
- && tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1 \
+RUN git clone --filter=blob:none https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg-src \
+ && cd /tmp/ffmpeg-src \
+ && git fetch --depth 1 origin "${FFMPEG_COMMIT}" \
+ && git checkout --detach "${FFMPEG_COMMIT}" \
+ && test "$(git rev-parse HEAD)" = "${FFMPEG_COMMIT}" \
+ && ./configure --prefix=/opt/ffmpeg --enable-gpl --enable-libfreetype --enable-libmp3lame --enable-libx264 --enable-libx265 --enable-openssl \
+ && make -j"$(nproc)" && make install \
  && ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg \
  && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
- && rm -f /tmp/ffmpeg.tar.xz
+ && rm -rf /tmp/ffmpeg-src
 
 ENV LD_LIBRARY_PATH="/opt/ffmpeg/lib:${LD_LIBRARY_PATH}"
 
@@ -250,7 +252,9 @@ WORKDIR /workspace
 CMD ["sleep", "infinity"]
 ```
 
-GPU 版は、利用側プロジェクトの運用方針に合わせて NVIDIA ランタイム設定を追加してください。CPU 版で最初に動作確認してから分岐するのが安全です。
+GPU 版は、CPU Compose を書き換えず、別の GPU override で `app` / `render` の
+`build.dockerfile` を `Dockerfile.gpu` に明示します。これにより `.env` の値に関係なく
+GPU Dockerfile を選択できます。NVIDIA runtime も同じ override にだけ追加してください。
 
 ### 3) 起動する
 

@@ -41,15 +41,27 @@ cd zundamotion
 
 VS Code でプロジェクトを開き、「Reopen in Container」を選択します。
 
-GPU を使う場合:
+GPU を使う場合は `.devcontainer/gpu/devcontainer.json` を選択します。この定義は
+`.devcontainer/docker-compose.gpu.yml` を重ね、`app` と `render` の build に
+`.devcontainer/Dockerfile.gpu` を明示します。`.env` の `ZUNDA_DOCKER` に依存しないため、
+CPU/GPU の選択が環境変数の残り値で変わりません。
 
-- `.env` で `ZUNDA_DOCKER=Dockerfile.gpu` を指定
-- ホスト側で NVIDIA Container Toolkit と GPU ドライバを有効化
-- コンテナ内で `nvidia-smi` と `ffmpeg -filters` の確認を実施
+- ホスト側で NVIDIA Container Toolkit と GPU ドライバを有効化する
+- コンテナ内で `nvidia-smi` と `ffmpeg -filters` を確認する
+- GPU 版 VOICEVOX が必要な場合だけ、`docker-compose.voicevox-gpu.yml` を追加で重ねる
 
 CPU 用・GPU 用の公式 Dockerfile はどちらも CPython 3.14 系を使います。GPU
 Dockerfile は CUDA ベースイメージ上に Python 3.14 の仮想環境を作るため、ホストの
 `python3` の版には依存しません。
+
+CPU/GPU Dockerfile は同じ固定 FFmpeg commit からソースビルドします。完成したイメージには
+実行時の `ffmpeg -version`、`ffmpeg -buildconf`、エンコーダー・フィルタ検出結果を記録した
+`/opt/zundamotion-build-info/build-info.json` が含まれます。CPU/GPU Dockerfile と本書の
+固定値が一致することは、リポジトリ直下で次のコマンドにより検査できます。
+
+```bash
+python scripts/check_runtime_versions.py
+```
 
 Docker ログで追いたい場合:
 

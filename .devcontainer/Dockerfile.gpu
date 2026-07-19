@@ -69,7 +69,7 @@ RUN set -eux; \
         --prefix=/opt/ffmpeg \
         --pkg-config-flags=--static \
         --enable-gpl --enable-nonfree \
-        --enable-libx264 --enable-libx265 --enable-libmp3lame \
+        --enable-libx264 --enable-libx265 --enable-libmp3lame --enable-libfreetype \
         --enable-cuda-nvcc --enable-cuvid --enable-nvenc \
         --enable-opencl \
         --extra-cflags=-I/usr/local/cuda/include \
@@ -78,18 +78,17 @@ RUN set -eux; \
         ; \
       make -j"$(nproc)"; \
       make install; \
-      rm -rf /tmp/ffmpeg-src; \
-      rm -rf /tmp/nv-codec-headers; \
-    && ln -sf /opt/ffmpeg/bin/ffmpeg  /usr/local/bin/ffmpeg \
+      rm -rf /tmp/ffmpeg-src /tmp/nv-codec-headers \
+    && ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg \
     && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
-    && mkdir -p /opt/zundamotion-build-info \
-    && printf '%s\n' "${FFMPEG_COMMIT}" > /opt/zundamotion-build-info/ffmpeg-commit.txt \
-    && printf '%s\n' "${NV_CODEC_HEADERS_VERSION}" > /opt/zundamotion-build-info/nv-codec-headers.txt \
-    && /opt/ffmpeg/bin/ffmpeg -buildconf > /opt/zundamotion-build-info/ffmpeg-configure.txt
+    && true
 
 # 共有ライブラリの検索パス
 ENV LD_LIBRARY_PATH="/opt/ffmpeg/lib:${LD_LIBRARY_PATH}"
 RUN echo "/opt/ffmpeg/lib" > /etc/ld.so.conf.d/ffmpeg.conf && ldconfig
+
+COPY scripts/write_build_info.py /usr/local/bin/write_build_info.py
+RUN python /usr/local/bin/write_build_info.py --profile gpu --ffmpeg-commit "${FFMPEG_COMMIT}" --nv-codec-headers "${NV_CODEC_HEADERS_VERSION}" --cuda-base-image nvidia/cuda:13.0.0-devel-ubuntu22.04
 
 # FFmpegより後に置き、Python依存の更新でFFmpegを再ビルドしない。
 COPY requirements.txt .
