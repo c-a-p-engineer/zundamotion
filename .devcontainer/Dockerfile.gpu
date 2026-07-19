@@ -39,34 +39,19 @@ ENV PATH="/opt/pyenv/bin:${PATH}"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
 # ---------------------------------------------------------
-# Python パッケージ
+# FFmpeg（NVENC + libmp3lame 対応）: 固定commitのソースビルド
 # ---------------------------------------------------------
-COPY requirements.txt .
-RUN pip install --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt
-
-# ---------------------------------------------------------
-# FFmpeg（NVENC + libmp3lame 対応）: 既定はBtbNの事前ビルドで高速導入
-#   ※ Driver 525+ & NVIDIA Container Toolkit 必須
-# ---------------------------------------------------------
-# NOTE:
-#  - The default BtbN build below provides NVENC encoders. CUDA/OpenCL filter availability
-#    (overlay_cuda/scale_cuda/scale_npp/overlay_opencl/scale_opencl) depends on the build.
-#  - If CUDA filters are missing in your environment, consider switching to a different
-#    artifact (e.g. specific version tag) or building FFmpeg with --enable-cuda-nvcc --enable-libnpp --enable-nonfree.
-# 最高性能重視の既定: 自前ビルドで CUDA/OpenCL フィルタと NVENC を確実化
-ARG BUILD_FFMPEG_FROM_SOURCE=1
 # NVIDIA 550+ のホストドライバで実 NVENC できる SDK に固定する。master を追うと
 # Docker ホストより新しいドライバを要求して CPU フォールバックする場合がある。
 ARG NV_CODEC_HEADERS_VERSION=n12.2.72.0
+ARG FFMPEG_COMMIT=db69d06eeeab4f46da15030a80d539efb4503ca8
 
 # 依存は最小限（mp3lameライブラリを保険で導入）
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libmp3lame0 \
   && rm -rf /var/lib/apt/lists/*
 
-RUN if [ "$BUILD_FFMPEG_FROM_SOURCE" = "1" ]; then \
-      set -eux; \
+RUN set -eux; \
       apt-get update && apt-get install -y --no-install-recommends \
         build-essential pkg-config yasm nasm git ca-certificates \
         libx264-dev libx265-dev libnuma-dev libfreetype6-dev libmp3lame-dev \
@@ -75,8 +60,11 @@ RUN if [ "$BUILD_FFMPEG_FROM_SOURCE" = "1" ]; then \
       # NVENC ヘッダ（ffnvcodec）
       git clone --depth 1 --branch "${NV_CODEC_HEADERS_VERSION}" https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers; \
       make -C /tmp/nv-codec-headers install; \
-      git clone --depth 1 https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg-src; \
+      git clone --filter=blob:none https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg-src; \
       cd /tmp/ffmpeg-src; \
+      git fetch --depth 1 origin "${FFMPEG_COMMIT}"; \
+      git checkout --detach "${FFMPEG_COMMIT}"; \
+      test "$(git rev-parse HEAD)" = "${FFMPEG_COMMIT}"; \
       ./configure \
         --prefix=/opt/ffmpeg \
         --pkg-config-flags=--static \
@@ -92,18 +80,21 @@ RUN if [ "$BUILD_FFMPEG_FROM_SOURCE" = "1" ]; then \
       make install; \
       rm -rf /tmp/ffmpeg-src; \
       rm -rf /tmp/nv-codec-headers; \
-    else \
-      curl -L -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" \
-      && mkdir -p /opt/ffmpeg \
-      && tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1 \
-      && rm -f /tmp/ffmpeg.tar.xz; \
-    fi \
     && ln -sf /opt/ffmpeg/bin/ffmpeg  /usr/local/bin/ffmpeg \
-    && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
+    && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
+    && mkdir -p /opt/zundamotion-build-info \
+    && printf '%s\n' "${FFMPEG_COMMIT}" > /opt/zundamotion-build-info/ffmpeg-commit.txt \
+    && printf '%s\n' "${NV_CODEC_HEADERS_VERSION}" > /opt/zundamotion-build-info/nv-codec-headers.txt \
+    && /opt/ffmpeg/bin/ffmpeg -buildconf > /opt/zundamotion-build-info/ffmpeg-configure.txt
 
 # 共有ライブラリの検索パス
 ENV LD_LIBRARY_PATH="/opt/ffmpeg/lib:${LD_LIBRARY_PATH}"
 RUN echo "/opt/ffmpeg/lib" > /etc/ld.so.conf.d/ffmpeg.conf && ldconfig
+
+# FFmpegより後に置き、Python依存の更新でFFmpegを再ビルドしない。
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+ && pip install --no-cache-dir -r requirements.txt
 
 # NVENC と libmp3lame の存在確認
 RUN set -eux; \

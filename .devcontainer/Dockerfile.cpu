@@ -1,5 +1,5 @@
 # =========================================================
-# CPU + FFmpeg(prebuilt) + Python 3.14（Debian Bookworm）
+# CPU + fixed-source FFmpeg + Python 3.14（Debian Bookworm）
 # =========================================================
 FROM python:3.14-slim-bookworm
 
@@ -9,7 +9,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 # 基本ツール
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y \
-    curl unzip git xz-utils ca-certificates \
+    build-essential curl unzip git xz-utils ca-certificates nasm pkg-config yasm \
+    libfreetype6-dev libmp3lame-dev libssl-dev libx264-dev libx265-dev libnuma-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------
@@ -28,28 +29,32 @@ RUN python -m venv /opt/pyenv \
 ENV PATH="/opt/pyenv/bin:${PATH}"
 
 # ---------------------------------------------------------
-# Python パッケージ
+# FFmpeg（CPU版: 固定commitのソースビルド。prebuilt fallbackなし）
 # ---------------------------------------------------------
-COPY requirements.txt .
-RUN pip install --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt
+ARG FFMPEG_COMMIT=db69d06eeeab4f46da15030a80d539efb4503ca8
 
-# ---------------------------------------------------------
-# FFmpeg（CPU版 prebuilt）
-#   - BtbN ビルド (GPL / shared)
-#   - NVENC 無しでも動作可能
-# ---------------------------------------------------------
-ARG FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl-shared.tar.xz"
-
-RUN curl -L -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" \
- && mkdir -p /opt/ffmpeg \
- && tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1 \
+RUN git clone --filter=blob:none https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg-src \
+ && cd /tmp/ffmpeg-src \
+ && git fetch --depth 1 origin "${FFMPEG_COMMIT}" \
+ && git checkout --detach "${FFMPEG_COMMIT}" \
+ && test "$(git rev-parse HEAD)" = "${FFMPEG_COMMIT}" \
+ && ./configure --prefix=/opt/ffmpeg --enable-gpl --enable-libfreetype --enable-libmp3lame --enable-libx264 --enable-libx265 --enable-openssl \
+ && make -j"$(nproc)" && make install \
  && ln -sf /opt/ffmpeg/bin/ffmpeg  /usr/local/bin/ffmpeg \
  && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
- && rm -f /tmp/ffmpeg.tar.xz
+ && mkdir -p /opt/zundamotion-build-info \
+ && printf '%s\n' "${FFMPEG_COMMIT}" > /opt/zundamotion-build-info/ffmpeg-commit.txt \
+ && /opt/ffmpeg/bin/ffmpeg -buildconf > /opt/zundamotion-build-info/ffmpeg-configure.txt \
+ && python --version > /opt/zundamotion-build-info/runtime.txt \
+ && rm -rf /tmp/ffmpeg-src
 
 ENV LD_LIBRARY_PATH="/opt/ffmpeg/lib"
 RUN echo "/opt/ffmpeg/lib" > /etc/ld.so.conf.d/ffmpeg.conf && ldconfig
+
+# FFmpegより後に置き、Python依存の更新でFFmpegを再ビルドしない。
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+ && pip install --no-cache-dir -r requirements.txt
 
 # CPU版なので NVENC 確認は不要
 RUN ffmpeg -hide_banner -encoders | grep -E 'libx264|libx265'
