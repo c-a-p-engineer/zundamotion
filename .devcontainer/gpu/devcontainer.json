@@ -1,0 +1,7 @@
+{
+  "name": "zundamotion GPU",
+  "dockerComposeFile": ["../docker-compose.yml", "../docker-compose.gpu.yml"],
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "postCreateCommand": "bash .devcontainer/setup-mcp.sh"
+}

@@ -82,16 +82,14 @@ python -m ensurepip --upgrade || true
 python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 python -m pip install --no-cache-dir -r requirements.txt
 
-FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl-shared.tar.xz"
-curl -L -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL"
-sudo mkdir -p /opt/ffmpeg
-sudo tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1
-sudo ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
-sudo ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
-rm -f /tmp/ffmpeg.tar.xz
-echo "/opt/ffmpeg/lib" | sudo tee /etc/ld.so.conf.d/ffmpeg.conf >/dev/null
-sudo ldconfig
-echo 'export LD_LIBRARY_PATH="/opt/ffmpeg/lib:${LD_LIBRARY_PATH:-}"' >> ~/.bashrc
+# FFmpeg は Dockerfile と同じ固定 commit
+FFMPEG_COMMIT=db69d06eeeab4f46da15030a80d539efb4503ca8
+git clone --filter=blob:none https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg-src
+cd /tmp/ffmpeg-src
+git fetch --depth 1 origin "$FFMPEG_COMMIT"
+git checkout --detach "$FFMPEG_COMMIT"
+test "$(git rev-parse HEAD)" = "$FFMPEG_COMMIT"
+# Dockerfile と同じ configure オプションで build する。
 ```
 
 動作確認:
