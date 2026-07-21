@@ -1,17 +1,11 @@
 services:
   app:
-    build:
-      args:
-        RUNTIME_IMAGE: ${ZUNDAMOTION_RUNTIME_GPU_IMAGE:?run scripts/export_runtime_env.py first}
     runtime: nvidia
     gpus: all
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
   render:
-    build:
-      args:
-        RUNTIME_IMAGE: ${ZUNDAMOTION_RUNTIME_GPU_IMAGE:?run scripts/export_runtime_env.py first}
     runtime: nvidia
     gpus: all
     environment:

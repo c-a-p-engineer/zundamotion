@@ -3,8 +3,6 @@ services:
     build:
       context: ..
       dockerfile: .devcontainer/Dockerfile
-      args:
-        RUNTIME_IMAGE: ${ZUNDAMOTION_RUNTIME_CPU_IMAGE:?run scripts/export_runtime_env.py first}
     working_dir: /workspace
     volumes:
       - ..:/workspace:cached
@@ -22,8 +20,6 @@ services:
     build:
       context: ..
       dockerfile: .devcontainer/Dockerfile
-      args:
-        RUNTIME_IMAGE: ${ZUNDAMOTION_RUNTIME_CPU_IMAGE:?run scripts/export_runtime_env.py first}
     working_dir: /workspace
     volumes:
       - ..:/workspace:cached

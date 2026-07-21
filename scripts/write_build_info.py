@@ -79,23 +79,20 @@ def write_build_info(output: Path, payload: dict[str, object]) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("cpu", "gpu"), required=True)
-    parser.add_argument("--ffmpeg-source-url", required=True)
-    parser.add_argument("--ffmpeg-source-sha256", required=True)
-    parser.add_argument("--nv-codec-headers")
-    parser.add_argument("--cuda-base-image")
+    parser.add_argument("--lock", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    lock = json.loads(args.lock.read_text(encoding="utf-8"))
     payload = build_payload(
-        profile=args.profile,
-        ffmpeg_source_url=args.ffmpeg_source_url,
-        ffmpeg_source_sha256=args.ffmpeg_source_sha256,
-        nv_codec_headers=args.nv_codec_headers,
-        cuda_base_image=args.cuda_base_image,
+        profile="unified",
+        ffmpeg_source_url=f"btbn:{lock['ffmpeg']['release_tag']}/{lock['ffmpeg']['asset']}",
+        ffmpeg_source_sha256=lock["ffmpeg"]["sha256"],
+        nv_codec_headers=None,
+        cuda_base_image=None,
     )
     write_build_info(args.output, payload)
     return 0
