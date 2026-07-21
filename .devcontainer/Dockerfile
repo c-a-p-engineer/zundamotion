@@ -6,7 +6,12 @@ WORKDIR /workspace
 COPY .devcontainer/runtime.lock.json /tmp/runtime.lock.json
 COPY scripts/install_locked_ffmpeg.py /usr/local/bin/install_locked_ffmpeg.py
 COPY scripts/write_build_info.py /usr/local/bin/write_build_info.py
-RUN python /usr/local/bin/install_locked_ffmpeg.py --lock /tmp/runtime.lock.json \
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends fontconfig fonts-ipafont-gothic \
+ && rm -rf /var/lib/apt/lists/* \
+ && test -f /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf \
+ && fc-match IPAGothic \
+ && python /usr/local/bin/install_locked_ffmpeg.py --lock /tmp/runtime.lock.json \
  && python /usr/local/bin/write_build_info.py --lock /tmp/runtime.lock.json
 COPY requirements.txt /tmp/requirements.txt
 RUN python -m pip install --no-cache-dir --upgrade pip \

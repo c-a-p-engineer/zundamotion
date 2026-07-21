@@ -25,6 +25,10 @@ def test_build_payload_uses_runtime_query_results() -> None:
         nv_codec_headers="n12.2.72.0",
         cuda_base_image="nvidia/cuda:test",
         command_runner=lambda command: responses[tuple(command)],
+        python_base_image="python:test@sha256:" + "b" * 64,
+        voicevox_cpu="voicevox:cpu@test",
+        voicevox_gpu="voicevox:gpu@test",
+        required_font_path="/fonts/ipag.ttf",
     )
 
     assert payload["ffmpeg_version"] == "ffmpeg version N-12345"
@@ -39,6 +43,9 @@ def test_build_payload_uses_runtime_query_results() -> None:
     assert payload["filters"]["overlay_cuda"] is True
     assert payload["cuda_base_image"] == "nvidia/cuda:test"
     assert payload["nv_codec_headers"] == "n12.2.72.0"
+    assert payload["python_base_image"] == "python:test@sha256:" + "b" * 64
+    assert payload["voicevox"]["cpu"] == "voicevox:cpu@test"
+    assert payload["required_font_path"] == "/fonts/ipag.ttf"
 
 
 def test_write_build_info_writes_utf8_json(tmp_path: Path) -> None:

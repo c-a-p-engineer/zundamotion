@@ -13,6 +13,16 @@
     "sha256": "1beb1d21b4485962baeb2fff4f01e8b91faa6d1017567b07b8f26df1a93cbdfe",
     "expected_version_prefix": "ffmpeg version n8.1.2"
   },
+  "voicevox": {
+    "cpu_image": "voicevox/voicevox_engine:cpu-ubuntu22.04-0.24.1",
+    "cpu_digest": "sha256:a6a96326ffda12a7292b235a6ef43d299ca33849993e262b230320e17c8c2be8",
+    "gpu_image": "voicevox/voicevox_engine:nvidia-ubuntu24.04-0.24.1",
+    "gpu_digest": "sha256:07c2f53a61ad65ba73539ac759212127ff9c95a3815fff14c6b6f4904db89a98"
+  },
+  "font": {
+    "package": "fonts-ipafont-gothic",
+    "required_path": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf"
+  },
   "required": {
     "encoders": ["aac", "libx264", "libx265", "libmp3lame", "h264_nvenc", "hevc_nvenc"],
     "configure_flags": ["--enable-libfreetype", "--enable-libx264", "--enable-libx265", "--enable-libmp3lame", "--enable-ffnvcodec"]

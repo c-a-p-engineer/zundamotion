@@ -38,7 +38,7 @@ services:
     shm_size: "2gb"
 
   voicevox:
-    image: ${VOICEVOX_IMAGE:-voicevox/voicevox_engine:cpu-ubuntu22.04-latest}
+    image: ${VOICEVOX_IMAGE:-voicevox/voicevox_engine:cpu-ubuntu22.04-0.24.1@sha256:a6a96326ffda12a7292b235a6ef43d299ca33849993e262b230320e17c8c2be8}
     ports:
       - "50021:50021"
     shm_size: "2gb"

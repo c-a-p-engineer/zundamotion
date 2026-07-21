@@ -1,6 +1,6 @@
 services:
   voicevox:
-    image: voicevox/voicevox_engine:nvidia-ubuntu24.04-latest
+    image: voicevox/voicevox_engine:nvidia-ubuntu24.04-0.24.1@sha256:07c2f53a61ad65ba73539ac759212127ff9c95a3815fff14c6b6f4904db89a98
     runtime: nvidia
     gpus: all
     environment:

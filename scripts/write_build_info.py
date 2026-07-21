@@ -39,6 +39,10 @@ def build_payload(
     ffmpeg_source_sha256: str,
     nv_codec_headers: str | None,
     cuda_base_image: str | None,
+    python_base_image: str | None = None,
+    voicevox_cpu: str | None = None,
+    voicevox_gpu: str | None = None,
+    required_font_path: str | None = None,
     command_runner: CommandRunner = run_command,
 ) -> dict[str, object]:
     """Collect installed capabilities so metadata reflects the built image."""
@@ -52,6 +56,7 @@ def build_payload(
     return {
         "profile": profile,
         "python_version": python_version,
+        "python_base_image": python_base_image,
         "ffmpeg_version": ffmpeg_version,
         "ffmpeg_source_url": ffmpeg_source_url,
         "ffmpeg_source_sha256": ffmpeg_source_sha256,
@@ -69,6 +74,8 @@ def build_payload(
         },
         "cuda_base_image": cuda_base_image,
         "nv_codec_headers": nv_codec_headers,
+        "voicevox": {"cpu": voicevox_cpu, "gpu": voicevox_gpu},
+        "required_font_path": required_font_path,
     }
 
 
@@ -93,6 +100,10 @@ def main() -> int:
         ffmpeg_source_sha256=lock["ffmpeg"]["sha256"],
         nv_codec_headers=None,
         cuda_base_image=None,
+        python_base_image=f"{lock['python']['image']}@{lock['python']['image_digest']}",
+        voicevox_cpu=f"{lock['voicevox']['cpu_image']}@{lock['voicevox']['cpu_digest']}",
+        voicevox_gpu=f"{lock['voicevox']['gpu_image']}@{lock['voicevox']['gpu_digest']}",
+        required_font_path=lock["font"]["required_path"],
     )
     write_build_info(args.output, payload)
     return 0
