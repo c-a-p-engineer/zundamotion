@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -98,6 +99,45 @@ def _run_ffprobe(output_path: Path) -> dict:
     return json.loads(proc.stdout)
 
 
+def _first_line(command: list[str]) -> str:
+    return subprocess.check_output(command, cwd=ROOT, text=True).splitlines()[0]
+
+
+def _write_performance_baseline(
+    *, script_path: str, output_path: Path, metadata: dict, elapsed_seconds: float
+) -> None:
+    perf_path = ROOT / "output" / "perf" / "perf_summary.json"
+    perf = json.loads(perf_path.read_text(encoding="utf-8")) if perf_path.is_file() else {}
+    video = next(stream for stream in metadata["streams"] if stream.get("codec_type") == "video")
+    baseline = {
+        "run_id": perf.get("run_id"),
+        "python_version": sys.version.split()[0],
+        "ffmpeg_version": _first_line(["ffmpeg", "-version"]),
+        "render_path": "cpu",
+        "input_script": script_path,
+        "output": {
+            "width": video.get("width"),
+            "height": video.get("height"),
+            "fps": video.get("avg_frame_rate"),
+            "duration": float(metadata.get("format", {}).get("duration") or 0.0),
+            "size_bytes": output_path.stat().st_size,
+        },
+        "total_wall_seconds": round(elapsed_seconds, 3),
+        "phase_ms": perf.get("phase_ms", {}),
+        "ffmpeg_calls": perf.get("ffmpeg_calls", 0),
+        "ffprobe_calls": perf.get("ffprobe_calls", 0),
+        "cache_hit": perf.get("cache_hit", 0),
+        "cache_miss": perf.get("cache_miss", 0),
+        "subtitle_burn_ms": perf.get("subtitle_burn_ms", 0.0),
+        "line_clips": perf.get("line_clips", 0),
+        "scene_concat_ms": perf.get("scene_concat_ms", 0.0),
+        "ffprobe": metadata,
+    }
+    (ROOT / "output" / "test_smoke" / "performance-baseline.json").write_text(
+        json.dumps(baseline, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
 def _expected_video(script: Path) -> tuple[int, int, int]:
     data = yaml.safe_load(script.read_text(encoding="utf-8")) or {}
     video = dict(EXPORT_PRESETS.get(str(data.get("export_preset", "")).lower(), {}).get("video", {}))
@@ -144,6 +184,7 @@ def test_sample_script_renders_valid_mp4(script_path: str, tmp_path: Path) -> No
         "-o",
         str(output_path),
     ]
+    started_at = time.perf_counter()
     with stdout_path.open("w", encoding="utf-8") as stdout_f, stderr_path.open(
         "w", encoding="utf-8"
     ) as stderr_f:
@@ -177,6 +218,12 @@ def test_sample_script_renders_valid_mp4(script_path: str, tmp_path: Path) -> No
     metadata = _run_ffprobe(output_path)
     (output_dir / "ffprobe-result.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    _write_performance_baseline(
+        script_path=script_path,
+        output_path=output_path,
+        metadata=metadata,
+        elapsed_seconds=time.perf_counter() - started_at,
     )
     duration = float(metadata.get("format", {}).get("duration") or 0.0)
     streams = metadata.get("streams") or []
