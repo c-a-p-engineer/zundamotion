@@ -17,6 +17,7 @@ AI / Codex 向けの常時ルールはリポジトリ直下の `AGENTS.md`、低
 
 - [`guides/setup_and_runtime.md`](./guides/setup_and_runtime.md): セットアップ、CLI 実行、ログ形式、GPU/NVENC 確認
 - [`guides/runtime_version_policy.md`](./guides/runtime_version_policy.md): runtime lock、digest、固定値更新、ロールバック
+- [`guides/reproducibility_contract.md`](./guides/reproducibility_contract.md): 入力・メディア意味・byte 一致の再現性契約と検証
 - [`guides/project_structure.md`](./guides/project_structure.md): 技術スタックとリポジトリ構成
 - [`guides/python_coding_rules.md`](./guides/python_coding_rules.md): Python コード規約と AI 向け分割基準
 - [`guides/source_refactoring_plan.md`](./guides/source_refactoring_plan.md): 既存 Python ソースを段階的に分割する計画

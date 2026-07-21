@@ -27,6 +27,8 @@
   - `README.md`
 - Docker runtime、digest、固定ランタイム更新を触るとき
   - `docs/guides/runtime_version_policy.md`
+- 再現性、乱数、media 比較、cache key を触るとき
+  - `docs/guides/reproducibility_contract.md`
 - 性能、並列度、キャッシュ、FFmpeg 経路を触るとき
   - `docs/guides/performance_regression_ledger.md`
   - `docs/guides/performance_tuning.md`

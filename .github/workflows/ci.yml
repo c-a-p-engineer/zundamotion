@@ -87,6 +87,11 @@ jobs:
           ffprobe -version | head -n 1
           python -m pytest tests/test_smoke_render_samples.py -m smoke
 
+      - name: Verify no-voice media reproducibility
+        run: |
+          python scripts/verify_reproducibility.py scripts/smoke_minimal.yaml \
+            --no-voice --hw-encoder cpu --output-dir output/reproducibility
+
       - name: Upload render smoke diagnostics
         if: always()
         uses: actions/upload-artifact@v6
@@ -101,3 +106,4 @@ jobs:
             output/test_smoke/*.stderr.log
             output/test_smoke/ffprobe-result.json
             output/test_smoke/performance-baseline.json
+            output/reproducibility/reproducibility-report.json
