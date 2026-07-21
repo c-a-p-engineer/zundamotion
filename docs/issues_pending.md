@@ -1,5 +1,14 @@
 # 未確定の課題
 
+## 後続リファクタリング（P0対象外）
+
+- 発生時刻 / 背景: 2026-07-22 / P0-5の完了範囲を、PipelineとAudioPhaseの第一段階責務分割、公開互換性保護、再計測、後続計画記録までとして正式化した。
+- 完了済み: Pipeline reporting分離、高レベルentry分離、AudioPhase公開互換層化、monkeypatch seam保護、500行超ファイルの再計測、依存順記録、characterization testとスモークによる保護。
+- 後続対象: `audio_phase_run.py`、`scene_standard_renderer.py`、`scene_preparation.py`、`scene_fast_path.py`、`overlays.py`、`subtitles/png.py`、`ffmpeg_ops.py`、`ffmpeg_capabilities.py`、`clip_renderer.py`、`cache.py`、その他500行超ファイル。
+- 懸念点: 「P0完了」を全リファクタリング完了または全ファイル500行以下達成と誤解すると、長大関数と責務集中が追跡から消える。
+- 提案 / 対応案: `guides/source_refactoring_plan.md` の依存順と保護テストに従い、1 PR 1責務で追加分割する。FFmpeg処理方式やcache keyの変更を責務分割へ混ぜない。
+- 履歴 / 参照: `docs/guides/source_refactoring_plan.md` の「P0完了範囲」「後続リファクタリング」を正とする。
+
 ## 歌唱機能 (`song`) の採用見送り判断
 - 発生時刻 / 背景: 2026-05-24 / VOICEVOX song API を使った歌唱機能を試作したが、Zundamotion の本来用途との整合性を再評価した。
 - 問題点: 1) 長い歌を 1 本として扱うと字幕 cue が長くなり、字幕運用と相性が悪い。2) 長時間歌唱を YAML で書くコストが高い。3) 楽曲や BGM との組み合わせは同期や責務分離の複雑度を上げる。4) 動画作成ツール本体へ歌唱機能を抱えると将来保守コストが高い。

@@ -20,7 +20,7 @@ AI / Codex 向けの常時ルールはリポジトリ直下の `AGENTS.md`、低
 - [`guides/reproducibility_contract.md`](./guides/reproducibility_contract.md): 入力・メディア意味・byte 一致の再現性契約と検証
 - [`guides/project_structure.md`](./guides/project_structure.md): 技術スタックとリポジトリ構成
 - [`guides/python_coding_rules.md`](./guides/python_coding_rules.md): Python コード規約と AI 向け分割基準
-- [`guides/source_refactoring_plan.md`](./guides/source_refactoring_plan.md): 既存 Python ソースを段階的に分割する計画
+- [`guides/source_refactoring_plan.md`](./guides/source_refactoring_plan.md): P0第一段階の完了範囲と、既存 Python ソースを後続で段階分割する計画
 - [`guides/refactoring_check.md`](./guides/refactoring_check.md): リファクタリング後のテスト、台本ロード、動画生成確認
 - [`guides/performance_tuning.md`](./guides/performance_tuning.md): 高速化オプションと上級者向け運用メモ
 - [`guides/submodule.md`](./guides/submodule.md): 利用側プロジェクトへ git submodule として取り込む手順
@@ -39,5 +39,5 @@ AI / Codex 向けの常時ルールはリポジトリ直下の `AGENTS.md`、低
 
 ## Notes
 
-- [`issues_pending.md`](./issues_pending.md): 未確定の課題
+- [`issues_pending.md`](./issues_pending.md): 未確定の課題とP0対象外の後続リファクタリング
 - [`user_simple_plugin.md`](./user_simple_plugin.md): ユーザープラグイン例
