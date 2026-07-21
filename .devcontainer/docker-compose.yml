@@ -1,10 +1,10 @@
-version: "3.8"
-
 services:
   app:
     build:
       context: ..
-      dockerfile: .devcontainer/${ZUNDA_DOCKER:-Dockerfile.cpu}
+      dockerfile: .devcontainer/Dockerfile
+      args:
+        RUNTIME_IMAGE: ${ZUNDAMOTION_RUNTIME_CPU_IMAGE:?run scripts/export_runtime_env.py first}
     working_dir: /workspace
     volumes:
       - ..:/workspace:cached
@@ -21,7 +21,9 @@ services:
     profiles: ["runner"]
     build:
       context: ..
-      dockerfile: .devcontainer/${ZUNDA_DOCKER:-Dockerfile.cpu}
+      dockerfile: .devcontainer/Dockerfile
+      args:
+        RUNTIME_IMAGE: ${ZUNDAMOTION_RUNTIME_CPU_IMAGE:?run scripts/export_runtime_env.py first}
     working_dir: /workspace
     volumes:
       - ..:/workspace:cached

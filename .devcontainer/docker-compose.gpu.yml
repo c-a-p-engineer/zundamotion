@@ -1,8 +1,8 @@
 services:
   app:
     build:
-      context: ..
-      dockerfile: .devcontainer/Dockerfile.gpu
+      args:
+        RUNTIME_IMAGE: ${ZUNDAMOTION_RUNTIME_GPU_IMAGE:?run scripts/export_runtime_env.py first}
     runtime: nvidia
     gpus: all
     environment:
@@ -10,8 +10,8 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
   render:
     build:
-      context: ..
-      dockerfile: .devcontainer/Dockerfile.gpu
+      args:
+        RUNTIME_IMAGE: ${ZUNDAMOTION_RUNTIME_GPU_IMAGE:?run scripts/export_runtime_env.py first}
     runtime: nvidia
     gpus: all
     environment:

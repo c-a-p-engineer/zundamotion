@@ -12,7 +12,7 @@
 
 ## 必要なもの
 
-- 最新安定版の CPython 3.14 系（パッチ版は固定しない）
+- `runtime.lock.json` で固定した CPython 3.14 系
 - FFmpeg / ffprobe
 - VOICEVOX Engine
 - Docker / Dev Container（再現可能な公式推奨環境）
@@ -41,27 +41,17 @@ cd zundamotion
 
 VS Code でプロジェクトを開き、「Reopen in Container」を選択します。
 
-GPU を使う場合は `.devcontainer/gpu/devcontainer.json` を選択します。この定義は
-`.devcontainer/docker-compose.gpu.yml` を重ね、`app` と `render` の build に
-`.devcontainer/Dockerfile.gpu` を明示します。`.env` の `ZUNDA_DOCKER` に依存しないため、
-CPU/GPU の選択が環境変数の残り値で変わりません。
+CPU は base Compose、GPU は `.devcontainer/docker-compose.gpu.yml` を重ねます。どちらも
+単一の薄い `.devcontainer/Dockerfile` を使用し、lock から得た digest 固定 runtime image を
+`RUNTIME_IMAGE` として渡します。
 
 - ホスト側で NVIDIA Container Toolkit と GPU ドライバを有効化する
 - コンテナ内で `nvidia-smi` と `ffmpeg -filters` を確認する
 - GPU 版 VOICEVOX が必要な場合だけ、`docker-compose.voicevox-gpu.yml` を追加で重ねる
 
-CPU 用・GPU 用の公式 Dockerfile はどちらも CPython 3.14 系を使います。GPU
-Dockerfile は CUDA ベースイメージ上に Python 3.14 の仮想環境を作るため、ホストの
-`python3` の版には依存しません。
-
-CPU/GPU Dockerfile は同じ固定 FFmpeg commit からソースビルドします。完成したイメージには
-実行時の `ffmpeg -version`、`ffmpeg -buildconf`、エンコーダー・フィルタ検出結果を記録した
-`/opt/zundamotion-build-info/build-info.json` が含まれます。CPU/GPU Dockerfile と本書の
-固定値が一致することは、リポジトリ直下で次のコマンドにより検査できます。
-
-```bash
-python scripts/check_runtime_versions.py
-```
+runtime image には実行時に収集した `/opt/zundamotion-build-info/build-info.json` が含まれます。
+lock の検査、初回 publish、月次更新、手動更新、ロールバックは
+[runtime_version_policy.md](./runtime_version_policy.md) を正として参照してください。
 
 Docker ログで追いたい場合:
 

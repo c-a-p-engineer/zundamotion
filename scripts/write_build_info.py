@@ -35,7 +35,8 @@ def contains_capability(listing: str, capability: str) -> bool:
 def build_payload(
     *,
     profile: str,
-    ffmpeg_commit: str,
+    ffmpeg_source_url: str,
+    ffmpeg_source_sha256: str,
     nv_codec_headers: str | None,
     cuda_base_image: str | None,
     command_runner: CommandRunner = run_command,
@@ -50,33 +51,24 @@ def build_payload(
 
     return {
         "profile": profile,
-        "ffmpeg": {
-            "requested_commit": ffmpeg_commit,
-            "version": ffmpeg_version,
-            "configure_options": configure_options,
-            "encoders": {
-                name: contains_capability(encoders, name)
-                for name in ("libx264", "libx265", "h264_nvenc", "hevc_nvenc")
-            },
-            "filters": {
-                "libfreetype": "--enable-libfreetype" in configure_options,
-                **{
-                    name: contains_capability(filters, name)
-                    for name in (
-                        "overlay_cuda",
-                        "scale_cuda",
-                        "scale_npp",
-                        "overlay_opencl",
-                        "scale_opencl",
-                    )
-                },
+        "python_version": python_version,
+        "ffmpeg_version": ffmpeg_version,
+        "ffmpeg_source_url": ffmpeg_source_url,
+        "ffmpeg_source_sha256": ffmpeg_source_sha256,
+        "ffmpeg_configure": configure_options,
+        "encoders": {
+            name: contains_capability(encoders, name)
+            for name in ("libx264", "libx265", "h264_nvenc", "hevc_nvenc", "aac")
+        },
+        "filters": {
+            "libfreetype": "--enable-libfreetype" in configure_options,
+            **{
+                name: contains_capability(filters, name)
+                for name in ("overlay", "drawtext", "overlay_cuda", "scale_cuda", "scale_npp")
             },
         },
-        "python": {"version": python_version},
-        "cuda": {
-            "base_image": cuda_base_image,
-            "nv_codec_headers": nv_codec_headers,
-        },
+        "cuda_base_image": cuda_base_image,
+        "nv_codec_headers": nv_codec_headers,
     }
 
 
@@ -88,7 +80,8 @@ def write_build_info(output: Path, payload: dict[str, object]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=("cpu", "gpu"), required=True)
-    parser.add_argument("--ffmpeg-commit", required=True)
+    parser.add_argument("--ffmpeg-source-url", required=True)
+    parser.add_argument("--ffmpeg-source-sha256", required=True)
     parser.add_argument("--nv-codec-headers")
     parser.add_argument("--cuda-base-image")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
@@ -99,7 +92,8 @@ def main() -> int:
     args = parse_args()
     payload = build_payload(
         profile=args.profile,
-        ffmpeg_commit=args.ffmpeg_commit,
+        ffmpeg_source_url=args.ffmpeg_source_url,
+        ffmpeg_source_sha256=args.ffmpeg_source_sha256,
         nv_codec_headers=args.nv_codec_headers,
         cuda_base_image=args.cuda_base_image,
     )

@@ -1,0 +1,72 @@
+name: Runtime update
+
+on:
+  schedule:
+    - cron: "17 18 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Detect official stable updates
+        id: detect
+        run: |
+          set +e
+          python scripts/check_runtime_updates.py --write
+          code=$?
+          set -e
+          if [ "$code" = 0 ]; then echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "$code" != 10 ]; then exit "$code"; fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+      - name: Set up Docker Buildx
+        if: steps.detect.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@v3
+      - name: Build CPU and GPU runtime images
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          python scripts/check_runtime_lock.py --allow-unpublished-images
+          python scripts/build_runtime_images.py --load
+      - name: Validate runtime metadata and required encoders
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          python scripts/validate_runtime_image.py --image zundamotion-runtime-cpu:candidate --profile cpu
+          python scripts/validate_runtime_image.py --image zundamotion-runtime-gpu:candidate --profile gpu
+      - name: Run full validation suite
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pytest -m "not smoke" --ignore=tests/test_audio_pcm_concat_integration.py
+          python -m pytest tests/test_audio_pcm_concat_integration.py
+          python -m build
+      - name: Log in to GHCR
+        if: steps.detect.outputs.changed == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push and record immutable digests
+        if: steps.detect.outputs.changed == 'true'
+        run: python scripts/build_runtime_images.py --push --update-lock
+      - name: Create update pull request
+        if: steps.detect.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/runtime-update
+          delete-branch: true
+          title: "build: update runtime images"
+          commit-message: "build: update runtime images"
+          body: |
+            Automated runtime update. The candidate was built, metadata-validated, and tested before GHCR publish.
+            GPU encoding smoke is intentionally not run on the GitHub-hosted runner.

@@ -20,26 +20,25 @@ def test_build_payload_uses_runtime_query_results() -> None:
 
     payload = build_payload(
         profile="gpu",
-        ffmpeg_commit="a" * 40,
+        ffmpeg_source_url="https://example.test/ffmpeg.tar.xz",
+        ffmpeg_source_sha256="a" * 64,
         nv_codec_headers="n12.2.72.0",
         cuda_base_image="nvidia/cuda:test",
         command_runner=lambda command: responses[tuple(command)],
     )
 
-    assert payload["ffmpeg"]["version"] == "ffmpeg version N-12345"
-    assert payload["ffmpeg"]["encoders"] == {
+    assert payload["ffmpeg_version"] == "ffmpeg version N-12345"
+    assert payload["encoders"] == {
         "libx264": True,
         "libx265": False,
         "h264_nvenc": True,
         "hevc_nvenc": False,
+        "aac": False,
     }
-    assert payload["ffmpeg"]["filters"]["libfreetype"] is True
-    assert payload["ffmpeg"]["filters"]["overlay_cuda"] is True
-    assert payload["ffmpeg"]["filters"]["scale_opencl"] is True
-    assert payload["cuda"] == {
-        "base_image": "nvidia/cuda:test",
-        "nv_codec_headers": "n12.2.72.0",
-    }
+    assert payload["filters"]["libfreetype"] is True
+    assert payload["filters"]["overlay_cuda"] is True
+    assert payload["cuda_base_image"] == "nvidia/cuda:test"
+    assert payload["nv_codec_headers"] == "n12.2.72.0"
 
 
 def test_write_build_info_writes_utf8_json(tmp_path: Path) -> None:

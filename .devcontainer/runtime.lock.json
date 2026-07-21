@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "python": {
+    "version": "3.14.6",
+    "series": "3.14",
+    "source_url": "https://www.python.org/ftp/python/3.14.6/Python-3.14.6.tar.xz",
+    "source_sha256": "143b1dddefaec3bd2e21e3b839b34a2b7fb9842272883c576420d605e9f30c63",
+    "cpu_base_image": "python:3.14.6-slim-bookworm",
+    "cpu_base_digest": "sha256:f70215e5dbe2a47dee6d23f9c6d358bf3c148f59cce2fd165b61118e9d80f2bb"
+  },
+  "ffmpeg": {
+    "version": "8.1.2",
+    "source_url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+    "source_sha256": "23644ca7537b0f499d300eed9c9cea8be650bc37f5f7abaf84ce361d5be3e2c9"
+  },
+  "gpu": {
+    "cuda_base_image": "nvidia/cuda:13.0.0-devel-ubuntu22.04",
+    "cuda_base_digest": "sha256:e2643be902109ce09777070c45834c74c76f89a1df84ade6455c0e8013312f3f",
+    "nv_codec_headers": "n12.2.72.0"
+  },
+  "runtime_images": {
+    "cpu": {"repository": "ghcr.io/c-a-p-engineer/zundamotion-runtime-cpu", "tag": "python-3.14.6-ffmpeg-8.1.2", "digest": null},
+    "gpu": {"repository": "ghcr.io/c-a-p-engineer/zundamotion-runtime-gpu", "tag": "python-3.14.6-ffmpeg-8.1.2", "digest": null}
+  }
+}

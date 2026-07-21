@@ -2,6 +2,11 @@
 
 このドキュメントは、Zundamotion を **利用側プロジェクトに git submodule として取り込み**、動画生成機能を呼び出すための手順をまとめたものです。
 
+> ランタイム image は親プロジェクト側で再コンパイルせず、Zundamotion の
+> `runtime.lock.json` が示す GHCR digest を利用します。runtime の準備・更新方法は
+> [`runtime_version_policy.md`](./runtime_version_policy.md) を正とし、この文書中の
+> 旧来の Dockerfile 例を新規プロジェクトへ複製しないでください。
+
 ## 推奨構成
 
 ```
