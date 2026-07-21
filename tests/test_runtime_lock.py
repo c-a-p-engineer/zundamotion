@@ -1,31 +1,35 @@
 from __future__ import annotations
 
+import copy
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from runtime_lock import load_lock, runtime_build_args, runtime_image_ref, validate_lock
+from runtime_lock import ffmpeg_download_url, load_lock, python_image_ref, validate_lock
 
 
-def test_committed_lock_is_valid_for_bootstrap() -> None:
-    assert validate_lock(load_lock(), allow_unpublished_images=True) == []
+def test_committed_lock_is_valid() -> None:
+    assert validate_lock(load_lock()) == []
 
 
-def test_runtime_build_args_are_derived_from_lock() -> None:
+def test_refs_are_derived_from_current_lock() -> None:
     lock = load_lock()
-    cpu = runtime_build_args(lock, "cpu")
-    gpu = runtime_build_args(lock, "gpu")
+    assert ffmpeg_download_url(lock).endswith(
+        f"/{lock['ffmpeg']['release_tag']}/{lock['ffmpeg']['asset']}"
+    )
+    assert python_image_ref(lock) == (
+        f"{lock['python']['image']}@{lock['python']['image_digest']}"
+    )
 
-    assert cpu["FFMPEG_SOURCE_SHA256"] == lock["ffmpeg"]["source_sha256"]
-    assert lock["python"]["cpu_base_digest"] in cpu["CPU_BASE_IMAGE"]
-    assert lock["gpu"]["cuda_base_digest"] in gpu["CUDA_BASE_IMAGE"]
+
+def test_floating_release_is_rejected() -> None:
+    lock = copy.deepcopy(load_lock())
+    lock["ffmpeg"]["release_tag"] = "latest"
+    assert "ffmpeg.release_tag must be a fixed autobuild-* tag" in validate_lock(lock)
 
 
-def test_unpublished_runtime_cannot_be_used_as_a_dev_image() -> None:
-    try:
-        runtime_image_ref(load_lock(), "cpu")
-    except ValueError as exc:
-        assert "not published" in str(exc)
-    else:
-        raise AssertionError("unpublished image must not have a runtime reference")
+def test_invalid_archive_checksum_is_rejected() -> None:
+    lock = copy.deepcopy(load_lock())
+    lock["ffmpeg"]["sha256"] = "not-a-checksum"
+    assert "ffmpeg.sha256 must be a 64-character lowercase SHA256" in validate_lock(lock)
