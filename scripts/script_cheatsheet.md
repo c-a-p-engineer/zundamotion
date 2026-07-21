@@ -725,6 +725,19 @@ lines:
 - 行ごとの `speed` / `pitch` / `voice_style` は VOICEVOX の音声チューニングに利用します。
 - `defaults.characters.<name>.speaker_id` や行の `speaker_id` で話者を指定してください。
 - `audio.master_loudnorm: true` または `audio.master_loudnorm: {i: -16, lra: 11, tp: -1.5}` で最終音声に `loudnorm` を適用できます。
+- `bgm_layers[].loop: true` は音源末尾で先頭へ戻ります。`bgm.action` は `start` / `stop` / `resume`、`fade` はその境界の秒数です。
+
+### J カット / L カット
+
+```yaml
+lines:
+  - text: "前の声を次の映像へ残します"
+    l_cut: {duration: 0.3, volume: 0.8}
+  - text: "次の映像です"
+```
+
+- `l_cut` は前行音声の末尾を次行映像の冒頭へ重ねます。
+- `j_cut.duration` は次行の映像開始を遅らせるための pre-padding を持ちますが、音声先行の意味動作は現在「要再検証」です。
 
 ## Topic（チャプター）
 

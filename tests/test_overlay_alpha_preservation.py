@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 import zundamotion.components.video.overlays as overlays_module
+from zundamotion.components.config.validate_overlays import _validate_mode
 from zundamotion.components.video.overlays import OverlayMixin
 from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
 
@@ -49,6 +50,24 @@ def test_overlay_chain_keeps_alpha_mask_when_effects_present():
     assert any("alphaextract,lut=y='val*0.850000'" in part for part in filters)
     # Final merge should recombine color and preserved alpha
     assert any("alphamerge[ov0]" in part for part in filters)
+
+
+def test_chroma_overlay_builds_colorkey_filter():
+    dummy = _DummyOverlay()
+    filters, _ = dummy._build_overlay_filter_parts(  # type: ignore[attr-defined]
+        "[1:v]",
+        0,
+        {
+            "mode": "chroma",
+            "chroma": {"key_color": "#00FF00", "similarity": 0.2, "blend": 0.1},
+        },
+    )
+    assert any("colorkey=0x00FF00:0.2:0.1" in part for part in filters)
+
+
+def test_supported_blend_modes_are_accepted():
+    for mode in ("screen", "add", "multiply", "lighten"):
+        _validate_mode({"mode": "blend", "blend_mode": mode}, "overlay", "test")
 
 
 def test_overlay_blink_is_applied_to_alpha_chain_only():

@@ -1,65 +1,80 @@
-# Zundamotion 機能一覧（実装状況付き）
+# Zundamotion 機能一覧
 
-## 実装済み機能（コード確認ベース）
-| カテゴリ | 機能 | 概要 | 主な実装/ソース |
+判定は実装コード、テスト、同梱サンプルの順に突合した結果です。状態は「実装済み」
+「一部実装」「未実装」「採用見送り」「要再検証」だけを使用します。
+
+## 映像・配置・合成
+
+| 機能 | 状態 | 対応範囲・制約 | 根拠 |
 | --- | --- | --- | --- |
-| 台本/検証 | YAMLロード・検証・デフォルト適用 | `defaults/characters_persist`や字幕/解像度をバリデーションし、欠損を補完 | zundamotion/components/config/validate.py, components/script/loader.py |
-| 音声合成 | VOICEVOX音声生成＋キャッシュ | speaker設定に従い音声を生成しキャッシュ共有 | components/audio/generator.py, components/audio/voicevox_client.py |
-| クリップ生成 | 背景画像/動画の正規化とシーン連結 | contain/cover/fit_width等でリサイズし、行ごとのクリップをconcat | utils/ffmpeg_ops.build_background_fit_steps, components/video/renderer.py, components/pipeline_phases/video_phase/scene_renderer.py |
-| キャラ配置 | アンカー＋座標＋スケール配置、座標・スケール移動、揺れ系エフェクト | `move` で行クリップ内の任意座標移動とスケール補間、shake/bob/swayをoverlay式で表現、enter/leave余白計算あり | components/video/clip/movement.py, components/video/clip/effects/resolve.py |
-| キャラ配置 | シーン内の表示状態継承 | `characters_persist: true` では表情だけを変更しても scale/position 等を維持。`scene.character_defaults` と `reset_characters` に対応し、シーン境界では状態を破棄 | components/pipeline_phases/video_phase/character_tracker.py |
-| キャラ配置 | 立ち絵PNG色替えフィルター | 汎用画像フィルターキャッシュを使い、色相・彩度・明度の事前変換、透明度維持、キャッシュ再利用に対応。`targets` による上部/下部/矩形 + 色域指定の部分色替えと、`asset_name` での別名キャラクター間素材共有も可能 | components/video/image_color_filter_cache.py, components/video/character_image_resolver.py |
-| 背景/画面効果 | 背景揺れ・画面揺れ | pad+crop方式でシェイク | components/video/clip/effects/resolve.py |
-| オーバーレイ | 画像レイヤー・前景オーバーレイ・PiP | image_layers/fg_overlays/insertでロゴ・挿入映像を重畳 | components/video/renderer.py, components/pipeline_phases/video_phase/scene_renderer.py |
-| オーバーレイ | テキストバッジ | `badge` / `badges` から固定サイズPNGを生成し、scene/line 単位や top-level 共有定義の重要ラベルを動画上部へ重畳 | components/video/badge_overlay_cache.py, components/pipeline_phases/video_phase/scene_renderer.py, components/script/loader.py |
-| 字幕 | PNG字幕焼き込み＋SRT/ASS出力、バウンス効果 | SubtitlePNGRendererでスタイル適用、text:bounce_text効果あり | components/subtitles, plugins/builtin/subtitle_text/plugin.py, main.py CLI `--subtitle-file` |
-| トランジション | xfade＋音声acrossfade（scene.transition） | fade/dissolve/wipe/zoom等のxfade typeを指定可能 | utils/ffmpeg_ops.apply_transition, components/pipeline_phases/finalize_phase.py |
-| BGM/SE | BGMミックス（音量・フェード・ディレイ）＋複数SE合成 | amixでBGMと映像音声を混合、fade in/out・delay対応 | utils/ffmpeg_audio.add_bgm_to_video, mix_audio_tracks, components/pipeline_phases/bgm_phase.py |
-| 音声形式 | 中間PCM WAV・最終AAC-LC | 無音、VOICEVOX加工、voice_layers、SE、音声filterはpcm_s16le WAV。行/シーンのPTSを0始点に正規化し、最終MP4をAAC-LCで検証。利用者向け設定は `scripts/script_cheatsheet.md` の「BGM と音声チューニング」を参照 | utils/ffmpeg_params.py, utils/ffmpeg_audio.py, utils/ffmpeg_probe.py |
-| 連結 | DTS安全なscene/字幕断片concat | 安全な入力はstream copy。AAC encoder delay/paddingを含む複数入力は映像copy＋音声AAC再エンコード | utils/ffmpeg_ops.concat_videos_safe |
-| エフェクト拡張 | プラグイン式オーバーレイ効果 | blur/vignette/eq/hue/curves/unsharp/lut3d/rotate等を登録・適用 | plugins/builtin/overlay_basic/plugin.py, components/video/overlay_effects.py |
-| 字幕エフェクト拡張 | バウンス字幕プラグイン | text:bounce_textで上下バウンド | plugins/builtin/subtitle_text/plugin.py |
-| 進捗/出力補助 | タイムライン出力・ログ（JSON/KV/ファイル） | timeline.md/csv生成、ログ形式切替 | timeline.py, main.py |
-| 性能 | HWエンコーダ自動検出＋スレッド調整 | GPU/CPUを判定し、フィルタ/concatスレッドを自動制御 | utils/ffmpeg_hw.py, components/pipeline_phases/video_phase/scene_renderer.py（auto-tune） |
-| 出力 | 書き出しプリセット | YouTube 1080p/1440p、Shorts、draft の解像度・fps・音声設定を一度解決し、全Phase・Renderer・キャッシュキーで共有 | utils/export_presets.py, utils/ffmpeg_params.py, pipeline.py |
+| 背景パン・ズーム / Ken Burns | 実装済み | `bg:pan_zoom` / `bg:ken_burns` の単一区間補間 | `clip/effects/resolve.py`, `test_background_pan_zoom_effect.py` |
+| キャラクター位置移動 | 実装済み | `move.from` から行の最終位置へ x/y を補間 | `clip/movement.py`, `test_character_movement.py` |
+| キャラクタースケール補間 | 実装済み | `move.from.scale` から最終 scale へ補間 | `clip/movement.py`, `test_character_movement.py` |
+| キャラクター回転 | 一部実装 | overlay effect の `rotate` は対応。`move` と統合した回転補間は未対応 | `overlay_effects.py`, `test_overlay_effects_registry.py` |
+| 複数キーフレーム | 未実装 | pan/zoom と move は開始・終了の単一区間のみ | `clip/movement.py`, `clip/effects/resolve.py` |
+| クロマキー | 実装済み | `fg_overlays.mode: chroma`、key color/similarity/blend | `overlays.py`, `validate_overlays.py` |
+| blend mode | 実装済み | `screen` / `add` / `multiply` / `lighten` | `overlays.py`, `validate_overlays.py`, `sample_registry_smoke.yaml` |
+| image layers | 実装済み | show/hide、複数 layer、fade | `scene_preparation.py`, `test_script_loader.py` |
+| 前景 overlay / PiP | 実装済み | 静止画・動画、位置、scale、timing、loop | `overlays.py`, `sample_registry_smoke.yaml` |
+| overlay blink | 実装済み | interval/duty/min/max opacity、alpha のみを変調 | `overlays.py`, `test_overlay_alpha_preservation.py` |
+| text badge | 実装済み | top-level/scene/line、timing、show/hide | `badge_overlay_cache.py`, `test_badge_overlay_cache.py` |
+| キャラクター色替え | 実装済み | hue/saturation/brightness、対象領域・色域 | `image_color_filter_cache.py`, `test_scene_cache_fingerprint.py` |
+| キャラクター flip | 実装済み | `flip_x` / `flip_y`、顔差分にも継承 | `clip/characters.py`, `test_scene_renderer_subtitle_flow.py` |
+| LUT | 一部実装 | overlay plugin の `lut3d` は対応。全 timeline の管理 UI/preview はない | `plugins/builtin/overlay_basic`, `test_overlay_effects_registry.py` |
+| ノイズ effect | 未実装 | blur/unsharp/vignette はあるが noise preset はない | `plugins/builtin/overlay_basic` |
+| 動画素材の速度変更 | 実装済み | `insert.speed` 0.25〜4.0、映像 PTS と音声 atempo を同期 | `clip_renderer.py`, `test_clip_renderer_insert_speed.py` |
 
-## 機能優先度表（計画 + 実装状況）
-| カテゴリ | 機能名 | 優先度 | 実装状況 | 用途説明 |
-| --- | --- | --- | --- | --- |
-| カット・トリム | カット / トリム / 分割 | MVP | 実装済（台本→行クリップ生成/concat） | シナリオに沿って素材を配置する基本操作 |
-| 画面構図 | クロップ / アスペクト比調整 | MVP | 実装済（contain/cover/fit_width/fit_height） | 必要な範囲だけ切り出しレイアウトを整える |
-| 画面構図 | パン & ズーム（Ken Burns） | MVP | 未実装 | 静止画や定点動画に動きを付ける |
-| 画面構図 | 位置・スケール・回転アニメーション | MVP | 一部実装（座標・スケール補間、shake/bob/sway＋rotate。複数キーフレーム未対応） | スライドイン/アウトや軽いズーム演出 |
-| トランジション | フェードイン / フェードアウト | MVP | 実装済（xfade=fade） | シンプルな場面転換や開始/終了の自然な繋ぎ |
-| トランジション | クロスディゾルブ / スライド / ズーム | MVP | 実装済（xfade type指定でdissolve/wipeleft/zoom等） | 基本的なシーン間遷移で雰囲気を演出 |
-| テキスト | テロップ / タイトル（位置・スタイル・簡易アニメ） | MVP | 実装済（PNG字幕＋bounce effect、SRT/ASS出力） | 字幕・見出しを表示して情報を補足 |
-| オーバーレイ | PNG/ロゴ透過オーバーレイ | MVP | 実装済（image_layers/fg_overlays/insertで重畳） | ロゴや枠などの静的重ね合わせ |
-| オーディオ | 音量調整 / ミュート / フェード | MVP | 実装済（BGM volume・fade、amix） | ナレーションやBGMの音量バランスを取る |
-| オーディオ | BGM / 効果音トラック（ループ） | MVP | 一部実装（BGM/SEミックス・delay、明示ループ未対応） | シーンを跨いでBGMを敷き詰める |
-| コンポジット | ピクチャーインピクチャー（ワイプ） | 優先高 | 実装済（動画insertを正規化して重畳） | 画面隅に別映像を重ねる実況/解説用途 |
-| 速度 | 速度変更（スロー / 早送り） | 優先高 | 未実装 | テンポ調整や尺合わせ |
-| トランジション | プリセット系（グリッチ / フラッシュ） | 優先高 | 一部実装（xfade内蔵のwipe系のみ、グリッチ未対応） | 目立つ場面転換のプリセット化 |
-| 色調整 | 明るさ・コントラスト・彩度・色相 | 優先高 | 実装済（eq/hue/curvesフィルタ） | 基本的な見た目補正 |
-| 色調整 | ぼかし / シャープ / ビネット / ノイズ | 優先高 | 一部実装（gblur/unsharp/vignette、ノイズ未対応） | 雰囲気付けや視線誘導 |
-| コンポジット | ブレンドモード（加算/乗算/スクリーン） | 優先高 | 未実装 | レイヤー合成で雰囲気や光演出を追加 |
-| オーディオ | クロスフェード / Jカット / Lカット | 優先高 | 一部実装（シーン間acrossfade、J/Lカット未対応） | 映像より先/後で音を繋げる |
-| オーディオ | EQ / コンプレッサー / リバーブ | 優先高 | 未実装（オーディオEQ/comp/reverbなし） | ざっくりと音質とラウドネスを整える |
-| コンポジット | クロマキー（グリーンバック） | 将来候補 | 未実装 | 合成撮影用の背景置換 |
-| 画面構図 | 手ブレ補正（スタビライズ） | 将来候補 | 未実装 | 手持ち映像の揺れ抑制 |
-| 色調整 | LUT / カラーグレーディング | 将来候補 | 一部実装（lut3dフィルタのみ） | 映画調など高度なトーン調整 |
-| オーバーレイ | オーバーレイ動画（フレア/パーティクル） | 将来候補 | 実装済（動画insertで重畳可） | 派手な装飾エフェクト |
-| 実務系 | テンプレート / プリセット管理 | 将来候補 | 未実装 | OP/EDやテロップスタイルの再利用 |
-| 実務系 | アセット管理 / プロキシ生成 | 将来候補 | 未実装 | 大容量素材を扱うワークフロー最適化 |
-| 実務系 | 複数シーケンス管理 | 将来候補 | 未実装 | 章ごとにタイムラインを分けて編集 |
-| 実務系 | 書き出しプリセット（解像度/ビットレート） | 将来候補 | 実装済 | 配信プラットフォーム別の最適設定出力。トランジション、concat再エンコード、BGM、loudnorm後も設定を維持 |
+## 音声・BGM
 
-## 設計ドキュメントリンク
-- YAMLスキーマ草案: `docs/design/yaml_schema_draft.md`
-- FFmpegフィルタ対応表: `docs/design/ffmpeg_filter_mapping.md`
-- パーサ＆filter_complex骨組み: `docs/design/parser_and_builder.md`
+| 機能 | 状態 | 対応範囲・制約 | 根拠 |
+| --- | --- | --- | --- |
+| BGM loop | 実装済み | `bgm_layers[].loop`、source position wrap | `bgm_phase.py`, `test_bgm_phase_loop.py` |
+| BGM start/stop/resume | 実装済み | timeline event で制御 | `bgm_phase.py`, `sample_bgm.yaml` |
+| BGM fade | 実装済み | event ごとの fade in/out | `bgm_phase.py`, `ffmpeg_audio.py` |
+| scene 間 audio crossfade | 実装済み | `scene.transition` の `acrossfade` | `ffmpeg_ops.py`, `test_audio_pcm_concat_integration.py` |
+| L カット | 実装済み | 前行の音声 tail を次行映像へ overlay | `audio_phase.py`, `test_audio_phase_voice_layers.py` |
+| J カット | 要再検証 | `j_cut.duration` の映像 pre-padding は実装。音声先行の render characterization が未整備 | `scene_standard_renderer.py` |
+| 音声 filter preset | 実装済み | `phone` / `echo` / `radio` / `muffled` | `filter_presets.py`, `sample_filters.yaml` |
+| 任意 EQ | 未実装 | 任意 FFmpeg audio filter 文字列は受け付けない | `validate_script.py` |
+| compressor | 一部実装 | `radio` preset 内の固定 `acompressor` のみ | `filter_presets.py` |
+| reverb / echo | 一部実装 | `echo` preset の固定 `aecho` のみ。任意 reverb 設定はない | `filter_presets.py` |
+| loudnorm | 実装済み | `audio.master_loudnorm` / `mastering.loudnorm` | `bgm_phase.py`, `test_bgm_phase_loop.py` |
 
-## 採用見送りメモ
+## 台本・出力・保守
 
-- 歌唱機能 (`song`)
-  - 2026-05-24 時点で不採用。
-  - 理由と再検討条件は `docs/guides/song_mode_rejected.md` を参照。
+| 機能 | 状態 | 対応範囲・制約 | 根拠 |
+| --- | --- | --- | --- |
+| scene cache | 実装済み | base と subtitle layer を分離し素材署名を含む | `video_phase/scene_cache.py`, `test_scene_renderer_subtitle_flow.py` |
+| FinalizePhase cache | 実装済み | transition と final concat、`system.finalize_cache` で無効化可 | `finalize_phase.py`, `test_finalize_phase.py` |
+| SRT/ASS 出力 | 実装済み | `srt` / `ass` / `both` | `timeline.py`, `test_subtitle_text.py` |
+| Markdown 入力 | 実装済み | frontmatter と panel image 化 | `components/markdown`, `test_markdown_pipeline.py` |
+| include / vars | 実装済み | section/scene include、文字列変数、循環検出 | `components/script/resolver.py`, `test_script_resolver.py` |
+| plugin | 実装済み | built-in と drop-in、allow/deny | `plugins`, `test_plugins_integration.py` |
+| Shorts 書き出し | 実装済み | `shorts_1080x1920` preset | `export_presets.py`, `test_media_params_resolution.py` |
+| 1440p 書き出し | 実装済み | `youtube_1440p` preset | `export_presets.py`, `test_media_params_resolution.py` |
+| template 管理 | 一部実装 | package default config と include 再利用は可能。template catalog/version 管理はない | `templates/config.yaml`, `components/script/resolver.py` |
+| proxy 生成 | 未実装 | proxy asset pipeline はない | 実装・テストなし |
+| 複数 sequence | 未実装 | 1 台本 1 timeline | `pipeline.py` |
+
+## 基盤機能
+
+| 機能 | 状態 | 対応範囲・制約 | 根拠 |
+| --- | --- | --- | --- |
+| YAML load/validation | 実装済み | default 適用、素材・設定検証 | `components/config`, `components/script/loader.py` |
+| VOICEVOX 音声生成/cache | 実装済み | speaker/style/speed/pitch、retry/cache | `components/audio`, `test_audio_generator.py` |
+| PNG/ASS 字幕 burn | 実装済み | `png` / `auto` / `ass` と安全な fallback | `components/subtitles`, `test_subtitle_png.py`, `test_subtitle_ass.py` |
+| transition | 実装済み | fade/dissolve/wipe/zoom と DTS 安全な concat | `ffmpeg_ops.py`, `test_ffmpeg_ops_transition.py` |
+| no-voice | 実装済み | 推定または明示 duration の無音 track | `audio_phase.py`, smoke tests |
+| export preset | 実装済み | 解像度/fps/audio を全 phase へ共有 | `export_presets.py`, `test_media_params_resolution.py` |
+
+## 採用見送り
+
+| 機能 | 状態 | 理由 |
+| --- | --- | --- |
+| 歌唱機能 (`song`) | 採用見送り | 字幕、長尺 YAML、同期、保守責務との不整合。詳細は `guides/song_mode_rejected.md` |
+
+## 関連資料
+
+- YAML: [`../scripts/script_cheatsheet.md`](../scripts/script_cheatsheet.md)
+- サンプル: [`script_samples.md`](./script_samples.md)
+- filter mapping: [`design/ffmpeg_filter_mapping.md`](./design/ffmpeg_filter_mapping.md)
