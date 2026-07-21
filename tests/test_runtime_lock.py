@@ -84,6 +84,14 @@ def test_compose_voicevox_defaults_match_lock() -> None:
     assert gpu["services"]["voicevox"]["image"] == voicevox_image_ref(lock, "gpu")
 
 
+def test_env_example_voicevox_default_matches_lock() -> None:
+    root = Path(__file__).resolve().parents[1]
+    env_example = (root / ".devcontainer/.env.example").read_text(encoding="utf-8")
+    expected = f"VOICEVOX_IMAGE={voicevox_image_ref(load_lock(), 'cpu')}"
+    assert expected in env_example.splitlines()
+    assert "latest" not in env_example.lower()
+
+
 def test_dockerfile_installs_locked_font() -> None:
     root = Path(__file__).resolve().parents[1]
     lock = load_lock()
