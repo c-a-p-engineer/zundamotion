@@ -25,17 +25,18 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ca-certificates curl fonts-ipafont-gothic
+          sudo apt-get install -y --no-install-recommends ca-certificates fonts-ipafont-gothic
 
-      - name: Pull digest-pinned CPU runtime
+      - name: Validate runtime lock
+        run: PYTHONPATH=scripts python scripts/check_runtime_lock.py
+
+      - name: Install checksum-locked BtbN FFmpeg
         run: |
-          image=$(PYTHONPATH=scripts python -c 'from runtime_lock import load_lock, runtime_image_ref; print(runtime_image_ref(load_lock(), "cpu"))')
-          docker pull "$image"
-          docker create --name runtime "$image"
-          docker cp runtime:/opt/ffmpeg /opt/ffmpeg
-          docker rm runtime
-          echo /opt/ffmpeg/bin >> "$GITHUB_PATH"
-          echo LD_LIBRARY_PATH=/opt/ffmpeg/lib >> "$GITHUB_ENV"
+          sudo python scripts/install_locked_ffmpeg.py \
+            --lock .devcontainer/runtime.lock.json \
+            --prefix /opt/ffmpeg
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
 
       - name: Install Python dependencies
         run: python -m pip install -e ".[dev]"
