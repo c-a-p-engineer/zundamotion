@@ -1,219 +1,112 @@
 # セットアップと実行
 
-このガイドは、Zundamotion のセットアップ、CLI 実行、ログ確認、GPU/NVENC 確認までをまとめた利用者向け手順です。
+このガイドはローカル実行、公式 Dev Container、Codex Cloud、CPU/GPU 起動を扱います。
+固定値と更新手順は [runtime_version_policy.md](./runtime_version_policy.md) を参照してください。
 
-関連:
+## サポート範囲
 
-- [docs 入口](../README.md)
-- [README](../../README.md)
-- [submodule 利用](./submodule.md)
-- [パフォーマンスと運用](./performance_tuning.md)
-- [プロジェクト構造](./project_structure.md)
+公式環境は `runtime.lock.json` の CPython 3.14 系、固定 BtbN FFmpeg、固定 VOICEVOX、
+IPA ゴシックを使用します。ローカル実行の最低条件は Python 3.14 と FFmpeg/ffprobe 7.0 です。
+ローカル最低版は互換性の下限であり、公式 lock と同一出力を保証する値ではありません。
 
-## 必要なもの
+## 公式 Dev Container
 
-- `runtime.lock.json` で固定した CPython 3.14 系
-- FFmpeg / ffprobe
-- VOICEVOX Engine
-- Docker / Dev Container（再現可能な公式推奨環境）
-
-Python 3.13以前と3.15以降の未検証版、alpha / beta / RC / dev 版は公式サポート対象外です。
-
-## セットアップ
-
-### 1. 必要ツールのインストール
-
-- [Docker](https://www.docker.com/get-started/)
-- [FFmpeg](https://ffmpeg.org/download.html)
-- [VS Code](https://code.visualstudio.com/)
-- [Remote - Containers 拡張機能](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
-
-CLI 起動時には `ffmpeg` / `ffprobe` の存在とバージョンを確認します。FFmpeg 7.x 未満や未インストールの場合は実行前に停止します。
-
-### 2. リポジトリのクローン
+単一の `.devcontainer/Dockerfile` が digest 固定 Python image を土台にし、
+`scripts/install_locked_ffmpeg.py` で checksum 検証済み BtbN archive を導入します。
 
 ```bash
-git clone https://github.com/c-a-p-engineer/zundamotion.git
-cd zundamotion
+python scripts/check_runtime_lock.py
+docker compose -f .devcontainer/docker-compose.yml config
+docker compose -f .devcontainer/docker-compose.yml up -d --build app voicevox
 ```
 
-### 3. Dev Container の起動
-
-VS Code でプロジェクトを開き、「Reopen in Container」を選択します。
-
-CPU は base Compose、GPU は `.devcontainer/docker-compose.gpu.yml` を重ねます。どちらも
-単一の薄い `.devcontainer/Dockerfile` を使用し、lock から得た digest 固定 runtime image を
-`RUNTIME_IMAGE` として渡します。
-
-- ホスト側で NVIDIA Container Toolkit と GPU ドライバを有効化する
-- コンテナ内で `nvidia-smi` と `ffmpeg -filters` を確認する
-- GPU 版 VOICEVOX が必要な場合だけ、`docker-compose.voicevox-gpu.yml` を追加で重ねる
-
-runtime image には実行時に収集した `/opt/zundamotion-build-info/build-info.json` が含まれます。
-lock の検査、初回 publish、月次更新、手動更新、ロールバックは
-[runtime_version_policy.md](./runtime_version_policy.md) を正として参照してください。
-
-Docker ログで追いたい場合:
-
-- `docker compose exec app ...` の実行は `docker logs` に流れません
-- 前面実行用の `render` サービスを使ってください
+GPU render:
 
 ```bash
-ZUNDAMOTION_COMMAND='python -m zundamotion.main scripts/sample.yaml -o output/sample.mp4 --no-cache --hw-encoder cpu --log-kv' \
-docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml --profile runner up --build render
+docker compose -f .devcontainer/docker-compose.yml \
+  -f .devcontainer/docker-compose.gpu.yml config
+docker compose -f .devcontainer/docker-compose.yml \
+  -f .devcontainer/docker-compose.gpu.yml up -d --build app voicevox
 ```
 
-別ターミナル:
+VOICEVOX も GPU 化する場合:
 
 ```bash
-docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml logs -f render
+docker compose -f .devcontainer/docker-compose.yml \
+  -f .devcontainer/docker-compose.gpu.yml \
+  -f .devcontainer/docker-compose.voicevox-gpu.yml config
+docker compose -f .devcontainer/docker-compose.yml \
+  -f .devcontainer/docker-compose.gpu.yml \
+  -f .devcontainer/docker-compose.voicevox-gpu.yml up -d --build app voicevox
 ```
 
-### 4. Codex Cloud 環境向けセットアップ
-
-```bash
-set -euo pipefail
-
-sudo apt-get update
-sudo apt-get install -y --no-install-recommends \
-  curl git xz-utils ca-certificates \
-  gnupg2 software-properties-common \
-  fonts-ipafont-gothic
-
-python -m ensurepip --upgrade || true
-python -m pip install --no-cache-dir --upgrade pip setuptools wheel
-python -m pip install --no-cache-dir -r requirements.txt
-
-# FFmpeg は Dockerfile と同じ固定 commit
-FFMPEG_COMMIT=db69d06eeeab4f46da15030a80d539efb4503ca8
-git clone --filter=blob:none https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg-src
-cd /tmp/ffmpeg-src
-git fetch --depth 1 origin "$FFMPEG_COMMIT"
-git checkout --detach "$FFMPEG_COMMIT"
-test "$(git rev-parse HEAD)" = "$FFMPEG_COMMIT"
-# Dockerfile と同じ configure オプションで build する。
-```
-
-動作確認:
+## ランタイム確認
 
 ```bash
 python --version
-pip --version
-ffmpeg -hide_banner -encoders | grep -E 'libx264|libx265'
-ffmpeg -hide_banner -filters | grep -E 'overlay_opencl|scale_opencl' || true
+ffmpeg -version | head -n 1
+ffprobe -version | head -n 1
+curl http://voicevox:50021/version
+test -f /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf
+fc-match IPAGothic
+cat /opt/zundamotion-build-info/build-info.json
 ```
 
-この手順でも `python --version` が 3.14 系であることを確認してください。異なる
-Python 版での実行は動作保証対象外です。
+build-info には Python version/base image、FFmpeg version/archive/SHA256、VOICEVOX 固定参照、
+必須フォントパス、主要 encoder/filter の実測結果を記録します。
 
-## 基本実行
+## Codex Cloud
 
-### 動画生成
+Docker が利用可能なら公式 Dev Container と同じ build を優先します。Docker を使えない場合:
 
 ```bash
-python -m zundamotion.main scripts/sample.yaml
-python -m zundamotion.main scripts/sample.yaml -o output/my_video.mp4
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends fontconfig fonts-ipafont-gothic
+sudo python scripts/install_locked_ffmpeg.py \
+  --lock .devcontainer/runtime.lock.json --prefix /opt/ffmpeg
+python -m pip install -e '.[dev]'
+python scripts/check_runtime_lock.py
+test -f /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf
 ```
 
-### ログ形式
+この経路では Python 自体の image digest は固定できません。公式再現環境と区別して報告します。
+
+## CLI 実行
 
 ```bash
+python -m zundamotion.main scripts/sample.yaml -o output/sample.mp4
+python -m zundamotion.main scripts/sample.yaml -o output/sample.mp4 --no-voice --no-cache
 python -m zundamotion.main scripts/sample.yaml --log-json
 python -m zundamotion.main scripts/sample.yaml --log-kv
+python -m zundamotion.main scripts/sample.yaml --jobs auto --hw-encoder gpu --quality speed
 ```
 
-### キャッシュ制御
-
-```bash
-python -m zundamotion.main scripts/sample.yaml --no-cache
-python -m zundamotion.main scripts/sample.yaml --cache-refresh
-```
-
-### 音声なし
-
-```bash
-python -m zundamotion.main scripts/sample.yaml --no-voice --no-cache
-```
-
-### 並列数と HW エンコーダ
-
-```bash
-python -m zundamotion.main scripts/sample.yaml --jobs auto
-python -m zundamotion.main scripts/sample.yaml --jobs 4
-python -m zundamotion.main scripts/sample.yaml --hw-encoder gpu
-python -m zundamotion.main scripts/sample.yaml --quality quality
-```
-
-### 最終連結を `-c copy` に限定
-
-```bash
-python -m zundamotion.main scripts/sample.yaml --final-copy-only
-```
-
-### タイムライン出力
-
-```bash
-python -m zundamotion.main scripts/sample.yaml --timeline
-python -m zundamotion.main scripts/sample.yaml --timeline csv
-python -m zundamotion.main scripts/sample.yaml --timeline both
-python -m zundamotion.main scripts/sample.yaml --no-timeline
-```
-
-### 字幕ファイル出力
-
-```bash
-python -m zundamotion.main scripts/sample.yaml --subtitle-file
-python -m zundamotion.main scripts/sample.yaml --subtitle-file ass
-python -m zundamotion.main scripts/sample.yaml --no-subtitle-file
-```
-
-## `--project-root` の基準
-
-- 未指定: カレントディレクトリ基準
-- 指定: `--project-root` または `ZUNDAMOTION_PROJECT_ROOT` を基準に `assets/`, `scripts/`, `output/` などの相対パスを解決
-
-例:
-
-```bash
-zundamotion path/to/script.yaml -o output/out.mp4
-zundamotion scripts/sample.yaml --project-root vendor/zundamotion
-```
-
-submodule 利用の詳細は [`submodule.md`](./submodule.md) を参照してください。
-
-## VOICEVOX Engine
-
-Dev Container では Docker Compose により VOICEVOX Engine が起動し、通常は `voicevox:50021` で利用できます。  
-ローカルでは通常 `http://127.0.0.1:50021` を使います。必要に応じて `VOICEVOX_URL` で上書きできます。
+`--project-root` または `ZUNDAMOTION_PROJECT_ROOT` を指定すると相対パスの基準を変更します。
+submodule 利用は [submodule.md](./submodule.md) を参照してください。
 
 ## GPU / NVENC 確認
 
 ```bash
 nvidia-smi
-ldconfig -p | rg libnvidia-encode
 ffmpeg -hide_banner -encoders | rg nvenc
 python scripts/verify_gpu_runtime.py --skip-render
 ```
 
-`libnvidia-encode.so.1` が見つからない場合は、Docker 起動時に `--gpus all` と `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video` または `all` を指定してください。
+GPU filter は optional です。NVENC が使えても filter は CPU へフォールバックできます。
 
-`scripts/verify_gpu_runtime.py` は Python 3.14、GPU 認識、NVENC、CUDA/OpenCL
-フィルタを確認します。`--skip-render` を外すと短い H.264/AAC 動画も生成し、NVENC
-選択と DTS 警告の有無を `output/gpu-smoke/gpu-smoke.report.json` に記録します。
+## Docker ログで render を追う
 
-## 速度優先で回すとき
-
-- `--quality speed`
-- `--jobs auto`
-- `--hw-encoder gpu`
-
-長尺動画で字幕が多い場合は、最終字幕合成だけ自動で CPU フィルタへフォールバックします。進捗ログは 15 秒ごとに出ます。
+```bash
+ZUNDAMOTION_COMMAND='python -m zundamotion.main scripts/sample.yaml -o output/sample.mp4 --no-cache --hw-encoder cpu --log-kv' \
+docker compose -f .devcontainer/docker-compose.yml --profile runner up --build render
+```
 
 ## よくあるエラー
 
 | エラー | 対処 |
 | --- | --- |
-| `ModuleNotFoundError: No module named 'yaml'` | `pip install -r requirements.txt` |
-| `ffprobe not found` | FFmpeg / ffprobe を PATH に入れる |
-| `No module named 'zundamotion'` | `pip install -e .` または `PYTHONPATH=.` を指定 |
-| `Validation Error: ...` | YAML 構文、素材パス、パラメータ値を確認 |
+| `ffmpeg` / `ffprobe` がない | 公式 image を build するか固定 installer を実行する |
+| FFmpeg 7.0 未満 | 7.0 以上へ更新する。公式 lock は別途固定値を使う |
+| IPA ゴシックがない | `fonts-ipafont-gothic` を導入し必須パスを確認する |
+| `No module named 'zundamotion'` | `python -m pip install -e .` を実行する |
+| VOICEVOX に接続できない | Compose service と `VOICEVOX_URL` を確認する |

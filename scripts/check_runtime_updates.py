@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Check official Python and FFmpeg stable releases; write only on explicit request."""
+"""Report upstream Python/FFmpeg versions for a manual runtime-lock review."""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import urllib.request
@@ -35,45 +34,35 @@ def latest_ffmpeg_version(page: str) -> str:
     return max(matches, key=lambda value: tuple(map(int, value.split("."))))
 
 
-def source_sha256(url: str) -> str:
-    with urllib.request.urlopen(url, timeout=120) as response:
-        digest = hashlib.sha256()
-        while chunk := response.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def candidate_lock(lock: dict[str, object], python_version: str, ffmpeg_version: str) -> dict[str, object]:
-    candidate = json.loads(json.dumps(lock))
-    python = candidate["python"]
-    ffmpeg = candidate["ffmpeg"]
-    python["version"] = python_version
-    python["source_url"] = f"https://www.python.org/ftp/python/{python_version}/Python-{python_version}.tar.xz"
-    ffmpeg["version"] = ffmpeg_version
-    ffmpeg["source_url"] = f"https://ffmpeg.org/releases/ffmpeg-{ffmpeg_version}.tar.xz"
-    python["source_sha256"] = source_sha256(python["source_url"])
-    ffmpeg["source_sha256"] = source_sha256(ffmpeg["source_url"])
-    for image in candidate["runtime_images"].values():
-        image["tag"] = f"python-{python_version}-ffmpeg-{ffmpeg_version}"
-        image["digest"] = None
-    return candidate
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--write", action="store_true", help="write a changed candidate lock")
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="unsupported safety flag; lock updates require verified digests and checksums",
+    )
     parser.add_argument("--lock", type=Path, default=LOCK_PATH)
     args = parser.parse_args()
     lock = load_lock(args.lock)
     python_version = latest_python_version(fetch_text(PYTHON_SOURCE_INDEX))
     ffmpeg_version = latest_ffmpeg_version(fetch_text(FFMPEG_RELEASES))
-    if (python_version, ffmpeg_version) == (lock["python"]["version"], lock["ffmpeg"]["version"]):
-        return 0
     if args.write:
-        args.lock.write_text(json.dumps(candidate_lock(lock, python_version, ffmpeg_version), indent=2) + "\n", encoding="utf-8")
-    else:
-        print(json.dumps({"python": python_version, "ffmpeg": ffmpeg_version}))
-    return 10
+        parser.error(
+            "automatic writes are disabled; verify the Python image digest, BtbN release/archive "
+            "SHA256, and VOICEVOX digests, then edit runtime.lock.json manually"
+        )
+    current = (lock["python"]["version"], lock["ffmpeg"]["official_version"])
+    latest = (python_version, ffmpeg_version)
+    print(
+        json.dumps(
+            {
+                "current": {"python": current[0], "ffmpeg": current[1]},
+                "upstream": {"python": latest[0], "ffmpeg": latest[1]},
+                "update_available": latest != current,
+            }
+        )
+    )
+    return 10 if latest != current else 0
 
 
 if __name__ == "__main__":

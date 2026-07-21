@@ -25,7 +25,7 @@
 - CLI、セットアップ、実行方法を触るとき
   - `docs/guides/setup_and_runtime.md`
   - `README.md`
-- Docker runtime、digest、月次更新を触るとき
+- Docker runtime、digest、固定ランタイム更新を触るとき
   - `docs/guides/runtime_version_policy.md`
 - 性能、並列度、キャッシュ、FFmpeg 経路を触るとき
   - `docs/guides/performance_regression_ledger.md`

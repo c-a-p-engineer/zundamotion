@@ -1,302 +1,96 @@
 # Git submodule で取り込んで使う
 
-このドキュメントは、Zundamotion を **利用側プロジェクトに git submodule として取り込み**、動画生成機能を呼び出すための手順をまとめたものです。
+Zundamotion 本体を submodule に置き、利用側の素材、台本、出力を親リポジトリで管理します。
+公式 runtime は submodule の `.devcontainer/Dockerfile` と `runtime.lock.json` を正とし、
+古い Dockerfile や FFmpeg build 手順を親側へ複製しません。
 
-> ランタイム image は親プロジェクト側で再コンパイルせず、Zundamotion の
-> `runtime.lock.json` が示す GHCR digest を利用します。runtime の準備・更新方法は
-> [`runtime_version_policy.md`](./runtime_version_policy.md) を正とし、この文書中の
-> 旧来の Dockerfile 例を新規プロジェクトへ複製しないでください。
-
-## 推奨構成
-
-```
-your-project/
-  vendor/
-    zundamotion/        # git submodule
-  scripts/              # 利用側の台本置き場（任意）
-  assets/               # 利用側の素材置き場（任意）
-  output/               # 出力先（任意）
-```
-
-## 1) submodule 追加（利用側リポジトリで実行）
+## 追加とインストール
 
 ```bash
 git submodule add <GIT_URL> vendor/zundamotion
 git submodule update --init --recursive
-```
-
-更新する場合:
-
-```bash
-git submodule update --remote --merge
-```
-
-## 2) インストール（推奨: editable）
-
-利用側の仮想環境に、サブモジュールを editable install します。
-
-```bash
 python -m venv .venv
 . .venv/bin/activate
-pip install -e vendor/zundamotion
+python -m pip install -e vendor/zundamotion
 ```
 
-フォールバック（editable を使わない場合）:
+更新時は submodule の変更を確認してから、親リポジトリで参照 commit を記録します。
+
+## 実行基準
+
+親リポジトリをカレントディレクトリにして実行すると、`assets/`、`scripts/`、`output/` は
+親側を基準に解決されます。
 
 ```bash
-pip install -r vendor/zundamotion/requirements.txt
+zundamotion scripts/example.yaml -o output/example.mp4
 ```
 
-さらに最小のフォールバック（環境依存で動く場合）:
-
-```bash
-PYTHONPATH=vendor/zundamotion python -m zundamotion.main --help
-```
-
-## 3) 実行
-
-### 利用側プロジェクトを基準に実行（推奨）
-
-相対パス（`assets/...` など）は **利用側プロジェクト基準**で解決します。
-
-```bash
-zundamotion path/to/script.yaml -o output/out.mp4
-```
-
-### サブモジュール同梱サンプルを試す
-
-相対パス基準をサブモジュールに切り替えるには `--project-root` を使います。
+submodule 同梱サンプルを使う場合だけ基準を切り替えます。
 
 ```bash
 zundamotion scripts/sample.yaml --project-root vendor/zundamotion
 ```
 
-## 相対パスの基準（`--project-root` / `ZUNDAMOTION_PROJECT_ROOT`）
+`--project-root` は `ZUNDAMOTION_PROJECT_ROOT` より優先します。どちらも未指定なら
+実行時のカレントディレクトリが基準です。
 
-- 未指定: 実行時のカレントディレクトリ基準
-- 指定: `--project-root`（または `ZUNDAMOTION_PROJECT_ROOT`）のディレクトリへ移動してから処理を開始します
+## 親リポジトリの Dev Container
 
-用途:
-- 利用側プロジェクトに素材を置く（例: `assets/`） → `--project-root` は不要（または `--project-root .`）
-- サブモジュール側の `assets/` や `scripts/` をそのまま使う → `--project-root vendor/zundamotion`
-
-## 依存関係について（重要）
-
-- FFmpeg / ffprobe は実行環境に必要です（`ffmpeg` と `ffprobe` が PATH にあること）
-- VOICEVOX エンジン連携を使う場合、利用側で VOICEVOX の利用規約・実行環境（Docker 等）を整備してください
-
-## zundamotion-video-workspace のような開発環境を作る
-
-`zundamotion-video-workspace` のように、**エンジン本体は `vendor/zundamotion` に閉じ込め、素材・台本・出力は利用側リポジトリ直下で管理する**構成にすると運用しやすくなります。
-
-### 目的
-
-- `vendor/zundamotion` はアップデートしやすい
-- `assets/` と `scripts/` を利用側プロジェクトの資産として管理できる
-- Dev Container から `/workspace` をそのまま作業ディレクトリとして扱える
-- `zundamotion scripts/...` を利用側リポジトリ基準でそのまま実行できる
-
-### 推奨ディレクトリ構成
-
-```text
-your-project/
-  .devcontainer/
-    .env.example
-    Dockerfile.cpu
-    Dockerfile.gpu
-    devcontainer.json
-    docker-compose.yml
-    post-create.sh
-  assets/
-  scripts/
-  output/
-  vendor/
-    zundamotion/
-```
-
-### 1) 利用側リポジトリを作る
-
-```bash
-mkdir your-project
-cd your-project
-git init
-mkdir -p assets scripts output vendor .devcontainer
-git submodule add https://github.com/c-a-p-engineer/zundamotion.git vendor/zundamotion
-git submodule update --init --recursive
-```
-
-必要に応じて、サンプル素材や台本をサブモジュールから取り込みます。
-
-```bash
-cp -r vendor/zundamotion/assets/. assets/
-cp -r vendor/zundamotion/scripts/. scripts/
-```
-
-### 2) Dev Container を用意する
-
-`your-project/.devcontainer/.env.example`
-
-```dotenv
-# VOICEVOX は標準で CPU イメージです。
-VOICEVOX_IMAGE=voicevox/voicevox_engine:cpu-ubuntu22.04-latest
-
-# GPU VOICEVOX を使う場合だけ切り替えます。
-# VOICEVOX_IMAGE=voicevox/voicevox_engine:nvidia-ubuntu24.04-latest
-```
-
-`your-project/.devcontainer/devcontainer.json`
-
-```json
-{
-  "name": "zundamotion-video-workspace",
-  "dockerComposeFile": ["docker-compose.yml"],
-  "service": "app",
-  "workspaceFolder": "/workspace",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
-  "shutdownAction": "stopCompose",
-  "remoteUser": "root",
-  "containerEnv": {
-    "ZUNDAMOTION_PROJECT_ROOT": "/workspace",
-    "VOICEVOX_URL": "http://voicevox:50021",
-    "PYTHONPATH": "/workspace/vendor/zundamotion"
-  },
-  "postCreateCommand": "bash .devcontainer/post-create.sh"
-}
-```
-
-`your-project/.devcontainer/docker-compose.yml`
+親側 Compose の `app` build は submodule の公式 Dockerfile を使用します。
 
 ```yaml
-name: zundamotion-video-workspace
-
 services:
   app:
     build:
-      context: ..
-      dockerfile: .devcontainer/Dockerfile.cpu
+      context: ../vendor/zundamotion
+      dockerfile: .devcontainer/Dockerfile
     working_dir: /workspace
     volumes:
       - ..:/workspace
     command: sleep infinity
-    init: true
-    tty: true
-    stdin_open: true
     environment:
       ZUNDAMOTION_PROJECT_ROOT: /workspace
       VOICEVOX_URL: http://voicevox:50021
       PYTHONPATH: /workspace/vendor/zundamotion
-      PYTHONUNBUFFERED: "1"
-      PYTHONDONTWRITEBYTECODE: "1"
-    depends_on:
-      - voicevox
+    depends_on: [voicevox]
 
   voicevox:
-    image: ${VOICEVOX_IMAGE:-voicevox/voicevox_engine:cpu-ubuntu22.04-latest}
-    ports:
-      - "50021:50021"
-    init: true
+    image: voicevox/voicevox_engine:cpu-ubuntu22.04-0.24.1@sha256:a6a96326ffda12a7292b235a6ef43d299ca33849993e262b230320e17c8c2be8
+    ports: ["50021:50021"]
 ```
 
-`your-project/.devcontainer/post-create.sh`
+VOICEVOX の参照は submodule の `runtime.lock.json` と一致させます。固定値更新時に親側へ
+重複記載がある場合は同じコミットで同期し、`latest` を使いません。
+
+GPU render は submodule の `.devcontainer/docker-compose.gpu.yml` と同じ NVIDIA runtime 設定を
+親側 override に追加します。VOICEVOX も GPU 化する場合は lock の `voicevox.gpu_*` を使います。
+
+## 起動前確認
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-cd /workspace
-python3 -m pip install --upgrade pip setuptools wheel
-python3 -m pip install -e /workspace/vendor/zundamotion[dev]
-mkdir -p /workspace/output
+python vendor/zundamotion/scripts/check_runtime_lock.py \
+  --lock vendor/zundamotion/.devcontainer/runtime.lock.json
+docker compose -f .devcontainer/docker-compose.yml config
+docker compose -f .devcontainer/docker-compose.yml up -d --build
 ```
 
-`your-project/.devcontainer/Dockerfile.cpu`
-
-```dockerfile
-FROM python:3.14-slim-bookworm
-
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-    curl \
-    fonts-ipafont-gothic \
-    git \
-    xz-utils \
-    build-essential pkg-config yasm nasm \
-    libfreetype6-dev libmp3lame-dev libssl-dev libx264-dev libx265-dev libnuma-dev \
- && rm -rf /var/lib/apt/lists/*
-
-COPY vendor/zundamotion /tmp/zundamotion
-COPY vendor/zundamotion/requirements.txt /tmp/requirements.txt
-
-ARG FFMPEG_COMMIT=db69d06eeeab4f46da15030a80d539efb4503ca8
-
-RUN git clone --filter=blob:none https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg-src \
- && cd /tmp/ffmpeg-src \
- && git fetch --depth 1 origin "${FFMPEG_COMMIT}" \
- && git checkout --detach "${FFMPEG_COMMIT}" \
- && test "$(git rev-parse HEAD)" = "${FFMPEG_COMMIT}" \
- && ./configure --prefix=/opt/ffmpeg --enable-gpl --enable-libfreetype --enable-libmp3lame --enable-libx264 --enable-libx265 --enable-openssl \
- && make -j"$(nproc)" && make install \
- && ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg \
- && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
- && rm -rf /tmp/ffmpeg-src
-
-ENV LD_LIBRARY_PATH="/opt/ffmpeg/lib:${LD_LIBRARY_PATH}"
-
-RUN python -m pip install --upgrade pip setuptools wheel \
- && echo "/opt/ffmpeg/lib" > /etc/ld.so.conf.d/ffmpeg.conf \
- && ldconfig \
- && python -m pip install --no-cache-dir -r /tmp/requirements.txt \
- && python -m pip install --no-cache-dir /tmp/zundamotion \
- && rm -f /tmp/requirements.txt
-
-WORKDIR /workspace
-CMD ["sleep", "infinity"]
-```
-
-GPU 版は、CPU Compose を書き換えず、別の GPU override で `app` / `render` の
-`build.dockerfile` を `Dockerfile.gpu` に明示します。これにより `.env` の値に関係なく
-GPU Dockerfile を選択できます。NVIDIA runtime も同じ override にだけ追加してください。
-
-### 3) 起動する
+コンテナ内:
 
 ```bash
-cp .devcontainer/.env.example .devcontainer/.env
-docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --build
-docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml exec app bash
-```
-
-VS Code / Codex から使う場合は、利用側リポジトリを開いて Dev Container を起動します。
-
-### 4) 動作確認
-
-コンテナ内で以下を確認します。
-
-```bash
-cd /workspace
-python3 --version
-ffmpeg -version
-ffprobe -version
-zundamotion --help
+python --version
+ffmpeg -version | head -n 1
+ffprobe -version | head -n 1
+test -f /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf
 curl http://voicevox:50021/version
+zundamotion --help
 ```
 
-音声なしでまず 1 本生成:
+## 依存関係
 
-```bash
-zundamotion scripts/sample.yaml \
-  -o output/sample.mp4 \
-  --no-cache \
-  --no-voice \
-  --hw-encoder cpu
-```
+- Python 3.14
+- FFmpeg / ffprobe 7.0 以上（公式環境は lock の固定版）
+- VOICEVOX を使う場合は固定 engine service
+- 字幕の標準前提は IPA ゴシックの必須パス
 
-### 運用のコツ
-
-- `vendor/zundamotion` はエンジン更新専用として扱う
-- 利用側プロジェクトでは `assets/` `scripts/` `output/` を主に編集する
-- サブモジュール更新時は `vendor/zundamotion` 側を pull したあと、利用側リポジトリでサブモジュール参照更新をコミットする
-- `PYTHONPATH` を通すだけでも動きますが、Dev Container の `post-create` で `pip install -e /workspace/vendor/zundamotion[dev]` しておく方が安定します
+固定値、CPU/GPU 差、更新とロールバックは
+[runtime_version_policy.md](./runtime_version_policy.md) を参照してください。
