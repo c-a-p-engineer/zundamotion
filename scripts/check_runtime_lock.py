@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the one authoritative runtime lock file."""
+"""Validate the authoritative BtbN runtime lock file."""
 
 from __future__ import annotations
 
@@ -13,9 +13,8 @@ from runtime_lock import LOCK_PATH, load_lock, validate_lock
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lock", type=Path, default=LOCK_PATH)
-    parser.add_argument("--allow-unpublished-images", action="store_true")
     args = parser.parse_args()
-    errors = validate_lock(load_lock(args.lock), allow_unpublished_images=args.allow_unpublished_images)
+    errors = validate_lock(load_lock(args.lock))
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
