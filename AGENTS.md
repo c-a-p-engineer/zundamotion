@@ -29,6 +29,12 @@
   - `docs/guides/runtime_version_policy.md`
 - 再現性、乱数、media 比較、cache key を触るとき
   - `docs/guides/reproducibility_contract.md`
+- GitHub Pages、機能デモサイト、デモ動画、`site/`、Pages Workflowを触るとき
+  - `docs/guides/github_pages_feature_demo.md`
+  - `docs/features.md`
+  - `scripts/script_cheatsheet.md`
+  - `docs/guides/runtime_version_policy.md`
+  - `docs/guides/reproducibility_contract.md`
 - 性能、並列度、キャッシュ、FFmpeg 経路を触るとき
   - `docs/guides/performance_regression_ledger.md`
   - `docs/guides/performance_tuning.md`
@@ -54,6 +60,9 @@
 - 通常の作業は `zundamotion/`、`scripts/`、`docs/`、`tools/` の範囲で完結できるかを先に確認する
 - YAML オプション、CLI オプション、設定項目、挙動フラグを追加・変更した場合は、`README.md`、`scripts/script_cheatsheet.md`、関連 docs の更新要否を確認する
 - 設定項目を追加・変更した場合は、利用者向けの正本に「項目名」「意味」「設定可能値」「デフォルト値」を記載し、省略時挙動や他設定との優先順位がある場合はそれも明記する
+- 利用者向け機能を追加・変更した場合は、`docs/features.md`に加え、機能デモmanifest、デモYAML、実生成動画、Pages用テストの更新要否を確認する
+- GitHub Pagesの正本は`master`側のソースとし、`gh-pages`を直接編集しない
+- `implemented`または利用者向けの`partial`機能をPagesへ掲載する場合は、現在のZundamotionで生成したデモ動画と制限事項を必須とする
 - 大きな仕様追加や不採用判断は、判断理由と再検討条件を `docs/issues_pending.md` または `docs/guides/` に残す
 - `visible` 未指定時の表示や暗黙的なキャラクター補完など、設定ミス補正か仕様変更かが曖昧な挙動は実装前に確認する
 - 新しい資料を `docs/` 配下へ追加した場合は、`AGENTS.md` に「何のときに読む資料か」を追記する
@@ -64,6 +73,7 @@
 - docs 入口: `docs/README.md`
 - AI 向け低トークン規約: `docs/guides/ai_coding_rules.md`
 - Python コード規約: `docs/guides/python_coding_rules.md`
+- GitHub Pages機能デモ規約: `docs/guides/github_pages_feature_demo.md`
 - 機能一覧: `docs/features.md`
 - サンプル台本一覧: `docs/script_samples.md`
 - 性能変更時: `docs/guides/performance_regression_ledger.md`
@@ -79,6 +89,8 @@
 ## 6. 完了時の確認
 
 - 実装変更がある場合は、関連 docs とサンプル更新要否を確認したか報告する
+- 利用者向け機能を追加・変更した場合は、Pages機能紹介、デモYAML、実動画、manifestの更新要否を確認したか報告する
+- Pages関連変更では、作業ブランチから`gh-pages`を更新していないことと、`master` push時だけ公開される条件を確認する
 - 何を読んだか、なぜ他を読まなかったかを簡潔に説明できる状態にする
 - 新しい資料を追加した場合は、`AGENTS.md` と `docs/README.md` の更新有無を確認したか報告する
 - 未確認事項、残課題、必要なら `docs/issues_pending.md` への追記有無を報告する
