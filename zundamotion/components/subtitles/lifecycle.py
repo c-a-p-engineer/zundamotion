@@ -9,12 +9,12 @@ logger = logging.getLogger(__name__)
 
 
 def shutdown_subtitle_executor() -> None:
-    """Synchronously stop subtitle PNG workers and clear shared module state.
+    """Stop subtitle PNG workers and clear shared module state.
 
-    ``png.py`` keeps one shared ``ProcessPoolExecutor`` for render throughput and
-    also registers a non-blocking ``atexit`` fallback. Normal render completion
-    must explicitly wait for the workers so the CLI process cannot remain alive
-    after the video and sidecars have already been written.
+    CPython 3.14 provides ``terminate_workers()`` specifically for process pools
+    that do not exit cleanly through normal interpreter shutdown. Zundamotion's
+    supported runtime uses that path after all subtitle futures have completed.
+    Older runtimes fall back to a blocking ``shutdown()``.
     """
 
     from . import png as subtitle_png
@@ -27,6 +27,10 @@ def shutdown_subtitle_executor() -> None:
         return
 
     try:
-        executor.shutdown(wait=True, cancel_futures=True)
+        terminate_workers = getattr(executor, "terminate_workers", None)
+        if callable(terminate_workers):
+            terminate_workers()
+        else:
+            executor.shutdown(wait=True, cancel_futures=True)
     except Exception:
         logger.exception("Failed to shut down subtitle PNG executor cleanly")
