@@ -9,23 +9,84 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 
-def run(command: list[str], *, cwd: Path, timeout: int, binary: bool = False) -> bytes | str:
-    completed = subprocess.run(
-        command,
-        cwd=cwd,
-        env={**os.environ, "USE_RAMDISK": "0", "DISABLE_HWENC": "1"},
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout,
-        check=False,
+def _decode_stream(value: bytes | str | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _write_command_logs(
+    log_prefix: Path | None,
+    *,
+    command: list[str],
+    stdout: bytes | str | None,
+    stderr: bytes | str | None,
+) -> None:
+    if log_prefix is None:
+        return
+    log_prefix.parent.mkdir(parents=True, exist_ok=True)
+    command_path = log_prefix.parent / f"{log_prefix.name}.command.json"
+    stdout_path = log_prefix.parent / f"{log_prefix.name}.stdout.log"
+    stderr_path = log_prefix.parent / f"{log_prefix.name}.stderr.log"
+    command_path.write_text(
+        json.dumps(command, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    stdout_path.write_text(_decode_stream(stdout), encoding="utf-8")
+    stderr_path.write_text(_decode_stream(stderr), encoding="utf-8")
+
+
+def run(
+    command: list[str],
+    *,
+    cwd: Path,
+    timeout: int,
+    binary: bool = False,
+    log_prefix: Path | None = None,
+) -> bytes | str:
+    started_at = time.monotonic()
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            env={**os.environ, "USE_RAMDISK": "0", "DISABLE_HWENC": "1"},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        elapsed = time.monotonic() - started_at
+        _write_command_logs(
+            log_prefix,
+            command=command,
+            stdout=exc.stdout,
+            stderr=exc.stderr,
+        )
+        stderr = _decode_stream(exc.stderr)[-4000:]
+        raise RuntimeError(
+            f"command timed out after {elapsed:.1f}s (limit={timeout}s): "
+            f"{' '.join(command)}\n{stderr}"
+        ) from exc
+
+    _write_command_logs(
+        log_prefix,
+        command=command,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
     )
     if completed.returncode:
         stderr = completed.stderr.decode("utf-8", errors="replace")[-4000:]
-        raise RuntimeError(f"command failed ({completed.returncode}): {' '.join(command)}\n{stderr}")
+        raise RuntimeError(
+            f"command failed ({completed.returncode}): {' '.join(command)}\n{stderr}"
+        )
     if binary:
         return completed.stdout
     return completed.stdout.decode("utf-8", errors="strict")
@@ -34,10 +95,15 @@ def run(command: list[str], *, cwd: Path, timeout: int, binary: bool = False) ->
 def semantic_probe(path: Path, *, cwd: Path, timeout: int) -> dict[str, Any]:
     raw = run(
         [
-            "ffprobe", "-v", "error", "-show_entries",
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
             "format=duration:stream=index,codec_type,codec_name,width,height,avg_frame_rate,"
             "r_frame_rate,sample_rate,channels,channel_layout,duration,nb_frames",
-            "-of", "json", str(path),
+            "-of",
+            "json",
+            str(path),
         ],
         cwd=cwd,
         timeout=timeout,
@@ -47,11 +113,32 @@ def semantic_probe(path: Path, *, cwd: Path, timeout: int) -> dict[str, Any]:
 
 def decoded_hash(path: Path, stream: str, *, cwd: Path, timeout: int) -> str:
     if stream == "video":
-        command = ["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:v:0", "-f", "framemd5", "-"]
+        command = [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-map",
+            "0:v:0",
+            "-f",
+            "framemd5",
+            "-",
+        ]
     else:
         command = [
-            "ffmpeg", "-v", "error", "-i", str(path), "-map", "0:a:0",
-            "-f", "s16le", "-acodec", "pcm_s16le", "-",
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-map",
+            "0:a:0",
+            "-f",
+            "s16le",
+            "-acodec",
+            "pcm_s16le",
+            "-",
         ]
     data = run(command, cwd=cwd, timeout=timeout, binary=True)
     return hashlib.sha256(data).hexdigest()
@@ -64,7 +151,9 @@ def compare_values(left: Any, right: Any, path: str = "$") -> list[dict[str, Any
         differences: list[dict[str, Any]] = []
         for key in sorted(set(left) | set(right)):
             if key not in left or key not in right:
-                differences.append({"path": f"{path}.{key}", "left": left.get(key), "right": right.get(key)})
+                differences.append(
+                    {"path": f"{path}.{key}", "left": left.get(key), "right": right.get(key)}
+                )
             else:
                 differences.extend(compare_values(left[key], right[key], f"{path}.{key}"))
         return differences
@@ -80,13 +169,30 @@ def compare_values(left: Any, right: Any, path: str = "$") -> list[dict[str, Any
 
 def render(script: Path, output: Path, args: argparse.Namespace, root: Path) -> None:
     command = [
-        sys.executable, "-m", "zundamotion.main", str(script),
-        "--project-root", str(root), "-o", str(output), "--no-cache",
-        "--hw-encoder", args.hw_encoder, "--timeline", "both", "--subtitle-file", "both",
+        sys.executable,
+        "-m",
+        "zundamotion.main",
+        str(script),
+        "--project-root",
+        str(root),
+        "-o",
+        str(output),
+        "--no-cache",
+        "--hw-encoder",
+        args.hw_encoder,
+        "--timeline",
+        "both",
+        "--subtitle-file",
+        "both",
     ]
     if args.no_voice:
         command.append("--no-voice")
-    run(command, cwd=root, timeout=args.timeout)
+    run(
+        command,
+        cwd=root,
+        timeout=args.timeout,
+        log_prefix=output.with_suffix(".render"),
+    )
 
 
 def sidecar_hashes(output: Path) -> dict[str, str | None]:
@@ -115,12 +221,29 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     outputs = [output_dir / "run-1.mp4", output_dir / "run-2.mp4"]
     report_path = output_dir / "reproducibility-report.json"
+    started_at = time.monotonic()
+    stage = "initialization"
     try:
         for output in outputs:
+            stage = f"render:{output.name}"
             render(script, output, args, root)
-        probes = [semantic_probe(path, cwd=root, timeout=args.timeout) for path in outputs]
-        video_hashes = [decoded_hash(path, "video", cwd=root, timeout=args.timeout) for path in outputs]
-        audio_hashes = [decoded_hash(path, "audio", cwd=root, timeout=args.timeout) for path in outputs]
+
+        probes = []
+        for output in outputs:
+            stage = f"ffprobe:{output.name}"
+            probes.append(semantic_probe(output, cwd=root, timeout=args.timeout))
+
+        video_hashes = []
+        for output in outputs:
+            stage = f"video-framemd5:{output.name}"
+            video_hashes.append(decoded_hash(output, "video", cwd=root, timeout=args.timeout))
+
+        audio_hashes = []
+        for output in outputs:
+            stage = f"audio-pcm:{output.name}"
+            audio_hashes.append(decoded_hash(output, "audio", cwd=root, timeout=args.timeout))
+
+        stage = "sidecar-hashes"
         sidecars = [sidecar_hashes(path) for path in outputs]
         differences = compare_values(probes[0], probes[1], "$.ffprobe")
         differences.extend(compare_values(video_hashes[0], video_hashes[1], "$.video_framemd5"))
@@ -131,6 +254,7 @@ def main() -> int:
             "script": str(script),
             "no_voice": args.no_voice,
             "hw_encoder": args.hw_encoder,
+            "elapsed_seconds": round(time.monotonic() - started_at, 3),
             "ffprobe": probes,
             "video_framemd5_sha256": video_hashes,
             "audio_pcm_sha256": audio_hashes,
@@ -138,9 +262,19 @@ def main() -> int:
             "differences": differences,
         }
     except Exception as exc:
-        report = {"status": "error", "error": str(exc), "script": str(script)}
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        report = {
+            "status": "error",
+            "stage": stage,
+            "error": str(exc),
+            "script": str(script),
+            "elapsed_seconds": round(time.monotonic() - started_at, 3),
+        }
+
+    report_json = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+    report_path.write_text(report_json, encoding="utf-8")
     print(report_path)
+    if report["status"] != "pass":
+        print(report_json, file=sys.stderr, end="")
     return 0 if report["status"] == "pass" else 1
 
 
