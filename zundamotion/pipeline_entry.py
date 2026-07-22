@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .components.script import load_script_and_config
+from .components.subtitles.lifecycle import shutdown_subtitle_executor
 from .plugins.manager import initialize_plugins
 from .utils.logger import logger
 from .pipeline import GenerationPipeline
@@ -86,5 +87,7 @@ async def run_generation(
         quality=quality,
         final_copy_only=final_copy_only,
     )
-    await pipeline.run(output_path)
-
+    try:
+        await pipeline.run(output_path)
+    finally:
+        shutdown_subtitle_executor()
