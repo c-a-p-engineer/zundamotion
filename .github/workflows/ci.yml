@@ -2,7 +2,47 @@ name: CI
 
 on:
   push:
+    paths:
+      - ".github/workflows/ci.yml"
+      - ".github/actions/**"
+      - ".devcontainer/**"
+      - "zundamotion/**"
+      - "tests/**"
+      - "scripts/**"
+      - "assets/**"
+      - "plugins/**"
+      - "tools/**"
+      - "vendor/**"
+      - "pyproject.toml"
+      - "setup.py"
+      - "setup.cfg"
+      - "MANIFEST.in"
+      - "requirements*.txt"
+      - "Dockerfile*"
+      - "docker-compose*.yml"
+      - "compose*.yml"
+      - "*.lock"
   pull_request:
+    paths:
+      - ".github/workflows/ci.yml"
+      - ".github/actions/**"
+      - ".devcontainer/**"
+      - "zundamotion/**"
+      - "tests/**"
+      - "scripts/**"
+      - "assets/**"
+      - "plugins/**"
+      - "tools/**"
+      - "vendor/**"
+      - "pyproject.toml"
+      - "setup.py"
+      - "setup.cfg"
+      - "MANIFEST.in"
+      - "requirements*.txt"
+      - "Dockerfile*"
+      - "docker-compose*.yml"
+      - "compose*.yml"
+      - "*.lock"
 
 jobs:
   test:
@@ -106,4 +146,4 @@ jobs:
             output/test_smoke/*.stderr.log
             output/test_smoke/ffprobe-result.json
             output/test_smoke/performance-baseline.json
-            output/reproducibility/reproducibility-report.json
+            output/reproducibility/**
