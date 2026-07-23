@@ -1,0 +1,24 @@
+meta: {title: "キャラクター表示", version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle:
+  render_mode: png
+  font_size: 30
+  max_chars_per_line: 18
+  y: h-38-text_h/2
+  font_color: "#FFFFFF"
+  stroke_color: "#202020"
+  background:
+    show: true
+    color: "#111111"
+    opacity: 0.70
+    padding: {left: 18, right: 18, top: 8, bottom: 8}
+defaults:
+  speaker_id: 3
+  characters:
+    copetan: {speaker_id: 3, scale: 0.24, anchor: bottom_center, position: {x: -110, y: 0}}
+scenes:
+  - id: character
+    bg: assets/bg/room.png
+    lines:
+      - {text: "表情を変えて表示できます。", duration: 1.8, characters: [{name: copetan, expression: default, visible: true}]}
+      - {text: "左右反転や色替えもできます。", duration: 1.8, characters: [{name: copetan, expression: smile, flip_x: true}]}

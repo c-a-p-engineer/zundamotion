@@ -14,3 +14,8 @@ cache/**
 *.log
 # Todo list
 TODO.md
+
+# Generated GitHub Pages feature-demo artifacts
+site-work/
+site-dist/
+.run/

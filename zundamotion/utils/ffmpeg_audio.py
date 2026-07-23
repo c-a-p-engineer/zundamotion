@@ -232,6 +232,11 @@ async def add_bgm_segments_to_video(
     if not segments:
         raise ValueError("No BGM segments provided.")
 
+    # Keep the re-encoded AAC track within the copied video stream's timeline.
+    # ``amix=duration=longest`` intentionally preserves fades, but can otherwise
+    # leave a tail after the video and fail final A/V validation.
+    video_duration = await get_media_duration(video_path)
+
     cmd = [ffmpeg_path, "-y", *get_profile_flags()]
     cmd.extend(_threading_flags(ffmpeg_path))
     cmd.extend(["-i", video_path])
@@ -279,11 +284,18 @@ async def add_bgm_segments_to_video(
     video_has_audio = await has_audio_stream(video_path)
     if video_has_audio:
         filter_parts.append(
-            "[0:a][bgm_mix]amix=inputs=2:duration=longest[aout]"
+            "[0:a][bgm_mix]amix=inputs=2:duration=longest,"
+            f"apad=whole_dur={video_duration:.3f},"
+            f"atrim=duration={video_duration:.3f},asetpts=PTS-STARTPTS[aout]"
         )
         output_audio = "[aout]"
     else:
-        output_audio = "[bgm_mix]"
+        filter_parts.append(
+            "[bgm_mix]"
+            f"apad=whole_dur={video_duration:.3f},"
+            f"atrim=duration={video_duration:.3f},asetpts=PTS-STARTPTS[aout]"
+        )
+        output_audio = "[aout]"
 
     filter_complex = ";".join(filter_parts)
     cmd.extend(["-filter_complex", filter_complex])

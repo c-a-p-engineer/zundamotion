@@ -1,0 +1,13 @@
+meta: {title: "BGM制御", version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle: {render_mode: png, font_size: 30, max_chars_per_line: 18, y: h-38-text_h/2, font_color: "#FFFFFF", stroke_color: "#202020", background: {show: true, color: "#111111", opacity: 0.70, padding: {left: 18, right: 18, top: 8, bottom: 8}}}
+defaults: {speaker_id: 3}
+bgm_layers: [{id: main, file: assets/bgm/intro.wav, gain: 12.0, loop: true}]
+scenes:
+  - id: bgm
+    bg: assets/bg/room.png
+    items:
+      - {bgm: {id: main, action: start, fade: 0.3}}
+      - {say: {text: "BGMを開始します。", duration: 1.5}}
+      - {bgm: {id: main, action: stop, fade: 0.3}}
+      - {say: {text: "フェードして停止します。", duration: 1.5}}

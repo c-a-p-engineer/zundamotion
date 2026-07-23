@@ -1,0 +1,9 @@
+meta: {title: "Shorts出力", version: 1}
+video: {width: 360, height: 640, fps: 15}
+subtitle: {render_mode: png, font_size: 24, max_chars_per_line: 13, y: h-34-text_h/2, font_color: "#FFFFFF", stroke_color: "#202020", background: {show: true, color: "#111111", opacity: 0.70, padding: {left: 14, right: 14, top: 7, bottom: 7}}}
+background: {default: assets/bg/room.png}
+defaults: {speaker_id: 3}
+scenes:
+  - id: shorts
+    bg: assets/bg/room.png
+    lines: [{text: "縦長のShorts向け動画です。", duration: 3.0}]

@@ -12,6 +12,7 @@ AI / Codex 向けの常時ルールはリポジトリ直下の `AGENTS.md`、低
 - [`../scripts/script_cheatsheet.md`](../scripts/script_cheatsheet.md): 台本 YAML の早見表
 - [`features.md`](./features.md): 実装済み機能と計画中機能の一覧
 - [`script_samples.md`](./script_samples.md): 同梱サンプル台本のカタログ
+- [`../site/README.md`](../site/README.md): GitHub Pages 機能デモサイトのローカル生成と公開運用
 
 ## Guides
 

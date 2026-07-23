@@ -1,0 +1,14 @@
+meta: {title: "背景パン・ズーム", version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle: {render_mode: png, font_size: 30, max_chars_per_line: 18, y: h-38-text_h/2, font_color: "#FFFFFF", stroke_color: "#202020", background: {show: true, color: "#111111", opacity: 0.70, padding: {left: 18, right: 18, top: 8, bottom: 8}}}
+defaults: {speaker_id: 3}
+scenes:
+  - id: panzoom
+    bg: assets/bg/room.png
+    lines:
+      - text: "背景だけをゆっくり動かします。"
+        speaker_name: copetan
+        background_effects:
+          - type: bg:pan_zoom
+            zoom: {from: 1.0, to: 1.18}
+            pan: {from: {x: 0.4, y: 0.5}, to: {x: 0.6, y: 0.5}}

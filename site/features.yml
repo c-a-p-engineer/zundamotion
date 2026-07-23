@@ -1,0 +1,147 @@
+site:
+  title: Zundamotion
+  description: YAMLから音声・字幕・立ち絵・BGM付き動画を生成するツール
+  language: ja
+  repository_url: https://github.com/c-a-p-engineer/zundamotion
+categories:
+  - {id: getting-started, title: はじめる, order: 10}
+  - {id: character, title: キャラクター, order: 20}
+  - {id: visual, title: 映像と合成, order: 30}
+  - {id: audio, title: 音声とBGM, order: 40}
+  - {id: output, title: 出力, order: 50}
+features:
+  - &minimal
+    id: minimal
+    title: 最小の動画を作る
+    category: getting-started
+    status: implemented
+    kind: user-facing
+    summary: 背景、字幕、無音トラックだけの短い動画をYAMLから作ります。
+    description: [背景を指定し、行ごとに表示する文字を書きます。, --no-voice なら音声サービスなしで試せます。]
+    use_cases: [まず動作を確認したいとき, YAMLの基本構造を学ぶとき]
+    limitations: [音声を使う場合はVOICEVOXが必要です。]
+    demo: {script: site/demos/minimal.yaml, output: minimal.mp4, poster: minimal.webp, audio_required: true, width: 640, height: 360, fps: 15, max_duration_seconds: 12, max_size_bytes: 2097152, poster_time_seconds: 1.0}
+    source_feature_names: [YAML load/validation, no-voice]
+    source_docs: [docs/features.md, scripts/script_cheatsheet.md]
+  - id: voicevox
+    title: VOICEVOXで話す
+    category: getting-started
+    status: implemented
+    kind: user-facing
+    summary: 話者、話速、音高を指定して音声と口パク付きの動画を作ります。
+    description: [speaker_nameで話者を選びます。, 実行時は固定VOICEVOX CPU runtimeを使います。]
+    use_cases: [解説動画のナレーション, キャラクター会話]
+    limitations: [VOICEVOXサービスを起動している環境が必要です。]
+    demo: {script: site/demos/voicevox.yaml, output: voicevox.mp4, poster: voicevox.webp, audio_required: true, width: 640, height: 360, fps: 15, max_duration_seconds: 12, max_size_bytes: 2097152, poster_time_seconds: 1.0}
+    source_feature_names: [VOICEVOX 音声生成/cache]
+    source_docs: [docs/features.md, scripts/script_cheatsheet.md]
+  - &subtitle
+    id: subtitle
+    title: 字幕を表示する
+    category: getting-started
+    status: implemented
+    kind: user-facing
+    summary: 読みやすい字幕を映像に焼き込み、SRTやASSも出力できます。
+    description: [複数行の文字を動画上に表示します。, PNGとASSの字幕描画方式を選べます。]
+    use_cases: [音声を見なくても内容を伝えたいとき, アクセシビリティ向上]
+    limitations: [長い文章は画面に収まるよう短く分けてください。]
+    demo: {script: site/demos/subtitle.yaml, output: subtitle.mp4, poster: subtitle.webp, audio_required: false, width: 640, height: 360, fps: 15, max_duration_seconds: 12, max_size_bytes: 2097152, poster_time_seconds: 1.0}
+    source_feature_names: [PNG/ASS 字幕 burn, SRT/ASS 出力]
+    source_docs: [docs/features.md, scripts/script_cheatsheet.md]
+  - id: character-basic
+    title: キャラクターを表示する
+    category: character
+    status: implemented
+    kind: user-facing
+    summary: 表情、左右反転、色替えを含む立ち絵を表示します。
+    description: [行ごとに表情と配置を指定できます。, 表示と非表示を切り替えられます。]
+    use_cases: [話者を見せる, 役割や感情を伝える]
+    limitations: [使える表情はキャラクター素材にある差分だけです。]
+    demo: {script: site/demos/character-basic.yaml, output: character-basic.mp4, poster: character-basic.webp, audio_required: true, width: 640, height: 360, fps: 15, max_duration_seconds: 12, max_size_bytes: 2097152, poster_time_seconds: 1.0}
+    source_feature_names: [キャラクター色替え, キャラクター flip]
+    source_docs: [docs/features.md, scripts/script_cheatsheet.md]
+  - id: character-move
+    title: キャラクターを移動する
+    category: character
+    status: implemented
+    kind: user-facing
+    summary: 指定した位置と倍率までキャラクターを滑らかに移動します。
+    description: [開始位置から最終位置へ補間します。, 移動中も表情アニメーションに追従します。]
+    use_cases: [登場演出, 話者交代, 注目対象への移動]
+    limitations: [開始点と終了点の単一区間だけに対応します。]
+    demo: {script: site/demos/character-move.yaml, output: character-move.mp4, poster: character-move.webp, audio_required: true, width: 640, height: 360, fps: 15, max_duration_seconds: 12, max_size_bytes: 2097152, poster_time_seconds: 1.0}
+    source_feature_names: [キャラクター位置移動, キャラクタースケール補間]
+    source_docs: [docs/features.md, scripts/script_cheatsheet.md]
+  - &panzoom
+    id: background-pan-zoom
+    title: 背景を動かす
+    category: visual
+    status: implemented
+    kind: user-facing
+    summary: 背景だけをゆっくりパン・ズームして静止画に動きを付けます。
+    description: [開始と終了の焦点・倍率を指定します。, キャラクターや字幕とは独立して動きます。]
+    use_cases: [静止画背景に変化を付ける, 注目箇所へ寄る]
+    limitations: [複数キーフレームは指定できません。]
+    demo: {script: site/demos/background-pan-zoom.yaml, output: background-pan-zoom.mp4, poster: background-pan-zoom.webp, audio_required: true, width: 640, height: 360, fps: 15, max_duration_seconds: 12, max_size_bytes: 2097152, poster_time_seconds: 1.0}
+    source_feature_names: [背景パン・ズーム / Ken Burns]
+    source_docs: [docs/features.md, scripts/script_cheatsheet.md]
+  - id: bgm-control
+    title: BGMを切り替える
+    category: audio
+    status: implemented
+    kind: user-facing
+    summary: BGMを開始・停止・切替し、フェードとループを設定します。
+    description: [レイヤーごとにBGMを定義します。, タイムライン上で再生状態を切り替えます。]
+    use_cases: [場面転換, 話題ごとの雰囲気作り]
+    limitations: [BGMはリポジトリ内または利用許諾済みの素材を使ってください。]
+    demo: {script: site/demos/bgm-control.yaml, output: bgm-control.mp4, poster: bgm-control.webp, audio_required: true, width: 640, height: 360, fps: 15, max_duration_seconds: 12, max_size_bytes: 2097152, poster_time_seconds: 1.0}
+    source_feature_names: [BGM loop, BGM start/stop/resume, BGM fade]
+    source_docs: [docs/features.md, scripts/script_cheatsheet.md]
+  - id: transition
+    title: 場面を切り替える
+    category: visual
+    status: implemented
+    kind: user-facing
+    summary: フェード、ディゾルブ、ワイプで場面を自然につなぎます。
+    description: [次の場面へ切り替わる見え方を指定します。, 音声も必要に応じてクロスフェードします。]
+    use_cases: [話題の区切り, OP・本編・EDの接続]
+    limitations: [素材の長さに合わせて短い切替時間を選んでください。]
+    demo: {script: site/demos/transition.yaml, output: transition.mp4, poster: transition.webp, audio_required: true, width: 640, height: 360, fps: 15, max_duration_seconds: 12, max_size_bytes: 2097152, poster_time_seconds: 1.0}
+    source_feature_names: [transition, scene 間 audio crossfade]
+    source_docs: [docs/features.md, scripts/script_cheatsheet.md]
+  - id: overlay-compositing
+    title: 映像に重ねる
+    category: visual
+    status: implemented
+    kind: user-facing
+    summary: 画像や動画をメイン映像の上へ重ねて見せます。
+    description: [PiP、合成モード、点滅を組み合わせられます。, 透明色を抜くクロマキーにも対応します。]
+    use_cases: [強調演出, 補足映像, 画面装飾]
+    limitations: [クロマキーの抜け具合は素材の背景色に依存します。]
+    demo: {script: site/demos/overlay-compositing.yaml, output: overlay-compositing.mp4, poster: overlay-compositing.webp, audio_required: true, width: 640, height: 360, fps: 15, max_duration_seconds: 12, max_size_bytes: 2097152, poster_time_seconds: 1.0}
+    source_feature_names: [クロマキー, blend mode, 前景 overlay / PiP, overlay blink]
+    source_docs: [docs/features.md, scripts/script_cheatsheet.md]
+  - id: insert-video-speed
+    title: 動画を挿入して速度を変える
+    category: visual
+    status: implemented
+    kind: user-facing
+    summary: 動画素材を挿入し、映像と音声を同期したまま再生速度を変えます。
+    description: [insertで動画を指定します。, speedは0.25から4.0まで設定できます。]
+    use_cases: [素材紹介, テンポ調整]
+    limitations: [速度範囲外の指定はできません。]
+    demo: {script: site/demos/insert-video-speed.yaml, output: insert-video-speed.mp4, poster: insert-video-speed.webp, audio_required: true, width: 640, height: 360, fps: 15, max_duration_seconds: 12, max_size_bytes: 2097152, poster_time_seconds: 1.0}
+    source_feature_names: [動画素材の速度変更]
+    source_docs: [docs/features.md, scripts/script_cheatsheet.md]
+  - id: output-shorts
+    title: Shorts向けに出力する
+    category: output
+    status: implemented
+    kind: user-facing
+    summary: 縦長のShorts向けキャンバスで動画を出力します。
+    description: [縦長の解像度とfpsをYAMLで指定します。, 同じ台本形式で縦型動画を作れます。]
+    use_cases: [YouTube Shorts, モバイル向け動画]
+    limitations: [横長素材は縦画面に合う配置へ調整してください。]
+    demo: {script: site/demos/output-shorts.yaml, output: output-shorts.mp4, poster: output-shorts.webp, audio_required: true, width: 360, height: 640, fps: 15, max_duration_seconds: 12, max_size_bytes: 2097152, poster_time_seconds: 1.0}
+    source_feature_names: [Shorts 書き出し]
+    source_docs: [docs/features.md, scripts/script_cheatsheet.md]

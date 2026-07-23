@@ -80,6 +80,7 @@ CLI 実行例、ログ形式、GPU/NVENC 確認、字幕出力、`--project-root
 - キャラクター素材: [`docs/guides/character_assets.md`](docs/guides/character_assets.md)
 - プロジェクト構造: [`docs/guides/project_structure.md`](docs/guides/project_structure.md)
 - submodule 利用: [`docs/guides/submodule.md`](docs/guides/submodule.md)
+- 実生成動画付き機能デモサイト: [`site/README.md`](site/README.md)
 
 ## サンプル台本
 

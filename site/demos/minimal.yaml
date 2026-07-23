@@ -1,0 +1,17 @@
+meta: {title: "最小デモ", version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle: &subtitle_standard
+  render_mode: png
+  font_size: 30
+  max_chars_per_line: 18
+  y: h-38-text_h/2
+  font_color: "#FFFFFF"
+  stroke_color: "#202020"
+  background: {show: true, color: "#111111", opacity: 0.70, padding: {left: 18, right: 18, top: 8, bottom: 8}}
+background: {default: assets/bg/default.png}
+defaults: {speaker_id: 3}
+scenes:
+  - id: start
+    bg: assets/bg/default.png
+    lines:
+      - {text: "背景と字幕だけで動画を作れます。", duration: 3.0}

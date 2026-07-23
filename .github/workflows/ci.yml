@@ -9,6 +9,7 @@ on:
       - "zundamotion/**"
       - "tests/**"
       - "scripts/**"
+      - "site/**"
       - "assets/**"
       - "plugins/**"
       - "tools/**"

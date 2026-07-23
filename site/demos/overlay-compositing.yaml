@@ -1,0 +1,10 @@
+meta: {title: "オーバーレイ合成", version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle: {render_mode: png, font_size: 30, max_chars_per_line: 18, y: h-38-text_h/2, font_color: "#FFFFFF", stroke_color: "#202020", background: {show: true, color: "#111111", opacity: 0.70, padding: {left: 18, right: 18, top: 8, bottom: 8}}}
+defaults: {speaker_id: 3}
+scenes:
+  - id: overlay
+    bg: assets/bg/room.png
+    fg_overlays:
+      - {id: speedlines, src: assets/overlay/speedlines.png, mode: blend, blend_mode: screen, opacity: 0.7, position: {x: 0, y: 0}, scale: {w: 640, h: 360, keep_aspect: true}, timing: {start: 0.0, duration: 3.0}}
+    lines: [{text: "画像を上に重ねて強調します。", duration: 3.0}]
