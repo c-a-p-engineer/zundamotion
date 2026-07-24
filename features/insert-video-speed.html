@@ -1,0 +1,12 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>動画を挿入して速度を変える</title><link rel="stylesheet" href="../assets/css/site.css"></head><body><header><a href="../index.html">Zundamotion</a></header><main><h1>動画を挿入して速度を変える</h1><p>動画素材を挿入し、映像と音声を同期したまま再生速度を変えます。</p><video controls preload="metadata" poster="../assets/posters/insert-video-speed.webp"><source src="../assets/videos/insert-video-speed.mp4" type="video/mp4"></video><h2>何が起きるか</h2><ul><li>insertで動画を指定します。</li><li>speedは0.25から4.0まで設定できます。</li></ul><h2>使いどころ</h2><ul><li>素材紹介</li><li>テンポ調整</li></ul><h2>制限</h2><ul><li>速度範囲外の指定はできません。</li></ul><h2>YAML</h2><button data-copy="yaml">コピー</button><pre id="yaml">meta: {title: &quot;動画挿入と速度&quot;, version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle: {render_mode: png, font_size: 30, max_chars_per_line: 18, y: h-38-text_h/2, font_color: &quot;#FFFFFF&quot;, stroke_color: &quot;#202020&quot;, background: {show: true, color: &quot;#111111&quot;, opacity: 0.70, padding: {left: 18, right: 18, top: 8, bottom: 8}}}
+defaults: {speaker_id: 3}
+scenes:
+  - id: insert
+    bg: assets/bg/default.png
+    lines:
+      - text: &quot;挿入動画を2倍速で再生します。&quot;
+        duration: 3.0
+        insert: {path: assets/bg/sample_video.mp4, speed: 2.0}
+</pre><p><a href="../demos/insert-video-speed.yaml">完全なYAML</a></p><p>生成元 commit: <code>72400ddfd8420f2d689b7c6c3a71213fa6dc76f9</code></p></main><script src="../assets/js/site.js"></script></body></html>

@@ -1,0 +1,10 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shorts向けに出力する</title><link rel="stylesheet" href="../assets/css/site.css"></head><body><header><a href="../index.html">Zundamotion</a></header><main><h1>Shorts向けに出力する</h1><p>縦長のShorts向けキャンバスで動画を出力します。</p><video controls preload="metadata" poster="../assets/posters/output-shorts.webp"><source src="../assets/videos/output-shorts.mp4" type="video/mp4"></video><h2>何が起きるか</h2><ul><li>縦長の解像度とfpsをYAMLで指定します。</li><li>同じ台本形式で縦型動画を作れます。</li></ul><h2>使いどころ</h2><ul><li>YouTube Shorts</li><li>モバイル向け動画</li></ul><h2>制限</h2><ul><li>横長素材は縦画面に合う配置へ調整してください。</li></ul><h2>YAML</h2><button data-copy="yaml">コピー</button><pre id="yaml">meta: {title: &quot;Shorts出力&quot;, version: 1}
+video: {width: 360, height: 640, fps: 15}
+subtitle: {render_mode: png, font_size: 24, max_chars_per_line: 13, y: h-34-text_h/2, font_color: &quot;#FFFFFF&quot;, stroke_color: &quot;#202020&quot;, background: {show: true, color: &quot;#111111&quot;, opacity: 0.70, padding: {left: 14, right: 14, top: 7, bottom: 7}}}
+background: {default: assets/bg/room.png}
+defaults: {speaker_id: 3}
+scenes:
+  - id: shorts
+    bg: assets/bg/room.png
+    lines: [{text: &quot;縦長のShorts向け動画です。&quot;, duration: 3.0}]
+</pre><p><a href="../demos/output-shorts.yaml">完全なYAML</a></p><p>生成元 commit: <code>72400ddfd8420f2d689b7c6c3a71213fa6dc76f9</code></p></main><script src="../assets/js/site.js"></script></body></html>

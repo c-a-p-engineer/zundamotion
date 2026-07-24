@@ -1,0 +1,18 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>最小の動画を作る</title><link rel="stylesheet" href="../assets/css/site.css"></head><body><header><a href="../index.html">Zundamotion</a></header><main><h1>最小の動画を作る</h1><p>背景、字幕、無音トラックだけの短い動画をYAMLから作ります。</p><video controls preload="metadata" poster="../assets/posters/minimal.webp"><source src="../assets/videos/minimal.mp4" type="video/mp4"></video><h2>何が起きるか</h2><ul><li>背景を指定し、行ごとに表示する文字を書きます。</li><li>--no-voice なら音声サービスなしで試せます。</li></ul><h2>使いどころ</h2><ul><li>まず動作を確認したいとき</li><li>YAMLの基本構造を学ぶとき</li></ul><h2>制限</h2><ul><li>音声を使う場合はVOICEVOXが必要です。</li></ul><h2>YAML</h2><button data-copy="yaml">コピー</button><pre id="yaml">meta: {title: &quot;最小デモ&quot;, version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle: &amp;subtitle_standard
+  render_mode: png
+  font_size: 30
+  max_chars_per_line: 18
+  y: h-38-text_h/2
+  font_color: &quot;#FFFFFF&quot;
+  stroke_color: &quot;#202020&quot;
+  background: {show: true, color: &quot;#111111&quot;, opacity: 0.70, padding: {left: 18, right: 18, top: 8, bottom: 8}}
+background: {default: assets/bg/default.png}
+defaults: {speaker_id: 3}
+scenes:
+  - id: start
+    bg: assets/bg/default.png
+    lines:
+      - {text: &quot;背景と字幕だけで動画を作れます。&quot;, duration: 3.0}
+</pre><p><a href="../demos/minimal.yaml">完全なYAML</a></p><p>生成元 commit: <code>72400ddfd8420f2d689b7c6c3a71213fa6dc76f9</code></p></main><script src="../assets/js/site.js"></script></body></html>

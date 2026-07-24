@@ -1,0 +1,1 @@
+document.addEventListener("click", async event => { if (!event.target.matches("[data-copy]")) return; await navigator.clipboard.writeText(document.querySelector("#yaml").innerText); event.target.textContent="コピーしました"; });

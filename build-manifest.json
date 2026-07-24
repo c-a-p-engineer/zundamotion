@@ -1,0 +1,38 @@
+{
+  "source_commit": "72400ddfd8420f2d689b7c6c3a71213fa6dc76f9",
+  "features": {
+    "minimal": {
+      "video": "minimal.mp4"
+    },
+    "voicevox": {
+      "video": "voicevox.mp4"
+    },
+    "subtitle": {
+      "video": "subtitle.mp4"
+    },
+    "character-basic": {
+      "video": "character-basic.mp4"
+    },
+    "character-move": {
+      "video": "character-move.mp4"
+    },
+    "background-pan-zoom": {
+      "video": "background-pan-zoom.mp4"
+    },
+    "bgm-control": {
+      "video": "bgm-control.mp4"
+    },
+    "transition": {
+      "video": "transition.mp4"
+    },
+    "overlay-compositing": {
+      "video": "overlay-compositing.mp4"
+    },
+    "insert-video-speed": {
+      "video": "insert-video-speed.mp4"
+    },
+    "output-shorts": {
+      "video": "output-shorts.mp4"
+    }
+  }
+}

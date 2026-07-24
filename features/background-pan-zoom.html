@@ -1,0 +1,15 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>背景を動かす</title><link rel="stylesheet" href="../assets/css/site.css"></head><body><header><a href="../index.html">Zundamotion</a></header><main><h1>背景を動かす</h1><p>背景だけをゆっくりパン・ズームして静止画に動きを付けます。</p><video controls preload="metadata" poster="../assets/posters/background-pan-zoom.webp"><source src="../assets/videos/background-pan-zoom.mp4" type="video/mp4"></video><h2>何が起きるか</h2><ul><li>開始と終了の焦点・倍率を指定します。</li><li>キャラクターや字幕とは独立して動きます。</li></ul><h2>使いどころ</h2><ul><li>静止画背景に変化を付ける</li><li>注目箇所へ寄る</li></ul><h2>制限</h2><ul><li>複数キーフレームは指定できません。</li></ul><h2>YAML</h2><button data-copy="yaml">コピー</button><pre id="yaml">meta: {title: &quot;背景パン・ズーム&quot;, version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle: {render_mode: png, font_size: 30, max_chars_per_line: 18, y: h-38-text_h/2, font_color: &quot;#FFFFFF&quot;, stroke_color: &quot;#202020&quot;, background: {show: true, color: &quot;#111111&quot;, opacity: 0.70, padding: {left: 18, right: 18, top: 8, bottom: 8}}}
+defaults: {speaker_id: 3}
+scenes:
+  - id: panzoom
+    bg: assets/bg/room.png
+    lines:
+      - text: &quot;背景だけをゆっくり動かします。&quot;
+        speaker_name: copetan
+        background_effects:
+          - type: bg:pan_zoom
+            zoom: {from: 1.0, to: 1.18}
+            pan: {from: {x: 0.4, y: 0.5}, to: {x: 0.6, y: 0.5}}
+</pre><p><a href="../demos/background-pan-zoom.yaml">完全なYAML</a></p><p>生成元 commit: <code>72400ddfd8420f2d689b7c6c3a71213fa6dc76f9</code></p></main><script src="../assets/js/site.js"></script></body></html>

@@ -1,0 +1,12 @@
+meta: {title: "場面切替", version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle: {render_mode: png, font_size: 30, max_chars_per_line: 18, y: h-38-text_h/2, font_color: "#FFFFFF", stroke_color: "#202020", background: {show: true, color: "#111111", opacity: 0.70, padding: {left: 18, right: 18, top: 8, bottom: 8}}}
+defaults: {speaker_id: 3}
+scenes:
+  - id: first
+    bg: assets/bg/room.png
+    lines: [{text: "最初の場面です。", duration: 2.0}]
+    transition: {type: dissolve, duration: 0.5}
+  - id: second
+    bg: assets/bg/sunset.png
+    lines: [{text: "ディゾルブで切り替わりました。", duration: 2.0}]

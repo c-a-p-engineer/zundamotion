@@ -1,0 +1,11 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>映像に重ねる</title><link rel="stylesheet" href="../assets/css/site.css"></head><body><header><a href="../index.html">Zundamotion</a></header><main><h1>映像に重ねる</h1><p>画像や動画をメイン映像の上へ重ねて見せます。</p><video controls preload="metadata" poster="../assets/posters/overlay-compositing.webp"><source src="../assets/videos/overlay-compositing.mp4" type="video/mp4"></video><h2>何が起きるか</h2><ul><li>PiP、合成モード、点滅を組み合わせられます。</li><li>透明色を抜くクロマキーにも対応します。</li></ul><h2>使いどころ</h2><ul><li>強調演出</li><li>補足映像</li><li>画面装飾</li></ul><h2>制限</h2><ul><li>クロマキーの抜け具合は素材の背景色に依存します。</li></ul><h2>YAML</h2><button data-copy="yaml">コピー</button><pre id="yaml">meta: {title: &quot;オーバーレイ合成&quot;, version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle: {render_mode: png, font_size: 30, max_chars_per_line: 18, y: h-38-text_h/2, font_color: &quot;#FFFFFF&quot;, stroke_color: &quot;#202020&quot;, background: {show: true, color: &quot;#111111&quot;, opacity: 0.70, padding: {left: 18, right: 18, top: 8, bottom: 8}}}
+defaults: {speaker_id: 3}
+scenes:
+  - id: overlay
+    bg: assets/bg/room.png
+    fg_overlays:
+      - {id: speedlines, src: assets/overlay/speedlines.png, mode: blend, blend_mode: screen, opacity: 0.7, position: {x: 0, y: 0}, scale: {w: 640, h: 360, keep_aspect: true}, timing: {start: 0.0, duration: 3.0}}
+    lines: [{text: &quot;画像を上に重ねて強調します。&quot;, duration: 3.0}]
+</pre><p><a href="../demos/overlay-compositing.yaml">完全なYAML</a></p><p>生成元 commit: <code>72400ddfd8420f2d689b7c6c3a71213fa6dc76f9</code></p></main><script src="../assets/js/site.js"></script></body></html>

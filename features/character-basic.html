@@ -1,0 +1,25 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>キャラクターを表示する</title><link rel="stylesheet" href="../assets/css/site.css"></head><body><header><a href="../index.html">Zundamotion</a></header><main><h1>キャラクターを表示する</h1><p>表情、左右反転、色替えを含む立ち絵を表示します。</p><video controls preload="metadata" poster="../assets/posters/character-basic.webp"><source src="../assets/videos/character-basic.mp4" type="video/mp4"></video><h2>何が起きるか</h2><ul><li>行ごとに表情と配置を指定できます。</li><li>表示と非表示を切り替えられます。</li></ul><h2>使いどころ</h2><ul><li>話者を見せる</li><li>役割や感情を伝える</li></ul><h2>制限</h2><ul><li>使える表情はキャラクター素材にある差分だけです。</li></ul><h2>YAML</h2><button data-copy="yaml">コピー</button><pre id="yaml">meta: {title: &quot;キャラクター表示&quot;, version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle:
+  render_mode: png
+  font_size: 30
+  max_chars_per_line: 18
+  y: h-38-text_h/2
+  font_color: &quot;#FFFFFF&quot;
+  stroke_color: &quot;#202020&quot;
+  background:
+    show: true
+    color: &quot;#111111&quot;
+    opacity: 0.70
+    padding: {left: 18, right: 18, top: 8, bottom: 8}
+defaults:
+  speaker_id: 3
+  characters:
+    copetan: {speaker_id: 3, scale: 0.24, anchor: bottom_center, position: {x: -110, y: 0}}
+scenes:
+  - id: character
+    bg: assets/bg/room.png
+    lines:
+      - {text: &quot;表情を変えて表示できます。&quot;, duration: 1.8, characters: [{name: copetan, expression: default, visible: true}]}
+      - {text: &quot;左右反転や色替えもできます。&quot;, duration: 1.8, characters: [{name: copetan, expression: smile, flip_x: true}]}
+</pre><p><a href="../demos/character-basic.yaml">完全なYAML</a></p><p>生成元 commit: <code>72400ddfd8420f2d689b7c6c3a71213fa6dc76f9</code></p></main><script src="../assets/js/site.js"></script></body></html>

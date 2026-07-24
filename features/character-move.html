@@ -1,0 +1,15 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>キャラクターを移動する</title><link rel="stylesheet" href="../assets/css/site.css"></head><body><header><a href="../index.html">Zundamotion</a></header><main><h1>キャラクターを移動する</h1><p>指定した位置と倍率までキャラクターを滑らかに移動します。</p><video controls preload="metadata" poster="../assets/posters/character-move.webp"><source src="../assets/videos/character-move.mp4" type="video/mp4"></video><h2>何が起きるか</h2><ul><li>開始位置から最終位置へ補間します。</li><li>移動中も表情アニメーションに追従します。</li></ul><h2>使いどころ</h2><ul><li>登場演出</li><li>話者交代</li><li>注目対象への移動</li></ul><h2>制限</h2><ul><li>開始点と終了点の単一区間だけに対応します。</li></ul><h2>YAML</h2><button data-copy="yaml">コピー</button><pre id="yaml">meta: {title: &quot;キャラクター移動&quot;, version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle: {render_mode: png, font_size: 30, max_chars_per_line: 18, y: h-38-text_h/2, font_color: &quot;#FFFFFF&quot;, stroke_color: &quot;#202020&quot;, background: {show: true, color: &quot;#111111&quot;, opacity: 0.70, padding: {left: 18, right: 18, top: 8, bottom: 8}}}
+defaults:
+  speaker_id: 3
+  characters:
+    copetan: {speaker_id: 3, scale: 0.20, anchor: bottom_center, position: {x: -180, y: 0}}
+scenes:
+  - id: move
+    bg: assets/bg/room.png
+    lines:
+      - text: &quot;画面の中央まで移動します。&quot;
+        duration: 3.0
+        characters: [{name: copetan, expression: smile, visible: true, position: {x: -40, y: 0}, scale: 0.24, move: {from: {x: -180, y: 0, scale: 0.20}, duration: 2.0, easing: ease_out}}]
+</pre><p><a href="../demos/character-move.yaml">完全なYAML</a></p><p>生成元 commit: <code>72400ddfd8420f2d689b7c6c3a71213fa6dc76f9</code></p></main><script src="../assets/js/site.js"></script></body></html>

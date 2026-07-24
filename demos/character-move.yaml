@@ -1,0 +1,14 @@
+meta: {title: "キャラクター移動", version: 1}
+video: {width: 640, height: 360, fps: 15}
+subtitle: {render_mode: png, font_size: 30, max_chars_per_line: 18, y: h-38-text_h/2, font_color: "#FFFFFF", stroke_color: "#202020", background: {show: true, color: "#111111", opacity: 0.70, padding: {left: 18, right: 18, top: 8, bottom: 8}}}
+defaults:
+  speaker_id: 3
+  characters:
+    copetan: {speaker_id: 3, scale: 0.20, anchor: bottom_center, position: {x: -180, y: 0}}
+scenes:
+  - id: move
+    bg: assets/bg/room.png
+    lines:
+      - text: "画面の中央まで移動します。"
+        duration: 3.0
+        characters: [{name: copetan, expression: smile, visible: true, position: {x: -40, y: 0}, scale: 0.24, move: {from: {x: -180, y: 0, scale: 0.20}, duration: 2.0, easing: ease_out}}]
