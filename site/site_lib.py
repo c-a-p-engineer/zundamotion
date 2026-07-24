@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -25,10 +26,9 @@ def sha256(paths: list[Path]) -> str:
     return f"sha256:{digest.hexdigest()}"
 
 
-def feature_input_hash(feature: dict[str, Any]) -> str:
-    demo = ROOT / feature["demo"]["script"]
+@lru_cache(maxsize=1)
+def _common_feature_input_hash() -> str:
     tracked = [
-        demo,
         ROOT / "site/render_demos.py",
         ROOT / "site/site_lib.py",
         ROOT / ".devcontainer/runtime.lock.json",
@@ -39,6 +39,15 @@ def feature_input_hash(feature: dict[str, Any]) -> str:
         sorted(path for path in (ROOT / "assets").rglob("*") if path.is_file())
     )
     return sha256(tracked)
+
+
+def feature_input_hash(feature: dict[str, Any]) -> str:
+    demo = ROOT / feature["demo"]["script"]
+    digest = hashlib.sha256()
+    digest.update(_common_feature_input_hash().encode())
+    digest.update(str(demo.relative_to(ROOT)).encode())
+    digest.update(demo.read_bytes())
+    return f"sha256:{digest.hexdigest()}"
 
 
 def run_json(command: list[str]) -> dict[str, Any]:
