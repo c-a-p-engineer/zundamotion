@@ -45,6 +45,14 @@ def feature_input_hash(feature: dict[str, Any]) -> str:
     demo = ROOT / feature["demo"]["script"]
     digest = hashlib.sha256()
     digest.update(_common_feature_input_hash().encode())
+    digest.update(
+        json.dumps(
+            feature["demo"],
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    )
     digest.update(str(demo.relative_to(ROOT)).encode())
     digest.update(demo.read_bytes())
     return f"sha256:{digest.hexdigest()}"
