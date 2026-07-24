@@ -4,6 +4,17 @@ on:
   push:
     branches:
       - master
+    paths:
+      - ".github/workflows/pages.yml"
+      - ".devcontainer/runtime.lock.json"
+      - "pyproject.toml"
+      - "site/**"
+      - "!site/README.md"
+      - "zundamotion/**"
+      - "assets/**"
+      - "scripts/check_runtime_lock.py"
+      - "scripts/install_locked_ffmpeg.py"
+      - "scripts/runtime_lock.py"
   workflow_dispatch:
 
 concurrency:
@@ -28,6 +39,8 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.14.6"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install system dependencies
         run: |
@@ -51,10 +64,38 @@ jobs:
       - name: Install Python dependencies
         run: python -m pip install -e ".[dev]"
 
+      - name: Restore generated media cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            site-work/videos
+            site-work/posters
+            site-work/metadata
+          key: >-
+            pages-media-v1-${{ runner.os }}-${{ hashFiles(
+            '.devcontainer/runtime.lock.json',
+            'pyproject.toml',
+            'site/demos/**',
+            'site/render_demos.py',
+            'site/site_lib.py',
+            'zundamotion/**/*.py',
+            'assets/**') }}
+          restore-keys: |
+            pages-media-v1-${{ runner.os }}-
+
       - name: Validate feature demo manifest
         run: python site/validate.py
 
+      - name: Inspect restored media cache
+        id: media-cache
+        shell: bash
+        run: |
+          python site/render_demos.py \
+            --output site-work \
+            --cache-status >> "$GITHUB_OUTPUT"
+
       - name: Start pinned VOICEVOX CPU runtime
+        if: steps.media-cache.outputs.voice_required == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -104,7 +145,7 @@ jobs:
         run: python site/link_check.py --site-dir site-dist
 
       - name: Stop VOICEVOX
-        if: always()
+        if: always() && steps.media-cache.outputs.voice_required == 'true'
         run: docker rm -f voicevox || true
 
       - name: Upload generated site
@@ -129,6 +170,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      changed: ${{ steps.publish.outputs.changed }}
 
     steps:
       - name: Checkout source repository
@@ -143,9 +186,11 @@ jobs:
           path: ${{ runner.temp }}/pages-site
 
       - name: Replace generated gh-pages snapshot
+        id: publish
         shell: bash
         run: |
           set -euo pipefail
+          echo "changed=false" >> "$GITHUB_OUTPUT"
           test "${GITHUB_REF}" = "refs/heads/master"
 
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
@@ -174,9 +219,13 @@ jobs:
 
           git commit -m "pages: ${GITHUB_SHA}"
           git push origin HEAD:gh-pages
+          echo "changed=true" >> "$GITHUB_OUTPUT"
 
   deploy:
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    if: >-
+      github.ref == 'refs/heads/master' &&
+      github.event_name == 'push' &&
+      needs.publish-branch.outputs.changed == 'true'
     needs:
       - build
       - publish-branch
