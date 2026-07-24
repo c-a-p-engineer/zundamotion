@@ -27,8 +27,17 @@ def sha256(paths: list[Path]) -> str:
 
 def feature_input_hash(feature: dict[str, Any]) -> str:
     demo = ROOT / feature["demo"]["script"]
-    tracked = [demo, ROOT / "site/render_demos.py", ROOT / ".devcontainer/runtime.lock.json", ROOT / "pyproject.toml"]
+    tracked = [
+        demo,
+        ROOT / "site/render_demos.py",
+        ROOT / "site/site_lib.py",
+        ROOT / ".devcontainer/runtime.lock.json",
+        ROOT / "pyproject.toml",
+    ]
     tracked.extend(sorted((ROOT / "zundamotion").rglob("*.py")))
+    tracked.extend(
+        sorted(path for path in (ROOT / "assets").rglob("*") if path.is_file())
+    )
     return sha256(tracked)
 
 
