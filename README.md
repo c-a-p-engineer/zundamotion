@@ -3,6 +3,8 @@
 Zundamotion は、YAML 台本から `.mp4` 動画を生成するツールです。  
 VOICEVOX による音声合成、FFmpeg による映像合成、字幕焼き込み、BGM/SE 合成、立ち絵表示をまとめて扱います。
 
+公開デモサイト: [Zundamotion feature demos](https://c-a-p-engineer.github.io/zundamotion/)
+
 この README は入口ページです。詳細な手順や仕様は `docs/` と `scripts/script_cheatsheet.md` に分離しています。
 
 ## まず把握すること
@@ -80,7 +82,7 @@ CLI 実行例、ログ形式、GPU/NVENC 確認、字幕出力、`--project-root
 - キャラクター素材: [`docs/guides/character_assets.md`](docs/guides/character_assets.md)
 - プロジェクト構造: [`docs/guides/project_structure.md`](docs/guides/project_structure.md)
 - submodule 利用: [`docs/guides/submodule.md`](docs/guides/submodule.md)
-- 実生成動画付き機能デモサイト: [`site/README.md`](site/README.md)
+- 実生成動画付き機能デモサイト: [公開サイト](https://c-a-p-engineer.github.io/zundamotion/) / [`site/README.md`](site/README.md)
 
 ## サンプル台本
 
