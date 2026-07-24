@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - master
-      - feat/github-pages-feature-demo
   workflow_dispatch:
 
 concurrency:
