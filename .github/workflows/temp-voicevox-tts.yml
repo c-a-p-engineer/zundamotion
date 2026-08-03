@@ -1,0 +1,91 @@
+name: Temporary VOICEVOX TTS
+
+on:
+  pull_request:
+    paths:
+      - ".tts-trigger/**"
+
+permissions:
+  contents: read
+
+jobs:
+  synthesize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start VOICEVOX Engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull voicevox/voicevox_engine:cpu-latest
+          docker run -d --name voicevox -p 127.0.0.1:50021:50021 voicevox/voicevox_engine:cpu-latest
+          for i in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:50021/version >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs voicevox
+          exit 1
+
+      - name: Generate Japanese news narration
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > narration.txt <<'TEXT'
+          速報です。
+          横浜市港南区、日限山のサンヴェール日限山で、震度五強の地震により、建物の一部が損壊しました。
+
+          現場では現在、重機を使った、がれきの撤去作業が続いています。
+          これまでに、けが人の情報は入っていません。
+          しかし、建物には大きな亀裂が確認され、崩落の危険が残っています。
+
+          周辺の方は余震に警戒し、規制区域や損傷した建物には、絶対に近づかないでください。
+          TEXT
+
+          curl --fail --silent http://127.0.0.1:50021/speakers > speakers.json
+          SPEAKER_ID=$(jq -r '.[] | select(.name == "青山龍星") | .styles[] | select(.name == "熱血") | .id' speakers.json | head -n 1)
+          if [ -z "$SPEAKER_ID" ] || [ "$SPEAKER_ID" = "null" ]; then
+            SPEAKER_ID=$(jq -r '.[] | select(.name == "青山龍星") | .styles[] | select(.name == "ノーマル") | .id' speakers.json | head -n 1)
+          fi
+          test -n "$SPEAKER_ID"
+          echo "VOICEVOX speaker id: $SPEAKER_ID"
+
+          curl --fail --silent --get \
+            --data-urlencode "text@narration.txt" \
+            --data-urlencode "speaker=$SPEAKER_ID" \
+            -X POST http://127.0.0.1:50021/audio_query > query.json
+
+          jq '.speedScale = 1.08
+              | .pitchScale = -0.03
+              | .intonationScale = 1.18
+              | .volumeScale = 1.0
+              | .prePhonemeLength = 0.18
+              | .postPhonemeLength = 0.45
+              | .outputSamplingRate = 48000
+              | .outputStereo = true' query.json > tuned-query.json
+
+          curl --fail --silent \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            --data-binary @tuned-query.json \
+            "http://127.0.0.1:50021/synthesis?speaker=$SPEAKER_ID" \
+            > voicevox-news.wav
+
+          ffmpeg -hide_banner -y -i voicevox-news.wav \
+            -af "highpass=f=75,lowpass=f=9500,acompressor=threshold=-18dB:ratio=2.5:attack=8:release=120,alimiter=limit=0.94" \
+            -ar 48000 -ac 2 voicevox-news-mastered.wav
+
+      - name: Upload narration
+        uses: actions/upload-artifact@v4
+        with:
+          name: voicevox-japanese-news
+          path: |
+            voicevox-news-mastered.wav
+            narration.txt
+            speakers.json
+            tuned-query.json
+          if-no-files-found: error
+          retention-days: 1
