@@ -1,1 +1,2 @@
 Generate the temporary Japanese VOICEVOX narration artifact for the fictional earthquake-news video.
+Retry after removing the unavailable runner-side ffmpeg step.
