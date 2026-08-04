@@ -91,7 +91,7 @@ def test_generate_audio_raises_clear_error_for_unknown_voicevox_speaker(monkeypa
     asyncio.run(_run())
 
 
-def test_generate_audio_falls_back_to_silence_when_voicevox_synthesis_fails(
+def test_generate_audio_aborts_when_voicevox_synthesis_fails(
     monkeypatch, tmp_path
 ):
     async def _run() -> None:
@@ -130,11 +130,11 @@ def test_generate_audio_falls_back_to_silence_when_voicevox_synthesis_fails(
                 response=response,
             )
 
-        async def fake_create_silent_audio(output_path, duration, _audio_params, ffmpeg_path="ffmpeg"):
-            Path(output_path).write_bytes(b"RIFF")
-            fake_create_silent_audio.calls.append((output_path, duration, ffmpeg_path))
+        async def fake_get_engine_version(*_args, **_kwargs):
+            return "test-engine"
 
-        fake_create_silent_audio.calls = []
+        async def fake_create_silent_audio(*_args, **_kwargs):
+            raise AssertionError("silent fallback must not be created")
 
         monkeypatch.setattr(
             "zundamotion.components.audio.generator.get_speakers_info",
@@ -145,27 +145,28 @@ def test_generate_audio_falls_back_to_silence_when_voicevox_synthesis_fails(
             fake_generate_voice,
         )
         monkeypatch.setattr(
+            "zundamotion.components.audio.generator.get_engine_version",
+            fake_get_engine_version,
+        )
+        monkeypatch.setattr(
             "zundamotion.components.audio.generator.create_silent_audio",
             fake_create_silent_audio,
         )
 
-        audio_path, voice_usage, layer_segments = await generator.generate_audio(
-            "こんにちは",
-            {"speaker_id": 3, "speaker_name": "copetan"},
-            "scene1_1",
-        )
-
-        assert audio_path == tmp_path / "scene1_1_speech.wav"
-        assert audio_path.exists()
-        assert voice_usage == []
-        assert layer_segments == []
-        assert fake_create_silent_audio.calls
-        assert fake_create_silent_audio.calls[0][1] >= 1.0
+        with pytest.raises(
+            RuntimeError,
+            match=r"VOICEVOX synthesis failed for scene1_1 .*render aborted",
+        ):
+            await generator.generate_audio(
+                "こんにちは",
+                {"speaker_id": 3, "speaker_name": "copetan"},
+                "scene1_1",
+            )
 
     asyncio.run(_run())
 
 
-def test_generate_audio_falls_back_to_silence_when_cache_wraps_voicevox_error(
+def test_generate_audio_aborts_when_cache_wraps_voicevox_error(
     monkeypatch, tmp_path
 ):
     async def _run() -> None:
@@ -204,11 +205,11 @@ def test_generate_audio_falls_back_to_silence_when_cache_wraps_voicevox_error(
                 response=response,
             )
 
-        async def fake_create_silent_audio(output_path, duration, _audio_params, ffmpeg_path="ffmpeg"):
-            Path(output_path).write_bytes(b"RIFF")
-            fake_create_silent_audio.calls.append((output_path, duration, ffmpeg_path))
+        async def fake_get_engine_version(*_args, **_kwargs):
+            return "test-engine"
 
-        fake_create_silent_audio.calls = []
+        async def fake_create_silent_audio(*_args, **_kwargs):
+            raise AssertionError("silent fallback must not be created")
 
         monkeypatch.setattr(
             "zundamotion.components.audio.generator.get_speakers_info",
@@ -219,12 +220,50 @@ def test_generate_audio_falls_back_to_silence_when_cache_wraps_voicevox_error(
             fake_generate_voice,
         )
         monkeypatch.setattr(
+            "zundamotion.components.audio.generator.get_engine_version",
+            fake_get_engine_version,
+        )
+        monkeypatch.setattr(
+            "zundamotion.components.audio.generator.create_silent_audio",
+            fake_create_silent_audio,
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match=r"VOICEVOX synthesis failed for scene1_1 .*render aborted",
+        ):
+            await generator.generate_audio(
+                "こんにちは",
+                {"speaker_id": 3, "speaker_name": "copetan"},
+                "scene1_1",
+            )
+
+    asyncio.run(_run())
+
+
+def test_generate_audio_creates_silence_when_voice_is_disabled(monkeypatch, tmp_path):
+    async def _run() -> None:
+        generator = AudioGenerator(
+            config={"voice": {"enabled": False, "estimate_min_duration": 1.0}},
+            temp_dir=tmp_path,
+            audio_params=AudioParams(),
+            cache_manager=StubCacheManager(),
+        )
+
+        async def fake_create_silent_audio(
+            output_path, duration, _audio_params, ffmpeg_path="ffmpeg"
+        ):
+            Path(output_path).write_bytes(b"RIFF")
+            fake_create_silent_audio.calls.append((output_path, duration, ffmpeg_path))
+
+        fake_create_silent_audio.calls = []
+        monkeypatch.setattr(
             "zundamotion.components.audio.generator.create_silent_audio",
             fake_create_silent_audio,
         )
 
         audio_path, voice_usage, layer_segments = await generator.generate_audio(
-            "こんにちは",
+            "意図した無音です",
             {"speaker_id": 3, "speaker_name": "copetan"},
             "scene1_1",
         )

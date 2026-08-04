@@ -347,31 +347,17 @@ class AudioGenerator:
                     }
                 )
             except (CacheError, httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
-                speech_wav_path = speech_wav_path_base.with_suffix(".wav")
-                estimated_duration = _estimate_silent_duration(
-                    text,
-                    line_config,
-                    self.voice_config,
-                )
-                silent_duration = max(
-                    estimated_duration,
-                    required_speech_duration_for_ses,
-                    0.001,
-                )
-                logger.warning(
+                logger.error(
                     "[Audio] VOICEVOX synthesis failed for %s (speaker_id=%s): %s. "
-                    "Falling back to silent WAV with estimated duration %.3fs.",
+                    "Aborting render to avoid silent output.",
                     output_filename,
                     speaker,
                     exc,
-                    silent_duration,
                 )
-                await create_silent_audio(
-                    str(speech_wav_path),
-                    silent_duration,
-                    self.intermediate_audio_params,
-                )
-                speech_duration = silent_duration
+                raise RuntimeError(
+                    f"VOICEVOX synthesis failed for {output_filename} "
+                    f"(speaker_id={speaker}); render aborted to avoid silent output: {exc}"
+                ) from exc
         else:
             # If voice is disabled or text is empty, create a silent WAV file
             speech_wav_path = speech_wav_path_base.with_suffix(

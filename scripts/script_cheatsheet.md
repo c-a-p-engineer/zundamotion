@@ -80,6 +80,10 @@ VOICEVOX を使わず、無音の音声トラックを自動生成して動画�
 セリフの長さから推定した秒数で無音を作成します。明示的に長さを指定したい場合は `duration` か
 `estimated_duration` を行に指定してください。
 
+VOICEVOX を有効にした通常生成では、音声合成や音声キャッシュの生成に失敗すると対象発話を示して
+レンダーを停止します。失敗した発話を推定尺の無音へ置き換えて処理を続行することはありません。
+空テキスト、`wait`、`--no-voice` による意図した無音は従来どおり利用できます。
+
 ```bash
 DISABLE_HWENC=1 python -m zundamotion.main scripts/sample_include_vars.yaml \\
   --no-voice --no-cache -o output/sample_include_vars_no_voice.mp4

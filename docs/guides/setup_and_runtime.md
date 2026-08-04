@@ -109,4 +109,4 @@ docker compose -f .devcontainer/docker-compose.yml --profile runner up --build r
 | FFmpeg 7.0 未満 | 7.0 以上へ更新する。公式 lock は別途固定値を使う |
 | IPA ゴシックがない | `fonts-ipafont-gothic` を導入し必須パスを確認する |
 | `No module named 'zundamotion'` | `python -m pip install -e .` を実行する |
-| VOICEVOX に接続できない | Compose service と `VOICEVOX_URL` を確認する |
+| VOICEVOX に接続できず生成が停止する | 無音では継続しない。エラーに出た発話IDを確認し、Compose service と `VOICEVOX_URL` を直して再生成する |

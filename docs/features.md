@@ -61,7 +61,7 @@
 | 機能 | 状態 | 対応範囲・制約 | 根拠 |
 | --- | --- | --- | --- |
 | YAML load/validation | 実装済み | default 適用、素材・設定検証 | `components/config`, `components/script/loader.py` |
-| VOICEVOX 音声生成/cache | 実装済み | speaker/style/speed/pitch、retry/cache | `components/audio`, `test_audio_generator.py` |
+| VOICEVOX 音声生成/cache | 実装済み | speaker/style/speed/pitch、retry/cache。合成失敗時は無音化せず生成停止 | `components/audio`, `test_audio_generator.py` |
 | PNG/ASS 字幕 burn | 実装済み | `png` / `auto` / `ass` と安全な fallback | `components/subtitles`, `test_subtitle_png.py`, `test_subtitle_ass.py` |
 | transition | 実装済み | fade/dissolve/wipe/zoom と DTS 安全な concat | `ffmpeg_ops.py`, `test_ffmpeg_ops_transition.py` |
 | no-voice | 実装済み | 推定または明示 duration の無音 track | `audio_phase.py`, smoke tests |
