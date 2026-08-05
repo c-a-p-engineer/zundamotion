@@ -50,8 +50,12 @@ def main() -> int:
                     output.write(chunk)
         except Exception as exc:
             raise LockedFfmpegError("download_failed") from exc
-        if digest.hexdigest() != ffmpeg["sha256"]:
-            fail("checksum_mismatch")
+        actual_sha256 = digest.hexdigest()
+        if actual_sha256 != ffmpeg["sha256"]:
+            raise LockedFfmpegError(
+                "checksum_mismatch:"
+                f"expected={ffmpeg['sha256']}:actual={actual_sha256}:asset={ffmpeg['asset']}"
+            )
 
         unpack = Path(directory) / "unpack"
         try:
