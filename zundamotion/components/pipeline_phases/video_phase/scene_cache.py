@@ -1,18 +1,25 @@
-"""Scene cache payloads, short keys, and subtitle entry construction.
+"""Scene cache payloads, component manifests, and subtitle entry construction.
 
 This module is an internal SceneRenderer mixin; use scene_renderer.SceneRenderer.
 """
 
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
 from typing import Any, Dict, List
 
 from ....utils import perf_stats
+from ....utils.logger import logger
 from ....utils.subtitle_text import is_effective_subtitle_text
 
 
+_SCENE_CACHE_MANIFEST_VERSION = "20260806_scene_components_v1"
+
+
 class SceneCacheMixin:
-    """Build cache payloads and subtitle timing entries."""
+    """Build cache payloads and explain scene cache invalidation."""
 
     def _scene_base_cache_data(self, scene_hash_data: Dict[str, Any]) -> Dict[str, Any]:
         """Build cache data for the no-subtitle scene layer."""
@@ -62,20 +69,131 @@ class SceneCacheMixin:
         except Exception:
             return "-"
 
+    def _scene_cache_manifest_path(self, scene_id: str) -> Path:
+        safe_scene_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", scene_id).strip("._")
+        if not safe_scene_id:
+            safe_scene_id = "scene"
+        return (
+            Path(self.cache_manager.cache_dir)
+            / "scene-manifests"
+            / f"{safe_scene_id}.base-components.json"
+        )
+
+    def _scene_base_component_hashes(
+        self,
+        scene_base_hash_data: Dict[str, Any],
+    ) -> Dict[str, str]:
+        """Hash top-level cache payload components without storing raw values."""
+        components: Dict[str, str] = {}
+        for key in sorted(scene_base_hash_data, key=str):
+            component_data = {
+                "scene_cache_component": str(key),
+                "value": scene_base_hash_data[key],
+            }
+            components[str(key)] = self._cache_key_short(component_data)
+        return components
+
+    def _read_scene_cache_manifest(self, scene_id: str) -> Dict[str, Any] | None:
+        if bool(getattr(self.cache_manager, "no_cache", False)):
+            return None
+        path = self._scene_cache_manifest_path(scene_id)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "[SceneCacheExplain] scene=%s manifest_read_failed=%s",
+                scene_id,
+                type(exc).__name__,
+            )
+            return None
+        if data.get("version") != _SCENE_CACHE_MANIFEST_VERSION:
+            return None
+        return data
+
+    def _write_scene_cache_manifest(
+        self,
+        *,
+        scene_id: str,
+        base_key: str,
+        components: Dict[str, str],
+    ) -> None:
+        if bool(getattr(self.cache_manager, "no_cache", False)):
+            return
+        path = self._scene_cache_manifest_path(scene_id)
+        payload = {
+            "version": _SCENE_CACHE_MANIFEST_VERSION,
+            "scene_id": scene_id,
+            "base_key": base_key,
+            "components": components,
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            temporary.replace(path)
+        except OSError as exc:
+            logger.warning(
+                "[SceneCacheExplain] scene=%s manifest_write_failed=%s",
+                scene_id,
+                type(exc).__name__,
+            )
+
     def _scene_cache_component_keys(
         self,
         scene_hash_data: Dict[str, Any],
         scene_base_hash_data: Dict[str, Any],
-    ) -> Dict[str, str]:
-        """Return short component keys that explain scene cache invalidation."""
+    ) -> Dict[str, Any]:
+        """Return component keys and differences that explain invalidation."""
         subtitle_config_data = {
             "scene_cache_component": "subtitle_config",
             "subtitle_config": scene_hash_data.get("subtitle_config", {}),
         }
-        return {
-            "base_key": self._cache_key_short(scene_base_hash_data),
+        base_key = self._cache_key_short(scene_base_hash_data)
+        current_components = self._scene_base_component_hashes(scene_base_hash_data)
+        scene = getattr(self, "scene", {}) or {}
+        scene_id = str(scene.get("id") or "unknown")
+        previous = self._read_scene_cache_manifest(scene_id)
+        previous_components = (
+            previous.get("components", {})
+            if isinstance(previous, dict)
+            and isinstance(previous.get("components", {}), dict)
+            else {}
+        )
+        changed_components = sorted(
+            key
+            for key in set(previous_components) | set(current_components)
+            if previous_components.get(key) != current_components.get(key)
+        )
+        if previous is None:
+            manifest_status = "first_observation"
+        elif changed_components:
+            manifest_status = "changed"
+        else:
+            manifest_status = "unchanged"
+
+        detail: Dict[str, Any] = {
+            "base_key": base_key,
             "subtitle_config_key": self._cache_key_short(subtitle_config_data),
+            "base_components": current_components,
+            "previous_base_key": (
+                str(previous.get("base_key", "-"))
+                if isinstance(previous, dict)
+                else "-"
+            ),
+            "changed_components": changed_components,
+            "component_manifest_status": manifest_status,
         }
+        self._write_scene_cache_manifest(
+            scene_id=scene_id,
+            base_key=base_key,
+            components=current_components,
+        )
+        return detail
 
     def _subtitle_timing_key(self, subtitle_entries: List[Dict[str, Any]]) -> str:
         timing_data = {
@@ -92,6 +210,20 @@ class SceneCacheMixin:
         }
         return self._cache_key_short(timing_data)
 
+    @staticmethod
+    def _explain_base_cache_miss(
+        reason: str | None,
+        detail: Dict[str, Any] | None,
+    ) -> str | None:
+        if reason != "base_video_not_cached" or not detail:
+            return reason
+        changed = detail.get("changed_components") or []
+        if changed:
+            return "base_component_changed"
+        if detail.get("component_manifest_status") == "unchanged":
+            return "base_cache_entry_missing"
+        return "base_cache_not_observed"
+
     def _record_scene_cache_event(
         self,
         *,
@@ -102,12 +234,27 @@ class SceneCacheMixin:
         reason: str | None = None,
         detail: Dict[str, Any] | None = None,
     ) -> None:
+        explained_reason = (
+            self._explain_base_cache_miss(reason, detail)
+            if layer == "base" and status == "MISS"
+            else reason
+        )
+        changed = list((detail or {}).get("changed_components") or [])
+        if layer == "base" and status == "MISS":
+            logger.info(
+                "[SceneCacheExplain] scene=%s reason=%s changed_components=%s previous_key=%s current_key=%s",
+                scene_id,
+                explained_reason or "unknown",
+                ",".join(changed) if changed else "none",
+                (detail or {}).get("previous_base_key", "-"),
+                (detail or {}).get("base_key", key),
+            )
         perf_stats.record_scene_cache_event(
             scene_id=scene_id,
             layer=layer,
             status=status,
             key=key,
-            reason=reason,
+            reason=explained_reason,
             detail=detail,
         )
 
