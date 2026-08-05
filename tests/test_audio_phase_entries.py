@@ -29,6 +29,7 @@ def test_prepare_audio_entries_preserves_item_order_and_eager_tasks() -> None:
             calls.append((read_text, line, line_id))
             return Path(f"{line_id}.wav"), [], []
 
+        speech_line = {"text": "漢字", "reading": "かんじ"}
         timeline = StubTimeline()
         entries = prepare_audio_entries(
             scenes=[
@@ -38,13 +39,13 @@ def test_prepare_audio_entries_preserves_item_order_and_eager_tasks() -> None:
                     "items": [
                         {"topic": "Chapter"},
                         {"bgm": {"id": "main", "action": "start"}},
-                        {"say": {"text": "漢字《かんじ》"}},
+                        {"say": speech_line},
                         {"wait": 0.5},
                         {"image_layers": {"image_layers": [{"show": "panel"}]}},
                     ],
                 }
             ],
-            config={"subtitle": {"reading_display": "ruby"}},
+            config={"subtitle": {"reading_display": "none"}},
             timeline=timeline,  # type: ignore[arg-type]
             generate_line_audio=generate_audio,
         )
@@ -61,11 +62,11 @@ def test_prepare_audio_entries_preserves_item_order_and_eager_tasks() -> None:
         assert entries[3]["line_id"] == "scene_2"
         assert entries[4]["line_id"] == "scene_3"
         assert entries[2]["read_text"] == "かんじ"
-        assert entries[2]["display_text"]
+        assert entries[2]["display_text"] == "漢字"
 
         result = await entries[2]["audio_task"]
         assert result[0] == Path("scene_1.wav")
-        assert calls == [("かんじ", {"text": "漢字《かんじ》"}, "scene_1")]
+        assert calls == [("かんじ", speech_line, "scene_1")]
 
     asyncio.run(_run())
 
