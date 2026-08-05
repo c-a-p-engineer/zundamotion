@@ -781,9 +781,9 @@ async def apply_transition_local(
     Long prefix/suffix sections are copied or encoded as needed, then
     concatenated with the short xfade/acrossfade boundary clip.  When
     wait_padding is configured, the previous clip is allowed to finish, then a
-    still clone of its final frame transitions into the real head of the next
-    scene.  consume_next_head skips the next-scene head already used in that
-    boundary to avoid visually or audibly repeating it.
+    still clone of its final frame is held once before it transitions into the
+    real head of the next scene.  consume_next_head skips the next-scene head
+    already used in that boundary to avoid visually or audibly repeating it.
     """
     context = dict(context or {})
     dur1 = float(await get_media_duration(input_video1_path, caller="transition_input_probe"))
@@ -936,7 +936,7 @@ async def apply_transition_local(
             transition_type,
             concat_mode,
             len(parts),
-            duration + wait_padding * 2.0,
+            duration + wait_padding,
             transition_note,
             output_path,
         )
@@ -974,7 +974,7 @@ async def apply_transition_local(
                         "Applied local '%s' transition: copied %d part(s), re-encoded boundary %.2fs (freeze-before-transition, consume-next-head, suffix re-encoded after copy retry) -> %s",
                         transition_type,
                         max(0, len(retry_parts) - 1),
-                        duration + wait_padding * 2.0,
+                        duration + wait_padding,
                         output_path,
                     )
                     return
@@ -1037,27 +1037,20 @@ async def apply_transition(
     filter_parts = []
 
     v0_label = "0:v"
-    v1_label = "1:v"
     if wait_padding > 0:
         filter_parts.append(
             f"[0:v]tpad=stop_mode=clone:stop_duration={wait_padding:.3f}[v0pad]"
         )
-        filter_parts.append(
-            f"[1:v]tpad=start_mode=clone:start_duration={wait_padding:.3f}[v1pad]"
-        )
         v0_label = "v0pad"
-        v1_label = "v1pad"
 
     filter_parts.append(
-        f"[{v0_label}][{v1_label}]xfade=transition={transition_type}:duration={duration}:offset={xfade_offset:.3f}[v]"
+        f"[{v0_label}][1:v]xfade=transition={transition_type}:duration={duration}:offset={xfade_offset:.3f}[v]"
     )
 
     audio_channels = max(1, int(audio_params.channels))
     channel_layout = "stereo" if audio_channels == 2 else f"{audio_channels}c"
 
     if has_a1 and has_a2:
-        delay_ms = int(round(wait_padding * 1000))
-        delay_values = "|".join(str(delay_ms) for _ in range(audio_channels)) or str(delay_ms)
         filter_parts.append(
             f"[0:a]aresample=async=1:first_pts=0,"
             f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts={channel_layout},"
@@ -1065,11 +1058,10 @@ async def apply_transition(
         )
         filter_parts.append(
             f"[1:a]aresample=async=1:first_pts=0,"
-            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts={channel_layout},"
-            f"adelay={delay_values}[a1pad]"
+            f"aformat=sample_fmts=fltp:sample_rates={audio_params.sample_rate}:channel_layouts={channel_layout}[a1]"
         )
         filter_parts.append(
-            f"[a0pad][a1pad]acrossfade=d={duration}:c1=tri:c2=tri[a]"
+            f"[a0pad][a1]acrossfade=d={duration}:c1=tri:c2=tri[a]"
         )
         cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[v]", "-map", "[a]"]
     elif has_a1:

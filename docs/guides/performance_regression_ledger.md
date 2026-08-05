@@ -85,10 +85,12 @@
 対策:
 
 - transition boundary と final concat の cache hit 時に、ffprobe で実尺を取得する
-- 入力クリップから算出した期待尺との差が `max(1 秒, 期待尺の 1%)` を超える場合は、該当 cache だけを削除して 1 回再生成する
+- transition は `期待尺の 1%` を基準に `0.5〜2 秒`、final concat は `期待尺の 1%` を基準に `1〜5 秒` の範囲で許容し、超過時は該当 cache だけを削除して 1 回再生成する
 - ffprobe 不能、0 秒以下、非有限値も破損 cache として扱う
-- 新規生成は `*.partial-<pid>.mp4` に出力し、検証成功後だけ正式な cache パスへ atomic replace する
+- 新規生成は cache 配下の専用一時ディレクトリへ出力し、検証成功後だけ正式な cache パスへ atomic replace する。通常失敗時は transition の補助ファイルも一時ディレクトリごと削除する
 - 再生成後も検証に失敗した場合は、破損ファイルを残さず `PipelineError` で停止する
+- `wait_padding_seconds` は送出側と流入側へ二重に加えず、前シーン終端側へ1回だけ加える。これにより実尺と Timeline の shift を一致させる
+- transition cache key の version を更新し、二重 wait で生成済みの旧 cache を新しい実装で再利用しない
 
 回帰テスト:
 

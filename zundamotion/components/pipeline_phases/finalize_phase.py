@@ -5,6 +5,7 @@ import json
 import math
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
@@ -35,7 +36,10 @@ from zundamotion.utils.logger import logger, time_log
 
 
 class FinalizePhase:
-    _CACHE_DURATION_ABSOLUTE_TOLERANCE_SECONDS = 1.0
+    _TRANSITION_CACHE_MIN_TOLERANCE_SECONDS = 0.5
+    _TRANSITION_CACHE_MAX_TOLERANCE_SECONDS = 2.0
+    _FINAL_CACHE_MIN_TOLERANCE_SECONDS = 1.0
+    _FINAL_CACHE_MAX_TOLERANCE_SECONDS = 5.0
     _CACHE_DURATION_RELATIVE_TOLERANCE = 0.01
 
     def __init__(
@@ -124,10 +128,25 @@ class FinalizePhase:
         if not math.isfinite(expected_duration) or expected_duration <= 0:
             return True
 
-        tolerance = max(
-            self._CACHE_DURATION_ABSOLUTE_TOLERANCE_SECONDS,
-            expected_duration * self._CACHE_DURATION_RELATIVE_TOLERANCE,
+        relative_tolerance = (
+            expected_duration * self._CACHE_DURATION_RELATIVE_TOLERANCE
         )
+        if cache_label == "transition":
+            tolerance = min(
+                max(
+                    self._TRANSITION_CACHE_MIN_TOLERANCE_SECONDS,
+                    relative_tolerance,
+                ),
+                self._TRANSITION_CACHE_MAX_TOLERANCE_SECONDS,
+            )
+        else:
+            tolerance = min(
+                max(
+                    self._FINAL_CACHE_MIN_TOLERANCE_SECONDS,
+                    relative_tolerance,
+                ),
+                self._FINAL_CACHE_MAX_TOLERANCE_SECONDS,
+            )
         difference = abs(actual_duration - expected_duration)
         if difference > tolerance:
             logger.warning(
@@ -156,11 +175,12 @@ class FinalizePhase:
         """Reuse a valid Finalize cache or remove and rebuild one invalid entry."""
 
         async def atomic_creator(cache_output_path: Path) -> Path:
-            partial_path = cache_output_path.with_name(
-                f"{cache_output_path.stem}.partial-{os.getpid()}{cache_output_path.suffix}"
-            )
-            partial_path.unlink(missing_ok=True)
-            try:
+            cache_output_path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(
+                prefix=f".{cache_output_path.stem}.partial-",
+                dir=cache_output_path.parent,
+            ) as partial_dir:
+                partial_path = Path(partial_dir) / cache_output_path.name
                 generated_path = Path(await creator_func(partial_path))
                 if generated_path != partial_path:
                     raise PipelineError(
@@ -178,8 +198,6 @@ class FinalizePhase:
                 os.replace(partial_path, cache_output_path)
                 clear_probe_caches()
                 return cache_output_path
-            finally:
-                partial_path.unlink(missing_ok=True)
 
         cached_path = await self.cache_manager.get_or_create(
             key_data=key_data,
@@ -301,7 +319,7 @@ class FinalizePhase:
                     )
                     transition_key_data = {
                         "type": "finalize_transition_boundary",
-                        "version": "20260510_v1",
+                        "version": "20260805_wait_padding_v2",
                         "from_scene": from_scene_id,
                         "to_scene": to_scene_id,
                         "current": self._file_signature(current),

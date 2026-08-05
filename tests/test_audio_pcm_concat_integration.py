@@ -170,6 +170,8 @@ def test_opening_ending_and_multiple_transitions_have_no_dts_warning(tmp_path: P
             video, audio, wait_padding=0.1, hw_encoder="cpu", consume_next_head=True,
             context={"from_scene": "opening", "to_scene": "main"},
         )
+        first_summary = await validate_final_media(str(first), audio)
+        assert first_summary["duration"] == pytest.approx(1.5, abs=0.15)
         final = tmp_path / "opening-main-ending.mp4"
         await apply_transition_local(
             str(first), str(sources[2]), str(final), "fade", 0.2, 1.0,
@@ -185,5 +187,6 @@ def test_opening_ending_and_multiple_transitions_have_no_dts_warning(tmp_path: P
         assert summary["channels"] == 2
         assert abs(summary["video_start"] - summary["audio_start"]) <= 0.1
         assert summary["duration_delta"] <= 0.1
+        assert summary["duration"] == pytest.approx(2.3, abs=0.2)
 
     asyncio.run(_run())

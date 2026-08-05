@@ -212,6 +212,9 @@ def test_finalize_phase_does_not_publish_failed_partial_cache(
 
         async def failing_creator(output_path: Path) -> Path:
             output_path.write_bytes(b"partial")
+            output_path.with_name(f"{output_path.stem}_boundary.mp4").write_bytes(
+                b"partial-boundary"
+            )
             raise RuntimeError("render stopped")
 
         phase = FinalizePhase(
@@ -233,6 +236,6 @@ def test_finalize_phase_does_not_publish_failed_partial_cache(
             )
 
         assert not cached_path.exists()
-        assert not list(tmp_path.glob("*.partial-*.mp4"))
+        assert not list(tmp_path.glob(".*.partial-*"))
 
     asyncio.run(_run())
