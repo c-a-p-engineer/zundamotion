@@ -1,7 +1,7 @@
 {
   "path": "transition.mp4",
-  "duration": 7.821029,
-  "size_bytes": 609548,
+  "duration": 5.821029,
+  "size_bytes": 575846,
   "streams": [
     {
       "index": 0,
@@ -29,11 +29,11 @@
       "time_base": "1/15360",
       "start_pts": 323,
       "start_time": "0.021029",
-      "duration_ts": 119808,
-      "duration": "7.800000",
-      "bit_rate": "525704",
+      "duration_ts": 89088,
+      "duration": "5.800000",
+      "bit_rate": "663542",
       "bits_per_raw_sample": "8",
-      "nb_frames": "117",
+      "nb_frames": "87",
       "extradata_size": 44,
       "disposition": {
         "default": 1,
@@ -83,10 +83,10 @@
       "time_base": "1/48000",
       "start_pts": 0,
       "start_time": "0.000000",
-      "duration_ts": 371712,
-      "duration": "7.744000",
-      "bit_rate": "94425",
-      "nb_frames": "363",
+      "duration_ts": 275456,
+      "duration": "5.738667",
+      "bit_rate": "125838",
+      "nb_frames": "269",
       "extradata_size": 5,
       "disposition": {
         "default": 1,
