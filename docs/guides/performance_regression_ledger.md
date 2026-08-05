@@ -45,13 +45,14 @@
 
 ## 最新の採用・却下一覧
 
-2026-05-28 時点の判断です。新しく高速化を試す場合は、この表を先に更新してください。
+2026-08-05 時点の判断です。新しく高速化を試す場合は、この表を先に更新してください。
 
 | 対象 | 何をしたのか | 効果があったのか | 採用可否 |
 |---|---|---|---|
 | scene base / subtitle cache | scene base と字幕済み scene をキャッシュする | 字幕済み scene cache hit で `VideoPhase` がほぼ 0 秒になる | 採用 |
 | トピック単位のシーン分割 | 長い `main` に詰めず、章やトピックごとに scene を分ける | 一部修正時に未変更シーンを再利用しやすい | 採用 |
 | FinalizePhase cache | transition boundary と final concat intermediate を内容ハッシュでキャッシュする | transition boundary と final concat の再生成を避けられる | 採用 |
+| FinalizePhase cache self-healing | cache hit 時に期待尺を検証し、破損・尺不一致なら該当キャッシュだけを削除して再生成する。生成中は一時ファイルを使い、完了時だけ cache 名へ置換する | 停止後の不完全な final concat を成功扱いして短い動画を出力する回帰を防ぐ | 採用 |
 | PNG 字幕チャンク分割 | PNG 字幕焼き込みを字幕範囲ごとの chunk に分ける | 巨大 filter graph による長時間停止を避けられる | 採用 |
 | PNG 字幕チャンク/gap exact trim | chunk と gap を `trim` / `atrim` で正確に切る | `-ss` + stream copy で起きた発話二重化を避けられる | 採用 |
 | PNG 字幕チャンクサイズ auto | 字幕密度、gap、最長連続字幕区間から chunk size を決める | 既知の中尺ケースで過剰な chunk 増加を避けられる | 採用 |
@@ -75,6 +76,25 @@
 | scene-unit filter graph | scene 全体を 1 本の filter graph にまとめる案を検討した | 巨大 filter graph 化で debug 性と保守性が落ちる | 却下 |
 | GPU overlay / CUDA overlay | CUDA overlay を使う案を検証した | smoke test 失敗。CPU/GPU 往復のリスクが高い | 却下 |
 | transition suffix stream copy | next scene suffix を stream copy で切り出す案を試した | next scene 冒頭音声が再出現する場合がある | 却下 |
+
+## 2026-08-05 FinalizePhase cache self-healing
+
+長時間の final concat を停止した際、不完全な `finalize_concat_*.mp4` が正式な cache
+パスに残り、次回実行が cache hit として約 0.63 秒の動画を成功扱いする事象を確認した。
+
+対策:
+
+- transition boundary と final concat の cache hit 時に、ffprobe で実尺を取得する
+- 入力クリップから算出した期待尺との差が `max(1 秒, 期待尺の 1%)` を超える場合は、該当 cache だけを削除して 1 回再生成する
+- ffprobe 不能、0 秒以下、非有限値も破損 cache として扱う
+- 新規生成は `*.partial-<pid>.mp4` に出力し、検証成功後だけ正式な cache パスへ atomic replace する
+- 再生成後も検証に失敗した場合は、破損ファイルを残さず `PipelineError` で停止する
+
+回帰テスト:
+
+- `tests/test_finalize_phase.py::test_finalize_phase_rebuilds_truncated_final_concat_cache`
+- `tests/test_finalize_phase.py::test_finalize_phase_keeps_valid_final_concat_cache`
+- `tests/test_finalize_phase.py::test_finalize_phase_does_not_publish_failed_partial_cache`
 
 ## 2026-06-10 039_security_librahack 再生成ログ観察
 

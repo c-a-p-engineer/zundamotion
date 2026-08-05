@@ -2,15 +2,21 @@
 import asyncio
 import hashlib
 import json
+import math
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from zundamotion.cache import CacheManager
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
-from zundamotion.utils.ffmpeg_probe import get_media_info, get_audio_duration, get_media_duration
+from zundamotion.utils.ffmpeg_probe import (
+    clear_probe_caches,
+    get_media_info,
+    get_audio_duration,
+    get_media_duration,
+)
 from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
 from zundamotion.utils.ffmpeg_capabilities import (
     _threading_flags,
@@ -29,6 +35,9 @@ from zundamotion.utils.logger import logger, time_log
 
 
 class FinalizePhase:
+    _CACHE_DURATION_ABSOLUTE_TOLERANCE_SECONDS = 1.0
+    _CACHE_DURATION_RELATIVE_TOLERANCE = 0.01
+
     def __init__(
         self,
         config: Dict[str, Any],
@@ -79,6 +88,137 @@ class FinalizePhase:
         except Exception:
             return {"path": str(resolved), "missing": True}
 
+    async def _is_valid_finalize_cache(
+        self,
+        path: Path,
+        *,
+        expected_duration: float,
+        cache_label: str,
+    ) -> bool:
+        """Return whether a Finalize cache entry is playable and plausibly complete."""
+        try:
+            actual_duration = float(
+                await get_media_duration(
+                    str(path),
+                    caller="finalize_cache_validation",
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "FinalizePhase: Invalid %s cache '%s': media probe failed (%s).",
+                cache_label,
+                path.name,
+                exc,
+            )
+            return False
+
+        if not math.isfinite(actual_duration) or actual_duration <= 0:
+            logger.warning(
+                "FinalizePhase: Invalid %s cache '%s': duration=%s.",
+                cache_label,
+                path.name,
+                actual_duration,
+            )
+            return False
+
+        if not math.isfinite(expected_duration) or expected_duration <= 0:
+            return True
+
+        tolerance = max(
+            self._CACHE_DURATION_ABSOLUTE_TOLERANCE_SECONDS,
+            expected_duration * self._CACHE_DURATION_RELATIVE_TOLERANCE,
+        )
+        difference = abs(actual_duration - expected_duration)
+        if difference > tolerance:
+            logger.warning(
+                "FinalizePhase: Invalid %s cache '%s': actual=%.2fs expected=%.2fs "
+                "difference=%.2fs tolerance=%.2fs.",
+                cache_label,
+                path.name,
+                actual_duration,
+                expected_duration,
+                difference,
+                tolerance,
+            )
+            return False
+        return True
+
+    async def _get_or_create_finalize_cache(
+        self,
+        *,
+        key_data: Dict[str, Any],
+        file_name: str,
+        extension: str,
+        creator_func: Callable[[Path], Awaitable[Path]],
+        expected_duration: float,
+        cache_label: str,
+    ) -> Path:
+        """Reuse a valid Finalize cache or remove and rebuild one invalid entry."""
+
+        async def atomic_creator(cache_output_path: Path) -> Path:
+            partial_path = cache_output_path.with_name(
+                f"{cache_output_path.stem}.partial-{os.getpid()}{cache_output_path.suffix}"
+            )
+            partial_path.unlink(missing_ok=True)
+            try:
+                generated_path = Path(await creator_func(partial_path))
+                if generated_path != partial_path:
+                    raise PipelineError(
+                        "FinalizePhase: Cache creator returned an unexpected output path: "
+                        f"{generated_path}"
+                    )
+                if not await self._is_valid_finalize_cache(
+                    partial_path,
+                    expected_duration=expected_duration,
+                    cache_label=cache_label,
+                ):
+                    raise PipelineError(
+                        f"FinalizePhase: Generated {cache_label} cache failed validation."
+                    )
+                os.replace(partial_path, cache_output_path)
+                clear_probe_caches()
+                return cache_output_path
+            finally:
+                partial_path.unlink(missing_ok=True)
+
+        cached_path = await self.cache_manager.get_or_create(
+            key_data=key_data,
+            file_name=file_name,
+            extension=extension,
+            creator_func=atomic_creator,
+        )
+        if await self._is_valid_finalize_cache(
+            cached_path,
+            expected_duration=expected_duration,
+            cache_label=cache_label,
+        ):
+            return cached_path
+
+        logger.warning(
+            "FinalizePhase: Removing invalid %s cache and regenerating: %s",
+            cache_label,
+            cached_path,
+        )
+        cached_path.unlink(missing_ok=True)
+        clear_probe_caches()
+
+        rebuilt_path = await self.cache_manager.get_or_create(
+            key_data=key_data,
+            file_name=file_name,
+            extension=extension,
+            creator_func=atomic_creator,
+        )
+        if not await self._is_valid_finalize_cache(
+            rebuilt_path,
+            expected_duration=expected_duration,
+            cache_label=cache_label,
+        ):
+            rebuilt_path.unlink(missing_ok=True)
+            raise PipelineError(
+                f"FinalizePhase: Regenerated {cache_label} cache failed validation."
+            )
+        return rebuilt_path
+
     @time_log(logger)
     async def run(  # async を追加
         self,
@@ -118,10 +258,12 @@ class FinalizePhase:
                         scene_durations.append(float(result))
                     except Exception:
                         scene_durations.append(0.0)
+        processed_durations: List[float] = list(scene_durations)
 
         if len(processed_paths) >= 2:
             logger.info("FinalizePhase: Applying scene transitions where defined...")
             merged: List[Path] = []
+            merged_durations: List[float] = []
             current: Path = processed_paths[0]
             current_duration = scene_durations[0] if scene_durations else 0.0
             for i in range(len(processed_paths) - 1):
@@ -201,11 +343,27 @@ class FinalizePhase:
                         return cache_output_path
 
                     if self.finalize_cache_enabled:
-                        out_path = await self.cache_manager.get_or_create(
+                        if self.transition_wait_padding > 0:
+                            expected_transition_duration = (
+                                current_duration
+                                + next_duration
+                                + self.transition_wait_padding
+                            )
+                        else:
+                            expected_transition_duration = (
+                                current_duration + next_duration - t_dur
+                            )
+                        expected_transition_duration = max(
+                            0.0,
+                            expected_transition_duration,
+                        )
+                        out_path = await self._get_or_create_finalize_cache(
                             key_data=transition_key_data,
                             file_name=f"finalize_transition_{i:03d}_{i+1:03d}",
                             extension="mp4",
                             creator_func=transition_creator,
+                            expected_duration=expected_transition_duration,
+                            cache_label="transition",
                         )
                     else:
                         await transition_creator(out_path)
@@ -236,12 +394,15 @@ class FinalizePhase:
                 else:
                     # トランジション未指定なら、これまでの current を確定し次へ
                     merged.append(current)
+                    merged_durations.append(current_duration)
                     current = next_path
                     current_duration = next_duration
 
             # ループ終了後の最後の current を確定
             merged.append(current)
+            merged_durations.append(current_duration)
             processed_paths = merged
+            processed_durations = merged_durations
 
         safe_output_stem = output_stem or "final_output"
         output_video_path = self.temp_dir / f"{safe_output_stem}.mp4"
@@ -267,11 +428,13 @@ class FinalizePhase:
             return cache_output_path
 
         if self.finalize_cache_enabled:
-            output_video_path = await self.cache_manager.get_or_create(
+            output_video_path = await self._get_or_create_finalize_cache(
                 key_data=final_concat_key_data,
                 file_name="finalize_concat",
                 extension="mp4",
                 creator_func=final_concat_creator,
+                expected_duration=sum(processed_durations),
+                cache_label="final concat",
             )
         else:
             await final_concat_creator(output_video_path)
