@@ -9,7 +9,7 @@ from .components.script import load_script_and_config
 from .components.subtitles.lifecycle import shutdown_subtitle_executor
 from .plugins.manager import initialize_plugins
 from .utils.logger import logger
-from .pipeline import GenerationPipeline
+from .pipeline_diagnostics import DiagnosticGenerationPipeline as GenerationPipeline
 
 
 async def run_generation(
@@ -89,5 +89,8 @@ async def run_generation(
     )
     try:
         await pipeline.run(output_path)
+    except BaseException as exc:
+        pipeline.write_failure_summary(output_path, exc)
+        raise
     finally:
         shutdown_subtitle_executor()
