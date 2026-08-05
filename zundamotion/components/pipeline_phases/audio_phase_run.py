@@ -1,34 +1,28 @@
 """AudioPhase line preparation and synthesis orchestration."""
 
 import asyncio
-import hashlib
 import json
 import os
 import sys
 from pathlib import Path
-from typing import Tuple  # Add this import
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
-from zundamotion.utils.subtitle_text import (
-    is_effective_subtitle_text,
-    normalize_subtitle_text,
-)
-from zundamotion.utils.ffmpeg_probe import get_audio_duration
 from zundamotion.utils.ffmpeg_audio import (
     AUDIO_MIX_VERSION,
     INTERMEDIATE_AUDIO_FORMAT_VERSION,
     apply_audio_filter,
 )
-from zundamotion.utils.text_processing import parse_reading_markup
-from zundamotion.utils.logger import logger, time_log
 from zundamotion.utils.face_anim import (
-    generate_blink_timeline,
     deterministic_seed_from_text,
+    generate_blink_timeline,
 )
+from zundamotion.utils.logger import logger, time_log
+
+from .audio_phase_entries import prepare_audio_entries
 
 
 class AudioPhaseRunMixin:
@@ -37,14 +31,11 @@ class AudioPhaseRunMixin:
     @time_log(logger)
     async def run(
         self, scenes: List[Dict[str, Any]], timeline: Timeline
-    ) -> Tuple[
-        Dict[str, Dict[str, Any]], List[Tuple[int, str]]
-    ]:  # Return line_data_map and used_voicevox_info
-        """Phase 1: Generate all audio files and calculate their durations."""
+    ) -> Tuple[Dict[str, Dict[str, Any]], List[Tuple[int, str]]]:
+        """Generate line audio, timeline events, and face animation metadata."""
         line_data_map: Dict[str, Dict[str, Any]] = {}
-        total_lines = sum(len(s.get("lines", [])) for s in scenes)
+        total_lines = sum(len(scene.get("lines", [])) for scene in scenes)
         audio_sem = asyncio.Semaphore(self.audio_workers)
-        ordered_entries: List[Dict[str, Any]] = []
         pending_l_cut_audio: Optional[Dict[str, Any]] = None
 
         async def _generate_line_audio(
@@ -55,152 +46,12 @@ class AudioPhaseRunMixin:
             async with audio_sem:
                 return await self.audio_gen.generate_audio(read_text, line, line_id)
 
-        for scene in scenes:
-            scene_id = scene["id"]
-            bg = scene.get("bg", self.config.get("background", {}).get("default"))
-            timeline.add_scene_change(scene_id, bg)
-
-            items = scene.get("items")
-            if not isinstance(items, list):
-                items = None
-            if items is None:
-                lines = scene.get("lines")
-                if isinstance(lines, list):
-                    derived_items: List[Dict[str, Any]] = []
-                    for line in lines:
-                        if not isinstance(line, dict):
-                            continue
-                        if "wait" in line:
-                            derived_items.append({"wait": line})
-                        elif "text" in line or line.get("image_layers") is None:
-                            derived_items.append({"say": line})
-                        else:
-                            derived_items.append({"image_layers": line})
-                    items = derived_items
-                else:
-                    items = []
-            line_idx = 0
-
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-
-                if "bgm" in item:
-                    ordered_entries.append(
-                        {
-                            "entry_type": "bgm",
-                            "scene_id": scene_id,
-                            "bgm_cfg": item.get("bgm") or {},
-                        }
-                    )
-                    continue
-
-                if "topic" in item:
-                    ordered_entries.append(
-                        {
-                            "entry_type": "topic",
-                            "scene_id": scene_id,
-                            "topic": str(item.get("topic")),
-                        }
-                    )
-                    continue
-
-                if "say" in item:
-                    say_val = item.get("say")
-                    if isinstance(say_val, dict):
-                        line = say_val
-                    else:
-                        line = {"text": str(say_val or "")}
-                elif "wait" in item:
-                    wait_val = item.get("wait")
-                    if isinstance(wait_val, dict) and "wait" in wait_val:
-                        line = wait_val
-                    else:
-                        line = {"wait": wait_val}
-                elif "image_layers" in item:
-                    image_val = item.get("image_layers")
-                    if isinstance(image_val, dict):
-                        line = image_val
-                    else:
-                        line = {"image_layers": image_val}
-                else:
-                    continue
-
-                line_idx += 1
-                line_id = f"{scene_id}_{line_idx}"
-
-                if "wait" in line:
-                    ordered_entries.append(
-                        {
-                            "entry_type": "wait",
-                            "scene_id": scene_id,
-                            "line_idx": line_idx,
-                            "line_id": line_id,
-                            "line": line,
-                        }
-                    )
-                    continue
-
-                if (
-                    "text" not in line
-                    and "wait" not in line
-                    and line.get("image_layers") is not None
-                ):
-                    ordered_entries.append(
-                        {
-                            "entry_type": "image_layer",
-                            "scene_id": scene_id,
-                            "line_idx": line_idx,
-                            "line_id": line_id,
-                            "line": line,
-                        }
-                    )
-                    continue
-
-                original_text = str(line.get("text", ""))
-                subtitle_reading_display = str(
-                    (self.config.get("subtitle", {}) or {}).get(
-                        "reading_display", "none"
-                    )
-                ).lower()
-                if line.get("reading") or line.get("read"):
-                    read_text = str(
-                        line.get("reading") or line.get("read") or original_text
-                    )
-                    disp_from_markup, _ = parse_reading_markup(
-                        original_text, subtitle_reading_display
-                    )
-                    display_text = normalize_subtitle_text(
-                        line.get("subtitle_text") or disp_from_markup
-                    )
-                else:
-                    disp_from_markup, tts_from_markup = parse_reading_markup(
-                        original_text, subtitle_reading_display
-                    )
-                    read_text = tts_from_markup
-                    display_text = normalize_subtitle_text(
-                        line.get("subtitle_text") or disp_from_markup
-                    )
-
-                ordered_entries.append(
-                    {
-                        "entry_type": "say",
-                        "scene_id": scene_id,
-                        "line_idx": line_idx,
-                        "line_id": line_id,
-                        "line": line,
-                        "read_text": read_text,
-                        "display_text": display_text,
-                        "effective_subtitle_text": (
-                            display_text
-                            if is_effective_subtitle_text(display_text)
-                            else ""
-                        ),
-                        "audio_task": asyncio.create_task(
-                            _generate_line_audio(read_text, line, line_id)
-                        ),
-                    }
-                )
+        ordered_entries = prepare_audio_entries(
+            scenes=scenes,
+            config=self.config,
+            timeline=timeline,
+            generate_line_audio=_generate_line_audio,
+        )
 
         with tqdm(
             total=total_lines,
@@ -235,45 +86,42 @@ class AudioPhaseRunMixin:
                     pending_l_cut_audio = None
 
                 if entry_type == "wait":
-                        pbar.set_description(
-                            f"Calculating Wait Step (Scene '{scene_id}', Line {line_idx})"
-                        )
-                        wait_value = line["wait"]
-                        if isinstance(wait_value, dict):
-                            duration = float(
-                                wait_value.get("duration", 0.0)
-                            )  # Ensure float and provide default
-                        else:
-                            duration = float(wait_value)  # Ensure float
+                    pbar.set_description(
+                        f"Calculating Wait Step (Scene '{scene_id}', Line {line_idx})"
+                    )
+                    wait_value = line["wait"]
+                    if isinstance(wait_value, dict):
+                        duration = float(wait_value.get("duration", 0.0))
+                    else:
+                        duration = float(wait_value)
 
-                        timeline.add_event(f"(Wait {duration}s)", duration, text=None)
-
-                        line_data_map[line_id] = {
-                            "type": "wait",
-                            "duration": duration,
-                            "line_config": line,
-                            "audio_path": None,
-                            "text": None,
-                            "extra_audio_overlays": incoming_audio_overlays,
-                        }
-                        pbar.update(1)
-                        continue
+                    timeline.add_event(f"(Wait {duration}s)", duration, text=None)
+                    line_data_map[line_id] = {
+                        "type": "wait",
+                        "duration": duration,
+                        "line_config": line,
+                        "audio_path": None,
+                        "text": None,
+                        "extra_audio_overlays": incoming_audio_overlays,
+                    }
+                    pbar.update(1)
+                    continue
 
                 if entry_type == "image_layer":
-                        pbar.set_description(
-                            f"Registering Image Layer Step (Scene '{scene_id}', Line {line_idx})"
-                        )
-                        timeline.add_event("(Image Layer)", 0.0, text=None)
-                        line_data_map[line_id] = {
-                            "type": "image_layer",
-                            "duration": 0.0,
-                            "line_config": line,
-                            "audio_path": None,
-                            "text": None,
-                            "extra_audio_overlays": incoming_audio_overlays,
-                        }
-                        pbar.update(1)
-                        continue
+                    pbar.set_description(
+                        f"Registering Image Layer Step (Scene '{scene_id}', Line {line_idx})"
+                    )
+                    timeline.add_event("(Image Layer)", 0.0, text=None)
+                    line_data_map[line_id] = {
+                        "type": "image_layer",
+                        "duration": 0.0,
+                        "line_config": line,
+                        "audio_path": None,
+                        "text": None,
+                        "extra_audio_overlays": incoming_audio_overlays,
+                    }
+                    pbar.update(1)
+                    continue
 
                 text = entry["display_text"]
                 read_text = entry["read_text"]
@@ -282,16 +130,11 @@ class AudioPhaseRunMixin:
                     f"Audio Generation (Scene '{scene_id}', Line {line_idx}: '{text[:30]}...')"
                 )
 
-                (
-                    audio_path,
-                    voice_entries,
-                    voice_layer_segments,
-                ) = await entry["audio_task"]
-
+                audio_path, voice_entries, voice_layer_segments = await entry[
+                    "audio_task"
+                ]
                 if not audio_path:
-                    raise PipelineError(
-                        f"Audio generation failed for line: {line_id}"
-                    )
+                    raise PipelineError(f"Audio generation failed for line: {line_id}")
 
                 for speaker_id, generated_text in voice_entries:
                     if generated_text.strip():
@@ -374,7 +217,10 @@ class AudioPhaseRunMixin:
                 audio_full_duration = float(duration)
                 l_cut_duration = self._cut_duration(line, "l_cut")
                 if l_cut_duration > 0 and audio_full_duration > 0.05:
-                    l_cut_duration = min(l_cut_duration, max(0.0, audio_full_duration - 0.05))
+                    l_cut_duration = min(
+                        l_cut_duration,
+                        max(0.0, audio_full_duration - 0.05),
+                    )
                     if l_cut_duration > 0:
                         duration = max(0.05, audio_full_duration - l_cut_duration)
                         pending_l_cut_audio = {
@@ -412,9 +258,6 @@ class AudioPhaseRunMixin:
                     text=(effective_subtitle_text or None),
                 )
 
-                # ------------------------------
-                # Face animation timelines (mouth + blink)
-                # ------------------------------
                 video_cfg = self.config.get("video", {})
                 anim_cfg = video_cfg.get("face_anim", {})
                 mouth_fps = int(anim_cfg.get("mouth_fps", 15))
@@ -427,8 +270,9 @@ class AudioPhaseRunMixin:
 
                 mouth_segment_cache: Dict[str, List[Dict[str, Any]]] = {}
 
-                async def _load_mouth_segments(target_audio_path: Path) -> List[Dict[str, Any]]:
-                    cache_key_path = target_audio_path
+                async def _load_mouth_segments(
+                    target_audio_path: Path,
+                ) -> List[Dict[str, Any]]:
                     try:
                         cache_key_path = target_audio_path.resolve(strict=False)
                     except Exception:
@@ -438,12 +282,12 @@ class AudioPhaseRunMixin:
                         return mouth_segment_cache[cache_key]
 
                     try:
-                        st = target_audio_path.stat()
+                        stat = target_audio_path.stat()
                         key_data = {
                             "op": "mouth_timeline",
                             "audio_path": str(cache_key_path),
-                            "size": st.st_size,
-                            "mtime": int(st.st_mtime),
+                            "size": stat.st_size,
+                            "mtime": int(stat.st_mtime),
                             "fps": int(mouth_fps),
                             "thr_half": float(thr_half),
                             "thr_open": float(thr_open),
@@ -452,14 +296,18 @@ class AudioPhaseRunMixin:
                         async def _create_mouth_json(out_path: Path) -> Path:
                             from . import audio_phase as audio_phase_module
 
-                            segs = audio_phase_module.compute_mouth_timeline(
+                            segments = audio_phase_module.compute_mouth_timeline(
                                 target_audio_path,
                                 fps=mouth_fps,
                                 thr_half_ratio=thr_half,
                                 thr_open_ratio=thr_open,
                             )
-                            with open(out_path, "w", encoding="utf-8") as _f:
-                                json.dump({"segments": segs}, _f, ensure_ascii=False)
+                            with open(out_path, "w", encoding="utf-8") as output_file:
+                                json.dump(
+                                    {"segments": segments},
+                                    output_file,
+                                    ensure_ascii=False,
+                                )
                             return out_path
 
                         mouth_json_path = await self.cache_manager.get_or_create(
@@ -468,8 +316,15 @@ class AudioPhaseRunMixin:
                             extension="json",
                             creator_func=_create_mouth_json,
                         )
-                        with open(mouth_json_path, "r", encoding="utf-8") as _f:
-                            segments = (json.load(_f) or {}).get("segments", [])
+                        with open(
+                            mouth_json_path,
+                            "r",
+                            encoding="utf-8",
+                        ) as input_file:
+                            segments = (json.load(input_file) or {}).get(
+                                "segments",
+                                [],
+                            )
                     except Exception:
                         try:
                             from . import audio_phase as audio_phase_module
@@ -499,48 +354,57 @@ class AudioPhaseRunMixin:
                     for layer_idx, layer_cfg in enumerate(voice_layers_cfg):
                         target_name = layer_cfg.get("speaker_name")
                         if not target_name or self._is_face_anim_target_hidden(
-                            line, str(target_name)
+                            line,
+                            str(target_name),
                         ):
                             continue
                         matching_segments = [
-                            seg
-                            for seg in voice_layer_segments
-                            if seg.get("layer_origin") == layer_idx
+                            segment
+                            for segment in voice_layer_segments
+                            if segment.get("layer_origin") == layer_idx
                         ]
                         if not matching_segments:
                             continue
                         mouth_segments: List[Dict[str, Any]] = []
                         if bool(layer_cfg.get("mouth_sync", line_mouth_sync)):
-                            for seg_info in matching_segments:
-                                audio_seg = seg_info.get("audio_path")
-                                if not audio_seg:
+                            for segment_info in matching_segments:
+                                audio_segment = segment_info.get("audio_path")
+                                if not audio_segment:
                                     continue
                                 try:
-                                    audio_seg_path = (
-                                        audio_seg
-                                        if isinstance(audio_seg, Path)
-                                        else Path(str(audio_seg))
+                                    audio_segment_path = (
+                                        audio_segment
+                                        if isinstance(audio_segment, Path)
+                                        else Path(str(audio_segment))
                                     )
                                 except Exception:
                                     continue
-                                segments = await _load_mouth_segments(audio_seg_path)
+                                segments = await _load_mouth_segments(
+                                    audio_segment_path
+                                )
                                 if not segments:
                                     continue
-                                offset = float(seg_info.get("start_time", 0.0))
-                                for seg in segments:
-                                    start_val = float(seg.get("start", 0.0)) + offset
-                                    end_val = float(seg.get("end", 0.0)) + offset
-                                    if end_val <= start_val:
+                                offset = float(segment_info.get("start_time", 0.0))
+                                for segment in segments:
+                                    start_value = (
+                                        float(segment.get("start", 0.0)) + offset
+                                    )
+                                    end_value = (
+                                        float(segment.get("end", 0.0)) + offset
+                                    )
+                                    if end_value <= start_value:
                                         continue
                                     mouth_segments.append(
                                         {
-                                            "start": start_val,
-                                            "end": end_val,
-                                            "state": seg.get("state"),
+                                            "start": start_value,
+                                            "end": end_value,
+                                            "state": segment.get("state"),
                                         }
                                     )
                             mouth_segments.sort(key=lambda item: item["start"])
-                        seed = deterministic_seed_from_text(f"{line_id}:{target_name}")
+                        seed = deterministic_seed_from_text(
+                            f"{line_id}:{target_name}"
+                        )
                         blink_segments = generate_blink_timeline(
                             duration=float(duration),
                             fps=video_fps,
@@ -571,9 +435,11 @@ class AudioPhaseRunMixin:
                     target_name = line.get("speaker_name")
                     if not target_name:
                         try:
-                            for ch in (line.get("characters") or []):
-                                if ch.get("visible", False) and ch.get("name"):
-                                    target_name = ch.get("name")
+                            for character in line.get("characters") or []:
+                                if character.get("visible", False) and character.get(
+                                    "name"
+                                ):
+                                    target_name = character.get("name")
                                     break
                         except Exception:
                             target_name = None
@@ -584,7 +450,8 @@ class AudioPhaseRunMixin:
                                 break
 
                     if target_name and not self._is_face_anim_target_hidden(
-                        line, str(target_name)
+                        line,
+                        str(target_name),
                     ):
                         try:
                             mouth_segments = (
@@ -614,9 +481,11 @@ class AudioPhaseRunMixin:
                                     "blink_close_frames": blink_close_frames,
                                 },
                             }
-                        except Exception as e:
+                        except Exception as exc:
                             logger.debug(
-                                f"Face animation timeline generation failed for {line_id}: {e}"
+                                "Face animation timeline generation failed for %s: %s",
+                                line_id,
+                                exc,
                             )
 
                 line_data_map[line_id] = {
@@ -631,7 +500,7 @@ class AudioPhaseRunMixin:
                     "extra_audio_overlays": incoming_audio_overlays,
                 }
                 pbar.update(1)
-        # Ensure a clean newline after closing the progress bar
+
         try:
             tqdm.write("", file=sys.stderr)
         except Exception:
