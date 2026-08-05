@@ -96,6 +96,11 @@ voice:
   enabled: true
   speaker_id: 3      # Example: Copetan (normal voice)
   parallel_workers: auto # Parallel audio synthesis workers. "auto" uses up to 2 concurrent jobs for VOICEVOX stability.
+  request_timeout: 30.0  # Seconds allowed for one VOICEVOX request. CPU synthesis can exceed 6 seconds.
+  retry_attempts: 3
+  retry_wait_min: 1.0
+  retry_wait_max: 3.0
+  speaker_retry_attempts: 2
   speed: 1.0
   pitch: 0.0
   estimate_chars_per_second: 8.0

@@ -54,6 +54,17 @@ class ReusingCacheManager(StubCacheManager):
         return result
 
 
+def test_audio_generator_uses_cpu_safe_voicevox_request_timeout(tmp_path):
+    generator = AudioGenerator(
+        config={"voice": {"enabled": True}},
+        temp_dir=tmp_path,
+        audio_params=AudioParams(),
+        cache_manager=StubCacheManager(),
+    )
+
+    assert generator.voice_request_timeout == 30.0
+
+
 def test_generate_audio_raises_clear_error_for_unknown_voicevox_speaker(monkeypatch, tmp_path):
     async def _run() -> None:
         generator = AudioGenerator(

@@ -6,6 +6,7 @@ import httpx
 
 
 RETRY_EXCEPTIONS = (httpx.RequestError, asyncio.TimeoutError)
+DEFAULT_VOICEVOX_REQUEST_TIMEOUT_SECONDS = 30.0
 
 
 async def _with_retry(
@@ -33,7 +34,7 @@ async def _with_retry(
 async def get_speakers_info(
     voicevox_url: str = "http://127.0.0.1:50021",
     *,
-    timeout: float = 6.0,
+    timeout: float = DEFAULT_VOICEVOX_REQUEST_TIMEOUT_SECONDS,
     retry_attempts: int = 2,
     retry_wait_min: float = 1.0,
     retry_wait_max: float = 2.0,
@@ -82,7 +83,7 @@ async def get_speakers_info(
 async def get_engine_version(
     voicevox_url: str = "http://127.0.0.1:50021",
     *,
-    timeout: float = 6.0,
+    timeout: float = DEFAULT_VOICEVOX_REQUEST_TIMEOUT_SECONDS,
     retry_attempts: int = 2,
     retry_wait_min: float = 1.0,
     retry_wait_max: float = 2.0,
@@ -114,7 +115,7 @@ async def generate_voice(
     pitch: float = 0.0,
     voicevox_url: str = "http://127.0.0.1:50021",
     *,
-    timeout: float = 6.0,
+    timeout: float = DEFAULT_VOICEVOX_REQUEST_TIMEOUT_SECONDS,
     retry_attempts: int = 3,
     retry_wait_min: float = 1.0,
     retry_wait_max: float = 3.0,

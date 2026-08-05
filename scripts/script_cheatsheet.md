@@ -707,6 +707,22 @@ video:
   audio_bitrate_kbps: 160
 ```
 
+VOICEVOX の応答待ちと再試行は `voice` で設定します。CPU版では初回の音声合成に数秒以上かかることがあるため、既定のリクエストタイムアウトは30秒です。
+
+| 項目名 | 意味 | 設定可能値 | デフォルト値 |
+| --- | --- | --- | --- |
+| `request_timeout` | VOICEVOX APIの1リクエストを待つ最大秒数 | 正の数 | `30.0` |
+| `retry_attempts` | 音声合成リクエストの最大試行回数 | 1以上の整数 | `3` |
+| `retry_wait_min` | 再試行前に待つ最短秒数 | 0以上の数 | `1.0` |
+| `retry_wait_max` | 再試行前に待つ最長秒数 | `retry_wait_min` 以上の数 | `3.0` |
+| `speaker_retry_attempts` | 話者一覧・エンジン情報取得の最大試行回数 | 1以上の整数 | `2` |
+
+```yaml
+voice:
+  request_timeout: 30.0
+  retry_attempts: 3
+```
+
 各行クリップは映像・音声ともPTS 0始点へ正規化されます。複数クリップのconcatは、安全な場合だけstream copyを使用し、AACのencoder delay/paddingが境界にある場合は映像をcopyしたまま音声だけAACへ再エンコードします。
 
 ```yaml

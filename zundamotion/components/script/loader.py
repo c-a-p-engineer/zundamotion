@@ -59,7 +59,15 @@ def load_script_and_config(
 
     # Allow selected top-level sections in script to override global config
     # e.g., subtitle settings (reading_display), video params, bgm defaults, etc.
-    for top_key in ("video", "subtitle", "bgm", "background", "system", "transitions"):
+    for top_key in (
+        "video",
+        "subtitle",
+        "bgm",
+        "background",
+        "voice",
+        "system",
+        "transitions",
+    ):
         if top_key in script_data and isinstance(script_data[top_key], dict):
             final_config[top_key] = merge_configs(
                 final_config.get(top_key, {}), script_data[top_key]

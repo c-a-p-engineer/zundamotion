@@ -16,7 +16,12 @@ from ...utils.ffmpeg_audio import (
 )
 
 from ...utils.logger import logger  # loggerをインポート
-from .voicevox_client import generate_voice, get_engine_version, get_speakers_info
+from .voicevox_client import (
+    DEFAULT_VOICEVOX_REQUEST_TIMEOUT_SECONDS,
+    generate_voice,
+    get_engine_version,
+    get_speakers_info,
+)
 
 
 class AudioGenerator:
@@ -40,7 +45,12 @@ class AudioGenerator:
         self._engine_version_cache: Optional[str] = None
         self._dictionary_hash_cache: Optional[str] = None
         self._speaker_validation_unavailable = False
-        self.voice_request_timeout = float(self.voice_config.get("request_timeout", 6.0) or 6.0)
+        self.voice_request_timeout = float(
+            self.voice_config.get(
+                "request_timeout", DEFAULT_VOICEVOX_REQUEST_TIMEOUT_SECONDS
+            )
+            or DEFAULT_VOICEVOX_REQUEST_TIMEOUT_SECONDS
+        )
         self.voice_retry_attempts = int(self.voice_config.get("retry_attempts", 3) or 3)
         self.voice_retry_wait_min = float(self.voice_config.get("retry_wait_min", 1.0) or 1.0)
         self.voice_retry_wait_max = float(self.voice_config.get("retry_wait_max", 3.0) or 3.0)

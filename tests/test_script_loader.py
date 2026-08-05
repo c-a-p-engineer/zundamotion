@@ -203,6 +203,37 @@ def test_top_level_transitions_override_default_config(tmp_path):
     assert config["transitions"]["wait_padding_seconds"] == 0.0
 
 
+def test_top_level_voice_overrides_default_config(tmp_path):
+    default_config_path = tmp_path / "default.yaml"
+    default_config_path.write_text(
+        yaml.safe_dump(
+            {
+                "script": {"scenes": []},
+                "voice": {"request_timeout": 6.0, "retry_attempts": 3},
+                "defaults": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    script_path = tmp_path / "script.yaml"
+    script_path.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "voice override", "version": 3},
+                "voice": {"request_timeout": 45.0},
+                "scenes": [{"id": "scene", "lines": [{"wait": 0.1}]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_script_and_config(str(script_path), str(default_config_path))
+
+    assert config["voice"]["request_timeout"] == 45.0
+    assert config["voice"]["retry_attempts"] == 3
+
+
 def test_top_level_badges_are_inherited_by_each_scene(tmp_path):
     root = Path.cwd()
     default_config_path = tmp_path / "default.yaml"
