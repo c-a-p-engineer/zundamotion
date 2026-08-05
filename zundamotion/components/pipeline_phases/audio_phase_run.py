@@ -11,6 +11,11 @@ from tqdm import tqdm
 from zundamotion.timeline import Timeline
 from zundamotion.utils.logger import logger, time_log
 
+from .audio_phase_control import (
+    build_non_speech_line,
+    register_control_entry,
+    take_pending_audio_overlay,
+)
 from .audio_phase_entries import prepare_audio_entries
 from .audio_phase_speech import process_speech_entry
 
@@ -50,69 +55,27 @@ class AudioPhaseRunMixin:
             disable=(os.getenv("TQDM_DISABLE") == "1" or not sys.stderr.isatty()),
         ) as progress:
             for entry in entries:
-                entry_type = entry["entry_type"]
-                if entry_type == "bgm":
-                    bgm_config = entry["bgm_cfg"]
-                    timeline.add_bgm_event(
-                        str(bgm_config.get("id")),
-                        str(bgm_config.get("action")),
-                        fade=bgm_config.get("fade"),
-                    )
-                    continue
-                if entry_type == "topic":
-                    timeline.add_topic(entry["topic"])
+                if register_control_entry(entry, timeline):
                     continue
 
-                scene_id = entry["scene_id"]
-                line_index = entry["line_idx"]
-                line_id = entry["line_id"]
-                line = entry["line"]
-                incoming_audio_overlays: List[Dict[str, Any]] = []
-                if pending_l_cut_audio is not None:
-                    incoming_audio_overlays.append(pending_l_cut_audio)
-                    pending_l_cut_audio = None
-
-                if entry_type == "wait":
-                    progress.set_description(
-                        f"Calculating Wait Step (Scene '{scene_id}', Line {line_index})"
-                    )
-                    wait_value = line["wait"]
-                    duration = float(
-                        wait_value.get("duration", 0.0)
-                        if isinstance(wait_value, dict)
-                        else wait_value
-                    )
-                    timeline.add_event(f"(Wait {duration}s)", duration, text=None)
-                    line_data_map[line_id] = {
-                        "type": "wait",
-                        "duration": duration,
-                        "line_config": line,
-                        "audio_path": None,
-                        "text": None,
-                        "extra_audio_overlays": incoming_audio_overlays,
-                    }
-                    progress.update(1)
-                    continue
-
-                if entry_type == "image_layer":
-                    progress.set_description(
-                        f"Registering Image Layer Step (Scene '{scene_id}', Line {line_index})"
-                    )
-                    timeline.add_event("(Image Layer)", 0.0, text=None)
-                    line_data_map[line_id] = {
-                        "type": "image_layer",
-                        "duration": 0.0,
-                        "line_config": line,
-                        "audio_path": None,
-                        "text": None,
-                        "extra_audio_overlays": incoming_audio_overlays,
-                    }
+                incoming_audio_overlays = take_pending_audio_overlay(
+                    pending_l_cut_audio
+                )
+                pending_l_cut_audio = None
+                non_speech = build_non_speech_line(
+                    entry=entry,
+                    timeline=timeline,
+                    incoming_audio_overlays=incoming_audio_overlays,
+                )
+                if non_speech is not None:
+                    progress.set_description(non_speech.progress_description)
+                    line_data_map[non_speech.line_id] = non_speech.line_data
                     progress.update(1)
                     continue
 
                 progress.set_description(
                     "Audio Generation "
-                    f"(Scene '{scene_id}', Line {line_index}: "
+                    f"(Scene '{entry['scene_id']}', Line {entry['line_idx']}: "
                     f"'{entry['display_text'][:30]}...')"
                 )
                 result = await process_speech_entry(
@@ -121,7 +84,7 @@ class AudioPhaseRunMixin:
                     timeline=timeline,
                     incoming_audio_overlays=incoming_audio_overlays,
                 )
-                line_data_map[line_id] = result.line_data
+                line_data_map[entry["line_id"]] = result.line_data
                 pending_l_cut_audio = result.pending_l_cut_audio
                 progress.update(1)
 
