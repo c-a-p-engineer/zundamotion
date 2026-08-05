@@ -10,7 +10,7 @@
     "provider": "btbn",
     "release_tag": "autobuild-2026-06-30-13-34",
     "asset": "ffmpeg-n8.1.2-21-gce3c09c101-linux64-gpl-8.1.tar.xz",
-    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "sha256": "0ba73bbd93472c7622f6dec26d334c5e62e64d858d072490b2844320970456cd",
     "expected_version_prefix": "ffmpeg version n8.1.2"
   },
   "voicevox": {
