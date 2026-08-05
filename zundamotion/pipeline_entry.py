@@ -9,7 +9,6 @@ from .components.script import load_script_and_config
 from .components.subtitles.lifecycle import shutdown_subtitle_executor
 from .plugins.manager import initialize_plugins
 from .utils.logger import logger
-from .pipeline import GenerationPipeline
 
 
 async def run_generation(
@@ -34,6 +33,10 @@ async def run_generation(
     disable_voice: bool = False,
 ):
     """動画生成を高レベルに実行するユーティリティ関数。"""
+    # Delay the concrete pipeline import so both ``pipeline`` and
+    # ``pipeline_entry`` remain importable without a circular dependency.
+    from .pipeline_diagnostics import DiagnosticGenerationPipeline
+
     # Get the path to the default config file
     default_config_path = Path(__file__).parent / "templates" / "config.yaml"
 
@@ -78,7 +81,7 @@ async def run_generation(
             logger.warning("[PluginLoader] Plugin initialization failed; continuing with built-ins")
 
     # Resolve VideoParams and AudioParams once from the preset-expanded config.
-    pipeline = GenerationPipeline(
+    pipeline = DiagnosticGenerationPipeline(
         config,
         no_cache,
         cache_refresh,
@@ -89,5 +92,8 @@ async def run_generation(
     )
     try:
         await pipeline.run(output_path)
+    except BaseException as exc:
+        pipeline.write_failure_summary(output_path, exc)
+        raise
     finally:
         shutdown_subtitle_executor()

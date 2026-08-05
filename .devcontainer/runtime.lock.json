@@ -8,9 +8,9 @@
   "ffmpeg": {
     "official_version": "8.1.2",
     "provider": "btbn",
-    "release_tag": "autobuild-2026-07-20-14-10",
-    "asset": "ffmpeg-n8.1.2-29-g703dcc25b9-linux64-gpl-8.1.tar.xz",
-    "sha256": "1beb1d21b4485962baeb2fff4f01e8b91faa6d1017567b07b8f26df1a93cbdfe",
+    "release_tag": "autobuild-2026-06-30-13-34",
+    "asset": "ffmpeg-n8.1.2-21-gce3c09c101-linux64-gpl-8.1.tar.xz",
+    "sha256": "0ba73bbd93472c7622f6dec26d334c5e62e64d858d072490b2844320970456cd",
     "expected_version_prefix": "ffmpeg version n8.1.2"
   },
   "voicevox": {
@@ -28,5 +28,5 @@
     "configure_flags": ["--enable-libfreetype", "--enable-libx264", "--enable-libx265", "--enable-libmp3lame", "--enable-ffnvcodec"]
   },
   "optional_filters": ["overlay_cuda", "scale_cuda", "scale_npp", "overlay_opencl", "scale_opencl"],
-  "verified_at": "2026-07-21"
+  "verified_at": "2026-08-06"
 }
