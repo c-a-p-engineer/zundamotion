@@ -164,17 +164,16 @@ class SceneCacheMixin:
             and isinstance(previous.get("components", {}), dict)
             else {}
         )
-        changed_components = sorted(
-            key
-            for key in set(previous_components) | set(current_components)
-            if previous_components.get(key) != current_components.get(key)
-        )
         if previous is None:
+            changed_components: List[str] = []
             manifest_status = "first_observation"
-        elif changed_components:
-            manifest_status = "changed"
         else:
-            manifest_status = "unchanged"
+            changed_components = sorted(
+                key
+                for key in set(previous_components) | set(current_components)
+                if previous_components.get(key) != current_components.get(key)
+            )
+            manifest_status = "changed" if changed_components else "unchanged"
 
         detail: Dict[str, Any] = {
             "base_key": base_key,
