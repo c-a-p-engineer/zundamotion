@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import shutil
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from zundamotion.exceptions import ValidationError
 from zundamotion.timeline import Timeline
@@ -12,11 +15,73 @@ from zundamotion.utils.ffmpeg_probe import get_audio_duration, get_media_duratio
 from zundamotion.utils.logger import logger, time_log
 
 
+BGM_MIX_CACHE_VERSION = "bgm_mix_v1"
+
+
+def _path_signature(path: Path) -> Dict[str, Any]:
+    resolved = path.expanduser().resolve()
+    stat = resolved.stat()
+    return {
+        "path": str(resolved),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
+
+
 class BGMPhase:
     def __init__(self, config: Dict[str, Any], temp_dir: Path, audio_params: AudioParams):
         self.config = config
         self.temp_dir = temp_dir
         self.audio_params = audio_params
+
+    def _persistent_cache_root(self, final_video_path: Path) -> Optional[Path]:
+        system_cfg = self.config.get("system", {}) or {}
+        if system_cfg.get("cache_bgm_mix", True) is False:
+            return None
+        cache_root = Path(system_cfg.get("cache_dir", ".cache/zundamotion"))
+        try:
+            cache_root = cache_root.expanduser().resolve()
+            final_resolved = final_video_path.expanduser().resolve()
+            if not final_resolved.is_relative_to(cache_root):
+                return None
+            cache_root.mkdir(parents=True, exist_ok=True)
+            return cache_root
+        except (OSError, RuntimeError, ValueError):
+            return None
+
+    def _bgm_mix_cache_path(
+        self,
+        *,
+        final_video_path: Path,
+        bgm_layers: List[Dict[str, Any]],
+        segments: List[Dict[str, Any]],
+    ) -> Optional[Path]:
+        cache_root = self._persistent_cache_root(final_video_path)
+        if cache_root is None:
+            return None
+
+        normalized_layers: List[Dict[str, Any]] = []
+        for layer in bgm_layers:
+            layer_data = dict(layer)
+            layer_data["file"] = _path_signature(Path(str(layer["file"])))
+            normalized_layers.append(layer_data)
+        payload = {
+            "version": BGM_MIX_CACHE_VERSION,
+            "video": _path_signature(final_video_path),
+            "layers": normalized_layers,
+            "segments": segments,
+            "audio_params": self.audio_params.__dict__,
+        }
+        digest = hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+        return cache_root / f"bgm_mix_{digest}.mp4"
 
     @time_log(logger)
     async def run(
@@ -149,6 +214,15 @@ class BGMPhase:
             return await self._apply_mastering_if_enabled(output_path)
 
         logger.debug("BGM segments: %s", json.dumps(segments, ensure_ascii=False))
+        cache_path = self._bgm_mix_cache_path(
+            final_video_path=final_video_path,
+            bgm_layers=bgm_layers,
+            segments=segments,
+        )
+        if cache_path is not None and cache_path.exists():
+            logger.info("[BGMCache] HIT key=%s file=%s", cache_path.stem[-12:], cache_path.name)
+            return await self._apply_mastering_if_enabled(cache_path)
+
         output_path = self.temp_dir / "final_with_bgm.mp4"
         filter_complex = await add_bgm_segments_to_video(
             str(final_video_path),
@@ -158,6 +232,21 @@ class BGMPhase:
             audio_params=self.audio_params,
         )
         logger.debug("BGM filter_complex: %s", filter_complex)
+        if cache_path is not None:
+            temporary_cache_path = cache_path.with_name(
+                f".{cache_path.name}.{os.getpid()}.tmp"
+            )
+            try:
+                shutil.copy2(output_path, temporary_cache_path)
+                os.replace(temporary_cache_path, cache_path)
+                output_path = cache_path
+                logger.info(
+                    "[BGMCache] STORE key=%s file=%s",
+                    cache_path.stem[-12:],
+                    cache_path.name,
+                )
+            finally:
+                temporary_cache_path.unlink(missing_ok=True)
         return await self._apply_mastering_if_enabled(output_path)
 
     async def _apply_mastering_if_enabled(self, video_path: Path) -> Path:
