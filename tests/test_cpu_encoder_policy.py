@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import os
 
+import pytest
+
 from zundamotion import pipeline_entry
 from zundamotion.utils import ffmpeg_capabilities
 
@@ -32,6 +34,14 @@ def test_auto_policy_does_not_modify_environment(monkeypatch) -> None:
         assert os.environ["DISABLE_HWENC"] == "custom"
 
     assert os.environ["DISABLE_HWENC"] == "custom"
+
+
+def test_policy_context_does_not_suppress_exceptions(monkeypatch) -> None:
+    monkeypatch.delenv("DISABLE_HWENC", raising=False)
+
+    with pytest.raises(RuntimeError, match="expected"):
+        with pipeline_entry._encoder_policy_environment("auto"):
+            raise RuntimeError("expected")
 
 
 def test_downstream_encoder_resolution_skips_gpu_probe(monkeypatch) -> None:
