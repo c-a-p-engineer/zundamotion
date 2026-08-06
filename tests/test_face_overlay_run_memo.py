@@ -80,15 +80,11 @@ def test_scale_change_creates_distinct_run_entry(tmp_path) -> None:
 def test_source_change_invalidates_run_memo(tmp_path) -> None:
     subject, persistent, source = _subject(tmp_path)
 
-    async def first():
-        return await subject.get_scaled_overlay(source, 1.0)
+    async def run():
+        await subject.get_scaled_overlay(source, 1.0)
+        source.write_bytes(b"source-changed")
+        await subject.get_scaled_overlay(source, 1.0)
 
-    asyncio.run(first())
-    source.write_bytes(b"source-changed")
-
-    async def second():
-        return await subject.get_scaled_overlay(source, 1.0)
-
-    asyncio.run(second())
+    asyncio.run(run())
 
     assert persistent.calls == 2
