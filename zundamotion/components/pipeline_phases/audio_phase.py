@@ -48,8 +48,17 @@ class AudioPhase(AudioPhaseRunMixin):
         self.used_voicevox_info: List[Tuple[int, str]] = (
             []
         )  # Initialize list to store (speaker_id, text)
-        self.audio_worker_policy = self._resolve_audio_worker_policy()
-        self.audio_workers = self.audio_worker_policy.resolved
+        policy = self._resolve_audio_worker_policy()
+        self.audio_workers = max(1, int(self._determine_audio_workers()))
+        if self.audio_workers != policy.resolved:
+            policy = AudioWorkerPolicy(
+                requested=policy.requested,
+                resolved=self.audio_workers,
+                source="compatibility_override",
+                automatic=False,
+                fallback_reason="determine_audio_workers_override",
+            )
+        self.audio_worker_policy = policy
         logger.info(
             "[AudioConcurrency] requested=%s resolved=%d source=%s automatic=%s fallback=%s",
             self.audio_worker_policy.requested,

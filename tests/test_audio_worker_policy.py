@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+from zundamotion.components.pipeline_phases import audio_phase
+from zundamotion.components.pipeline_phases.audio_phase import AudioPhase
 from zundamotion.components.pipeline_phases.audio_worker_policy import (
     resolve_audio_worker_policy,
 )
+from zundamotion.utils.ffmpeg_params import AudioParams
 
 
 def test_auto_workers_are_bounded_to_two() -> None:
@@ -60,3 +65,19 @@ def test_invalid_value_falls_back_with_reason() -> None:
     assert policy.resolved == 2
     assert policy.automatic is True
     assert policy.fallback_reason == "invalid_value"
+
+
+def test_audio_phase_init_still_uses_determine_workers_override(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(audio_phase, "AudioGenerator", lambda *args, **kwargs: object())
+    monkeypatch.setattr(AudioPhase, "_determine_audio_workers", lambda self: 7)
+    cache_manager = SimpleNamespace(cache_dir=tmp_path)
+
+    phase = AudioPhase({}, tmp_path, cache_manager, AudioParams())
+
+    assert phase.audio_workers == 7
+    assert phase.audio_worker_policy.resolved == 7
+    assert phase.audio_worker_policy.source == "compatibility_override"
+    assert phase.audio_worker_policy.fallback_reason == "determine_audio_workers_override"
