@@ -269,113 +269,51 @@ class SceneStandardRendererMixin:
         except Exception as e:
             logger.debug("Face overlay precache skipped (scene=%s): %s", scene_id, e)
 
-        # シーンベース映像（背景のみ）を事前生成（動画/静止画どちらでも）
-        scene_base_path: Optional[Path] = None
-        # 静的レイヤ（全行で不変な立ち絵・挿入画像）を検出（項目単位の共通部分を抽出）
-        static_overlays: List[Dict[str, Any]] = []
-        static_char_keys: set = set()
-        static_insert_in_base = False
-        scene_level_insert_video: Optional[Path] = None
-        try:
-            talk_lines = [
-                l
-                for l in scene.get("lines", [])
-                if not ("wait" in l or l.get("type") == "wait")
-            ]
-            if talk_lines:
-                # 各行の可視キャラを正規化してキー化（name, expr, scale, anchor, pos）
-                per_line_char_maps = [self._norm_char_entries(tl) for tl in talk_lines]
-                if per_line_char_maps:
-                    common_keys = set(per_line_char_maps[0].keys())
-                    for m in per_line_char_maps[1:]:
-                        common_keys &= set(m.keys())
-                    for key in sorted(common_keys):
-                        ov = per_line_char_maps[0][key]
-                        if not Path(ov["path"]).exists():
-                            continue
-                        static_overlays.append(ov)
-                        static_char_keys.add(key)
-
-                # 画像の挿入が全行共通か（画像のみ、動画は対象外）
-                first_insert = talk_lines[0].get("insert")
-                if first_insert:
-                    same_insert_all = all(
-                        (tl.get("insert") == first_insert) for tl in talk_lines
-                    )
-                    if same_insert_all:
-                        insert_path = Path(first_insert.get("path", ""))
-                        # 画像はベースへ取り込み、動画はシーン単位で事前正規化のみ行う
-                        if insert_path.suffix.lower() in [
-                            ".png",
-                            ".jpg",
-                            ".jpeg",
-                            ".bmp",
-                            ".webp",
-                        ] and insert_path.exists():
-                            static_overlays.append(
-                                {
-                                    "path": str(insert_path),
-                                    "scale": first_insert.get("scale", 1.0),
-                                    "anchor": first_insert.get(
-                                        "anchor", "middle_center"
-                                    ),
-                                    "position": first_insert.get(
-                                        "position", {"x": "0", "y": "0"}
-                                    ),
-                                }
-                            )
-                            static_insert_in_base = True
-                        elif insert_path.suffix.lower() in [
-                            ".mp4",
-                            ".mov",
-                            ".webm",
-                            ".avi",
-                            ".mkv",
-                        ] and insert_path.exists():
-                            try:
-                                # シーン内で共通の挿入動画を一度だけ正規化
-                                normalized_insert = await normalize_media(
-                                    input_path=insert_path,
-                                    video_params=self.video_params,
-                                    audio_params=self.audio_params,
-                                    cache_manager=self.cache_manager,
-                                )
-                                scene_level_insert_video = normalized_insert
-                                logger.info(
-                                    f"Scene {scene_id}: pre-normalized common insert video -> {normalized_insert.name}"
-                                )
-                            except Exception as e:
-                                logger.warning(
-                                    f"Scene {scene_id}: failed to pre-normalize common insert video {insert_path.name}: {e}"
-                                )
-        except Exception as e:
-            logger.debug(
-                f"Static overlay detection failed on scene {scene_id}: {e}"
-            )
-        if scene_cp:
-            static_overlays = []
-            static_char_keys = set()
-            static_insert_in_base = False
-            scene_level_insert_video = None
-        # ベース映像生成の可否を判断
-        normalized_bg_path: Optional[Path] = None
-        total_lines_in_scene = len(scene.get("lines", []))
-        min_lines_for_base = int(
-            self.config.get("video", {}).get("scene_base_min_lines", 6)
+        base_plan = self._build_scene_base_plan(
+            scene=scene,
+            scene_copy=scene_cp,
+            is_background_video=is_bg_video,
+            has_line_background_override=has_line_bg_override,
         )
-        should_generate_base = False
-        if has_line_bg_override:
-            should_generate_base = False
-        elif static_overlays:
-            should_generate_base = True
-        elif is_bg_video and total_lines_in_scene >= min_lines_for_base:
-            # 静的オーバーレイは無いが、行数が多い場合はベース生成の方が有利
-            should_generate_base = True
-        elif (not is_bg_video) and total_lines_in_scene >= 2:
-            # 背景が静止画でも行数が複数ある場合は、背景のスケール/ループを一度だけ行う方が有利
-            should_generate_base = True
+        if base_plan.detection_error is not None:
+            logger.debug(
+                "Static overlay detection failed on scene %s: %s",
+                scene_id,
+                base_plan.detection_error,
+            )
+        static_overlays = base_plan.static_overlays
+        static_char_keys = base_plan.static_character_keys
+        static_insert_in_base = base_plan.static_insert_in_base
+        scene_level_insert_video: Optional[Path] = None
+        if base_plan.common_insert_video_path is not None:
+            try:
+                scene_level_insert_video = await normalize_media(
+                    input_path=base_plan.common_insert_video_path,
+                    video_params=self.video_params,
+                    audio_params=self.audio_params,
+                    cache_manager=self.cache_manager,
+                )
+                logger.info(
+                    "Scene %s: pre-normalized common insert video -> %s",
+                    scene_id,
+                    scene_level_insert_video.name,
+                )
+                if base_plan.scene_copy:
+                    scene_level_insert_video = None
+            except Exception as error:
+                logger.warning(
+                    "Scene %s: failed to pre-normalize common insert video %s: %s",
+                    scene_id,
+                    base_plan.common_insert_video_path.name,
+                    error,
+                )
 
-        base_bg_layout = self._resolve_background_layout({})
+        scene_base_path: Optional[Path] = None
+        normalized_bg_path: Optional[Path] = None
+        total_lines_in_scene = base_plan.total_lines
+        min_lines_for_base = base_plan.minimum_lines
+        should_generate_base = base_plan.should_generate_base
+        base_bg_layout = base_plan.base_background_layout
 
         if should_generate_base:
             try:
