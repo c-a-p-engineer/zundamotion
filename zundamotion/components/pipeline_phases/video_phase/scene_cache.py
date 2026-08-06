@@ -93,24 +93,35 @@ class SceneCacheMixin:
             components[str(key)] = self._cache_key_short(component_data)
         return components
 
-    def _read_scene_cache_manifest(self, scene_id: str) -> Dict[str, Any] | None:
+    def _read_scene_cache_manifest(
+        self,
+        scene_id: str,
+    ) -> tuple[Dict[str, Any] | None, str]:
+        """Read one component manifest and preserve why it was unavailable."""
         if bool(getattr(self.cache_manager, "no_cache", False)):
-            return None
+            return None, "cache_disabled"
         path = self._scene_cache_manifest_path(scene_id)
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            return None
-        except (OSError, json.JSONDecodeError) as exc:
+            return None, "manifest_missing"
+        except json.JSONDecodeError as exc:
             logger.warning(
                 "[SceneCacheExplain] scene=%s manifest_read_failed=%s",
                 scene_id,
                 type(exc).__name__,
             )
-            return None
+            return None, "manifest_corrupt"
+        except OSError as exc:
+            logger.warning(
+                "[SceneCacheExplain] scene=%s manifest_read_failed=%s",
+                scene_id,
+                type(exc).__name__,
+            )
+            return None, "manifest_read_failed"
         if data.get("version") != _SCENE_CACHE_MANIFEST_VERSION:
-            return None
-        return data
+            return None, "manifest_version_mismatch"
+        return data, "observed"
 
     def _write_scene_cache_manifest(
         self,
@@ -157,7 +168,7 @@ class SceneCacheMixin:
         current_components = self._scene_base_component_hashes(scene_base_hash_data)
         scene = getattr(self, "scene", {}) or {}
         scene_id = str(scene.get("id") or "unknown")
-        previous = self._read_scene_cache_manifest(scene_id)
+        previous, manifest_read_status = self._read_scene_cache_manifest(scene_id)
         previous_components = (
             previous.get("components", {})
             if isinstance(previous, dict)
@@ -186,6 +197,7 @@ class SceneCacheMixin:
             ),
             "changed_components": changed_components,
             "component_manifest_status": manifest_status,
+            "manifest_read_status": manifest_read_status,
         }
         self._write_scene_cache_manifest(
             scene_id=scene_id,
@@ -221,6 +233,15 @@ class SceneCacheMixin:
             return "base_component_changed"
         if detail.get("component_manifest_status") == "unchanged":
             return "base_cache_entry_missing"
+        manifest_status = detail.get("manifest_read_status")
+        if manifest_status == "manifest_missing":
+            return "base_manifest_missing"
+        if manifest_status == "manifest_version_mismatch":
+            return "base_manifest_version_changed"
+        if manifest_status == "manifest_corrupt":
+            return "base_manifest_corrupt"
+        if manifest_status == "manifest_read_failed":
+            return "base_manifest_read_failed"
         return "base_cache_not_observed"
 
     def _record_scene_cache_event(
@@ -241,12 +262,13 @@ class SceneCacheMixin:
         changed = list((detail or {}).get("changed_components") or [])
         if layer == "base" and status == "MISS":
             logger.info(
-                "[SceneCacheExplain] scene=%s reason=%s changed_components=%s previous_key=%s current_key=%s",
+                "[SceneCacheExplain] scene=%s reason=%s changed_components=%s previous_key=%s current_key=%s manifest=%s",
                 scene_id,
                 explained_reason or "unknown",
                 ",".join(changed) if changed else "none",
                 (detail or {}).get("previous_base_key", "-"),
                 (detail or {}).get("base_key", key),
+                (detail or {}).get("manifest_read_status", "unknown"),
             )
         perf_stats.record_scene_cache_event(
             scene_id=scene_id,
