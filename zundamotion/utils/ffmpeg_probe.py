@@ -66,6 +66,7 @@ class MediaInfo(TypedDict, total=False):
 
     video: Optional[VideoInfo]
     audio: Optional[AudioInfo]
+    duration: Optional[float]
 
 
 class AssetMetadata(TypedDict, total=False):
@@ -126,6 +127,53 @@ def get_image_info(file_path: str) -> ImageInfo:
     return info
 
 
+def _parse_media_probe(payload: Dict[str, Any]) -> MediaInfo:
+    media_info: MediaInfo = {"video": None, "audio": None, "duration": None}
+    for stream in payload.get("streams", []):
+        if stream.get("codec_type") == "video" and media_info["video"] is None:
+            r_rate = stream.get("r_frame_rate", "0/0")
+            try:
+                num, den = map(int, r_rate.split("/"))
+                fps = float(num) / float(den) if den else 0.0
+            except Exception:
+                fps = 0.0
+            media_info["video"] = {
+                "codec_name": stream.get("codec_name"),
+                "width": int(stream.get("width", 0)),
+                "height": int(stream.get("height", 0)),
+                "pix_fmt": stream.get("pix_fmt"),
+                "r_frame_rate": r_rate,
+                "fps": fps,
+            }
+        elif stream.get("codec_type") == "audio" and media_info["audio"] is None:
+            media_info["audio"] = {
+                "codec_name": stream.get("codec_name"),
+                "sample_rate": (
+                    int(stream.get("sample_rate", 0))
+                    if stream.get("sample_rate")
+                    else 0
+                ),
+                "channels": (
+                    int(stream.get("channels", 0)) if stream.get("channels") else 0
+                ),
+                "channel_layout": stream.get("channel_layout"),
+            }
+
+    raw_duration = (payload.get("format") or {}).get("duration")
+    if raw_duration not in {None, "", "N/A"}:
+        media_info["duration"] = round(float(raw_duration), 2)
+    return media_info
+
+
+def _memoize_probe(key: tuple[str, int, int], media_info: MediaInfo) -> None:
+    _media_info_memo[key] = media_info
+    duration = media_info.get("duration")
+    if duration is not None:
+        normalized = float(duration)
+        _duration_memo[("med", *key)] = normalized
+        _duration_memo[("aud", *key)] = normalized
+
+
 async def probe_asset(
     file_path: str,
     *,
@@ -140,9 +188,14 @@ async def probe_asset(
     if not cache:
         clear_probe_caches()
 
-    p = Path(file_path)
-    result: AssetMetadata = {"path": str(p), "image": None, "video": None, "audio": None}
-    if _is_image_path(p):
+    path = Path(file_path)
+    result: AssetMetadata = {
+        "path": str(path),
+        "image": None,
+        "video": None,
+        "audio": None,
+    }
+    if _is_image_path(path):
         result["kind"] = "image"
         result["image"] = get_image_info(file_path)
         return result
@@ -151,16 +204,19 @@ async def probe_asset(
     media_info = await get_media_info(file_path, caller=caller or "probe_asset")
     result["video"] = media_info.get("video")
     result["audio"] = media_info.get("audio")
-    result["duration"] = await get_media_duration(file_path, caller=caller or "probe_asset")
+    duration = media_info.get("duration")
+    if duration is None:
+        duration = await get_media_duration(file_path, caller=caller or "probe_asset")
+    result["duration"] = duration
     return result
 
 
 async def get_media_info(file_path: str, caller: Optional[str] = None) -> MediaInfo:
-    """動画/音声ファイルのメタ情報を取得する。"""
+    """動画/音声のstream情報とformat durationを1回のffprobeで取得する。"""
     try:
         resolved_caller = _resolve_probe_caller(caller)
-        p = Path(file_path)
-        key = _stat_key(p)
+        path = Path(file_path)
+        key = _stat_key(path)
         if key in _media_info_memo:
             return _media_info_memo[key]
         existing = _media_info_inflight.get(key)
@@ -168,51 +224,28 @@ async def get_media_info(file_path: str, caller: Optional[str] = None) -> MediaI
             return await existing
 
         async def _probe() -> MediaInfo:
-            cmd = [
+            command = [
                 "ffprobe",
                 "-v",
                 "error",
                 "-show_streams",
+                "-show_format",
                 "-of",
                 "json",
                 file_path,
             ]
-            result = await run_ffmpeg_async(
-                cmd,
+            completed = await run_ffmpeg_async(
+                command,
                 context={
                     "phase": "Probe",
                     "operation": "media_info",
                     "caller": resolved_caller,
                     "path": file_path,
+                    "includes_duration": True,
                 },
             )
-            info = json.loads(result.stdout)
-
-            media_info: MediaInfo = {"video": None, "audio": None}
-            for s in info.get("streams", []):
-                if s.get("codec_type") == "video" and media_info["video"] is None:
-                    r_rate = s.get("r_frame_rate", "0/0")
-                    try:
-                        num, den = map(int, r_rate.split("/"))
-                        fps = float(num) / float(den) if den else 0.0
-                    except Exception:
-                        fps = 0.0
-                    media_info["video"] = {
-                        "codec_name": s.get("codec_name"),
-                        "width": int(s.get("width", 0)),
-                        "height": int(s.get("height", 0)),
-                        "pix_fmt": s.get("pix_fmt"),
-                        "r_frame_rate": r_rate,
-                        "fps": fps,
-                    }
-                elif s.get("codec_type") == "audio" and media_info["audio"] is None:
-                    media_info["audio"] = {
-                        "codec_name": s.get("codec_name"),
-                        "sample_rate": int(s.get("sample_rate", 0)) if s.get("sample_rate") else 0,
-                        "channels": int(s.get("channels", 0)) if s.get("channels") else 0,
-                        "channel_layout": s.get("channel_layout"),
-                    }
-            _media_info_memo[key] = media_info
+            media_info = _parse_media_probe(json.loads(completed.stdout))
+            _memoize_probe(key, media_info)
             return media_info
 
         task = asyncio.create_task(_probe())
@@ -222,19 +255,20 @@ async def get_media_info(file_path: str, caller: Optional[str] = None) -> MediaI
         finally:
             if _media_info_inflight.get(key) is task:
                 _media_info_inflight.pop(key, None)
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error running ffprobe for {file_path}: {e.stderr}")
+    except subprocess.CalledProcessError as exc:
+        logger.error("Error running ffprobe for %s: %s", file_path, exc.stderr)
         raise
-    except (json.JSONDecodeError, KeyError, ValueError) as e:
-        logger.error(f"Error parsing ffprobe output for {file_path}: {e}")
+    except (json.JSONDecodeError, KeyError, ValueError) as exc:
+        logger.error("Error parsing ffprobe output for %s: %s", file_path, exc)
         raise
-
 
 
 async def probe_media_params_async(path: Path) -> Dict[str, Any]:
     """ffprobe で幅やFPSなど最小限の情報を取得する。"""
     try:
-        media_info = await get_media_info(str(path), caller="probe_media_params_async")
+        media_info = await get_media_info(
+            str(path), caller="probe_media_params_async"
+        )
         result: Dict[str, Any] = {}
         video_info = media_info.get("video")
         if video_info:
@@ -249,104 +283,95 @@ async def probe_media_params_async(path: Path) -> Dict[str, Any]:
             result["ach"] = audio_info.get("channels")
             result["acodec"] = audio_info.get("codec_name")
         return result
-    except Exception as e:
-        logger.error(f"Error probing media params for {path}: {e}")
+    except Exception as exc:
+        logger.error("Error probing media params for %s: %s", path, exc)
         return {}
+
+
+async def _probe_duration_only(
+    file_path: str,
+    *,
+    caller: str,
+    operation: str,
+) -> float:
+    completed = await run_ffmpeg_async(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+            file_path,
+        ],
+        context={
+            "phase": "Probe",
+            "operation": operation,
+            "caller": caller,
+            "path": file_path,
+            "reason": "combined_probe_missing_duration",
+        },
+    )
+    payload = json.loads(completed.stdout)
+    return round(float(payload["format"]["duration"]), 2)
+
+
+async def _get_duration(
+    file_path: str,
+    *,
+    kind: str,
+    caller: Optional[str],
+) -> float:
+    resolved_caller = _resolve_probe_caller(caller)
+    path = Path(file_path)
+    stat_key = _stat_key(path)
+    duration_key = (kind, *stat_key)
+    if duration_key in _duration_memo:
+        return _duration_memo[duration_key]
+    existing = _duration_inflight.get(duration_key)
+    if existing is not None:
+        return await existing
+
+    async def _resolve() -> float:
+        media_info = await get_media_info(file_path, caller=resolved_caller)
+        duration = media_info.get("duration")
+        if duration is None:
+            operation = "audio_duration" if kind == "aud" else "media_duration"
+            duration = await _probe_duration_only(
+                file_path,
+                caller=resolved_caller,
+                operation=operation,
+            )
+        normalized = float(duration)
+        _duration_memo[("med", *stat_key)] = normalized
+        _duration_memo[("aud", *stat_key)] = normalized
+        return normalized
+
+    task = asyncio.create_task(_resolve())
+    _duration_inflight[duration_key] = task
+    try:
+        return await task
+    finally:
+        if _duration_inflight.get(duration_key) is task:
+            _duration_inflight.pop(duration_key, None)
+
+
 async def get_audio_duration(file_path: str, caller: Optional[str] = None) -> float:
     """音声ファイルの長さ(秒)を返す。"""
     try:
-        resolved_caller = _resolve_probe_caller(caller)
-        p = Path(file_path)
-        key = ("aud", *_stat_key(p))
-        if key in _duration_memo:
-            return _duration_memo[key]
-        existing = _duration_inflight.get(key)
-        if existing is not None:
-            return await existing
-
-        async def _probe() -> float:
-            cmd = [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "json",
-                file_path,
-            ]
-            result = await run_ffmpeg_async(
-                cmd,
-                context={
-                    "phase": "Probe",
-                    "operation": "audio_duration",
-                    "caller": resolved_caller,
-                    "path": file_path,
-                },
-            )
-            info = json.loads(result.stdout)
-            duration = round(float(info["format"]["duration"]), 2)
-            _duration_memo[key] = duration
-            return duration
-
-        task = asyncio.create_task(_probe())
-        _duration_inflight[key] = task
-        try:
-            return await task
-        finally:
-            if _duration_inflight.get(key) is task:
-                _duration_inflight.pop(key, None)
-    except Exception as e:
-        logger.error(f"Failed to get audio duration for {file_path}: {e}")
+        return await _get_duration(file_path, kind="aud", caller=caller)
+    except Exception as exc:
+        logger.error("Failed to get audio duration for %s: %s", file_path, exc)
         raise
 
 
 async def get_media_duration(file_path: str, caller: Optional[str] = None) -> float:
     """動画/音声ファイルの長さ(秒)を返す。"""
     try:
-        resolved_caller = _resolve_probe_caller(caller)
-        p = Path(file_path)
-        key = ("med", *_stat_key(p))
-        if key in _duration_memo:
-            return _duration_memo[key]
-        existing = _duration_inflight.get(key)
-        if existing is not None:
-            return await existing
-
-        async def _probe() -> float:
-            cmd = [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "json",
-                file_path,
-            ]
-            result = await run_ffmpeg_async(
-                cmd,
-                context={
-                    "phase": "Probe",
-                    "operation": "media_duration",
-                    "caller": resolved_caller,
-                    "path": file_path,
-                },
-            )
-            info = json.loads(result.stdout)
-            duration = round(float(info["format"]["duration"]), 2)
-            _duration_memo[key] = duration
-            return duration
-
-        task = asyncio.create_task(_probe())
-        _duration_inflight[key] = task
-        try:
-            return await task
-        finally:
-            if _duration_inflight.get(key) is task:
-                _duration_inflight.pop(key, None)
-    except Exception as e:
-        logger.error(f"Failed to get media duration for {file_path}: {e}")
+        return await _get_duration(file_path, kind="med", caller=caller)
+    except Exception as exc:
+        logger.error("Failed to get media duration for %s: %s", file_path, exc)
         raise
 
 
@@ -377,8 +402,12 @@ async def validate_final_media(
     )
     payload = json.loads(result.stdout)
     streams = payload.get("streams") or []
-    video = next((item for item in streams if item.get("codec_type") == "video"), None)
-    audio = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    video = next(
+        (item for item in streams if item.get("codec_type") == "video"), None
+    )
+    audio = next(
+        (item for item in streams if item.get("codec_type") == "audio"), None
+    )
     if video is None or audio is None:
         raise ValueError(f"Final media must contain video and audio streams: {file_path}")
     if str(audio.get("codec_name") or "").lower() != "aac":
