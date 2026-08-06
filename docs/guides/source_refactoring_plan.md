@@ -1,210 +1,325 @@
 # ソースリファクタリング計画
 
 Zundamotion の既存 Python コードを `python_coding_rules.md` に沿って段階的に分割する計画。
-挙動、YAML、CLI、FFmpeg 出力を変えず、AI / Codex が変更時に読む範囲を小さくすることを目的とする。
+挙動、YAML、CLI、FFmpeg 出力、cache key を変えず、AI / Codex が変更時に読む範囲を小さくすることを目的とする。
 
-## P0完了範囲（2026-07-22正式化）
+## 0. 現在の結論（2026-08-06）
 
-P0-5は、PipelineおよびAudioPhaseの第一段階責務分割、公開互換性の維持、
-残存大型モジュールの再計測、後続分割計画の記録までを完了範囲とする。
+- 基準: `master` `d56a83a0b52dadc8907c256123346f238a885ef3`
+- Phase 0 の自動計測、Phase 1 の設定 validation、Phase 2 の Pipeline / AudioPhase 第一バッチは完了
+- `audio_phase_run.py` は 500 行超・80 行超関数の一覧から外れた
+- 次に実施する領域は **Phase 6A: `scene_standard_renderer.py` の段階分割**
+- 最初の PR は FFmpeg 処理方式を変えず、タイミング計画と保護テストだけを分離する
+- Phase 番号は領域識別子として維持し、実際の実施順は本書の「優先順位」に従う
 
-完了した内容:
+## 1. 現行コードの計測結果
 
-- Pipeline reporting責務を `pipeline_reporting.py` へ分離
-- 高レベルentryを `pipeline_entry.py` へ分離
-- `audio_phase.py` を公開互換層へ縮小
-- 公開importとmouth timelineのmonkeypatch seamをcharacterization testで保護
-- 500行超ファイルと長大関数を現行コードから再計測
-- 後続の依存順と確認項目を本書へ記録
-- Dev Containerの単体・統合・CPUスモークで第一段階分割を検証
+PR #18 の CI で `scripts/report_source_metrics.py` を実行した結果:
 
-これは全大型モジュールの分割完了を意味しない。500行以下の達成もP0完了条件には含めない。
+- Python ファイル: 177
+- 500 行超: 19 ファイル
+  - 本体 `zundamotion/`: 17 ファイル
+  - tests: 2 ファイル
+- 80 行超関数: 73 件
+  - 本体 `zundamotion/`: 59 件
 
-## 後続リファクタリング（P0対象外）
+テストファイルの行数超過は本体の責務分割と分けて扱う。
+本体の 500 行超ファイルは次のとおり。
 
-次の追加分割は、依存順とcharacterization testを維持しながら後続PRで実施する。
+| 優先 | 対象 | 行数 | 最長関数 | 関数行数 | 判断 |
+| ---: | --- | ---: | --- | ---: | --- |
+| 1 | `utils/ffmpeg_ops.py` | 1539 | `normalize_media` | 359 | 低レベル共通処理。影響範囲が広いため先に呼び出し側を整理する |
+| 1 | `video_phase/scene_standard_renderer.py` | 1264 | `_render_scene_internal` | 1240 | 単一関数へ標準 scene 描画が集中。次フェーズ |
+| 2 | `components/video/overlays.py` | 1212 | `apply_subtitle_overlays` | 293 | 字幕計画・filter・実行が混在 |
+| 2 | `cache.py` | 1005 | `get_or_create_normalized_video` | 128 | probe・metadata・生成 cache が混在 |
+| 2 | `components/video/clip_renderer.py` | 979 | `render_clip` | 915 | clip 入力・graph・実行が単一関数に集中 |
+| 2 | `components/subtitles/png.py` | 968 | `_render_subtitle_png` | 171 | style・描画・metadata・worker が混在 |
+| 3 | `utils/ffmpeg_capabilities.py` | 939 | `smoke_test_cuda_filters` | 94 | capability probe と smoke が混在 |
+| 2 | `components/video/scene_renderer.py` | 793 | `render_wait_clip` | 414 | wait/background/base 描画が集中 |
+| 2 | `video_phase/scene_fast_path.py` | 724 | `_render_simple_scene_fast` | 428 | 適用判定・graph 構築・実行が混在 |
+| 4 | `components/video/clip/effects/resolve.py` | 695 | `_resolve_screen_shake` | 84 | ファイルは大きいが関数超過は小さい |
+| 4 | `components/markdown/pipeline.py` | 654 | `_markdown_render_config` | 110 | Markdown 解決と描画設定が混在 |
+| 3 | `pipeline_phases/finalize_phase.py` | 604 | `FinalizePhase.run` | 228 | transition・timeline shift・concat・cache が混在 |
+| 3 | `utils/ffmpeg_runner.py` | 592 | `run_ffmpeg_async` | 270 | subprocess・監視・ログ・診断が集中 |
+| 2 | `components/video/clip/characters.py` | 582 | `build_character_overlays` | 255 | character 状態と filter graph が集中 |
+| 2 | `components/subtitles/generator.py` | 556 | `build_subtitle_overlay` | 139 | style 解決と overlay 構築が混在 |
+| 2 | `video_phase/scene_preparation.py` | 537 | `_precache_face_overlays` | 137 | 背景・badge・顔・画像 layer 準備が混在 |
+| 3 | `video_phase/main.py` | 527 | `VideoPhase.run` | 146 | phase 構築・scene 並列制御・結果集約が混在 |
 
-- `pipeline_phases/audio_phase_run.py`
-- `video_phase/scene_standard_renderer.py`
-- `video_phase/scene_preparation.py`
-- `video_phase/scene_fast_path.py`
-- `components/video/overlays.py`
-- `components/subtitles/png.py`
-- `utils/ffmpeg_ops.py`
-- `utils/ffmpeg_capabilities.py`
-- `components/video/clip_renderer.py`
-- `cache.py`
-- その他の500行超ファイル
+優先欄は「直ちに着手する順番」ではなく、分割効果と依存関係を合わせた分類。
+`ffmpeg_ops.py` は最大ファイルだが、多数の描画経路から利用されるため最初には触らない。
 
-## 1. 現状
+## 2. 完了済み
 
-2026-07-22 に `master` 起点で AST 再計測した結果、500 行超は次の 17 ファイルです。
-過去資料の行数は判定に再利用していません。
+### Phase 0: ベースラインと保護
 
-| 対象 | 行数 | 最長関数 | 主な問題 |
-| --- | ---: | ---: | --- |
-| `utils/ffmpeg_ops.py` | 1547 | 359 | 背景、concat、transition、normalize が混在 |
-| `video_phase/scene_standard_renderer.py` | 1264 | 1240 | scene 標準描画が単一関数に集中 |
-| `components/video/overlays.py` | 1212 | 293 | overlay、字幕計画、filter 生成、実行が混在 |
-| `cache.py` | 1005 | 128 | media probe、metadata、normalized cache が混在 |
-| `components/video/clip_renderer.py` | 979 | 915 | clip 描画全体が単一関数に集中 |
-| `components/subtitles/png.py` | 968 | 171 | style、描画、metadata、worker が混在 |
-| `utils/ffmpeg_capabilities.py` | 939 | 94 | capability probe と smoke が混在 |
-| `components/video/scene_renderer.py` | 793 | 414 | wait/background render が集中 |
-| `video_phase/scene_fast_path.py` | 724 | 428 | fast path 全体が単一関数に集中 |
-| `components/video/clip/effects/resolve.py` | 695 | 84 | effect resolver が集中 |
-| `components/markdown/pipeline.py` | 654 | 110 | Markdown 解決と描画設定が混在 |
-| `pipeline_phases/audio_phase_run.py` | 639 | 602 | line 音声 orchestration の追加分割が必要 |
-| `utils/ffmpeg_runner.py` | 592 | 270 | subprocess 実行責務が集中 |
-| `components/video/clip/characters.py` | 582 | 255 | character filter graph が集中 |
-| `components/subtitles/generator.py` | 556 | 139 | subtitle style/overlay 構築が混在 |
-| `video_phase/scene_preparation.py` | 537 | 137 | face/image layer 準備が集中 |
-| `video_phase/main.py` | 527 | 146 | phase 作成と実行が混在 |
+- `scripts/report_source_metrics.py` を追加
+- AST で 500 行超ファイルと 80 行超関数を JSON / Markdown 出力
+- CI 成果物として計測結果を保存
+- 単体、FFmpeg 統合、CPU smoke、no-voice 再現性を比較可能にした
+- 完了 PR: #14
 
-今回 `pipeline.py` は 810 行から 441 行へ縮小し、`pipeline_reporting.py`（309 行）と
-`pipeline_entry.py`（90 行）へ責務を分けました。`audio_phase.py` は 698 行から 89 行へ縮小し、
-既存 import/monkeypatch seam を維持しましたが、移動先の `audio_phase_run.py` は追加分割が必要です。
+### Phase 1: 設定 validation
 
-## 2. 全体方針
+- `validate.py` を入口へ縮小
+- background、overlay、badge、image layer、script traversal を分離
+- validation 配下は 500 行以下・80 行以下を達成
+- 完了日: 2026-06-07
 
-- 1 PR では 1 責務だけを分割する
-- public API、import path、YAML、CLI、cache key、FFmpeg コマンドの意味を維持する
-- 移動前に characterization test を追加し、現行挙動を固定する
-- 元モジュールは薄い入口として残し、既存 import の互換性を維持する
-- 性能経路を触る PR では `performance_regression_ledger.md` に従って前後比較する
-- 各 PR 後に行数と長関数を再計測し、改善値を記録する
+### Phase 2: Pipeline / AudioPhase 第一バッチ
 
-## 3. 全体計画の完了条件（P0対象外を含む）
+Pipeline:
 
-- 対象ファイルは原則 500 行以下、目安 200〜400 行に収める
-- 対象関数は原則 80 行以下、目安 20〜40 行に収める
-- `GenerationPipeline` はフェーズ順序制御を主責務とする
-- FFmpeg コマンド生成と実行を別関数または別モジュールに分ける
-- 既存テストと追加した characterization test が通る
-- 代表 YAML の生成結果と A/V sync に意図しない変更がない
-- 性能経路の変更では、同一条件ベンチマークに有意な悪化がない
+- reporting を `pipeline_reporting.py` へ分離
+- 高レベル entry を `pipeline_entry.py` へ分離
+- public import を維持
 
-## 4. フェーズ計画
+AudioPhase:
 
-### Phase 0: ベースラインと保護テスト
+- `audio_phase_entries.py`: scene / item 正規化、読み・表示・TTS 文字列、task 準備
+- `audio_phase_face_anim.py`: 口パク、まばたき、voice layer 別 face animation
+- `audio_phase_speech.py`: 音声 cache、filter、duration、L カット、timeline 登録
+- `audio_phase_control.py`: BGM、topic、wait、image layer
+- `audio_phase_run.py`: ordered entry の順序制御
+- `audio_phase.py`: 公開互換層
 
-目的:
+完了 PR:
 
-- リファクタリング前の挙動、テスト、性能、コード規模を固定する
+- #15 入力計画
+- #16 顔 animation 計画
+- #17 発話処理
+- #18 非発話制御と orchestration 縮小
 
-作業:
+維持した契約:
 
-- Dev Container または開発依存入り環境で `pytest -q` を実行する
-- 行数、80 行超関数、500 行超ファイルの一覧を記録する
-- validation、pipeline、clip renderer の characterization test を追加する
-- 代表 YAML の no-voice 短尺レンダーと性能ベースラインを記録する
+- public import
+- YAML / CLI
+- timeline 順序
+- line data 形式
+- VOICEVOX 呼び出し単位
+- cache key
+- mouth timeline monkeypatch seam
+- CPU smoke / no-voice 再現性
 
-完了条件:
+## 3. 実施優先順位
 
-- 全テストの初期結果が記録されている
-- 後続フェーズで比較する代表入力と確認項目が固定されている
+| 実施順 | 領域 | 理由 |
+| ---: | --- | --- |
+| 1 | Phase 6A: scene standard renderer | 1240 行の単一関数と 416 行の nested line renderer が最大の変更集中点 |
+| 2 | Phase 6B: scene fast path / preparation | standard path の境界確定後なら責務を安全に分けやすい |
+| 3 | Phase 5: clip renderer / character / face | scene 側の入力契約を固定してから clip 内部を分割する |
+| 4 | Phase 3: subtitle PNG / overlays | scene assembly と clip contract 固定後に字幕経路を分割する |
+| 5 | Phase 4: FFmpeg utility / cache | 最も共有範囲が広く、上位呼び出し側の整理後に着手する |
+| 6 | Phase 7: Finalize / runner / Markdown / 残存超過 | 独立度と回帰リスクを見て小 PR で処理する |
 
-進捗:
+## 4. 次フェーズ: Phase 6A scene standard renderer
 
-- 2026-06-07: 設定 validation 用 characterization test とチェック台本を追加
-- 全テストは 149 件中 145 件成功。残り 4 件は FFmpeg / ffprobe と IPA フォント未導入による環境依存失敗
+### 4.1 現在集中している責務
 
-### Phase 1: 設定 validation の分割
+`SceneStandardRendererMixin._render_scene_internal` には次が混在している。
+
+- enter / leave / J カットによる line duration 補正
+- scene duration、line 開始時刻、badge marker、subtitle entry の計算
+- scene base / subtitle cache lookup
+- subtitle / face overlay precache
+- 静的 character・insert の共通部分検出
+- scene base、run base、background normalize の選択と生成
+- wait / talk / image layer の行別描画
+- line clip cache payload 構築
+- clip worker semaphore と順序維持
+- performance sampling と auto tune
+- scene concat、foreground overlay、subtitle burn
+- base / subtitle / no-sub cache 保存
+- 一時 base の cleanup
+
+nested `process_one` だけで 416 行あり、wait と talk の cache / 描画 / 計測が同じ関数に入っている。
+
+### 4.2 完了条件
+
+Phase 6A 全体の完了条件:
+
+- `scene_standard_renderer.py` を 500 行以下にする
+- `_render_scene_internal` を 80 行以下の順序制御へ縮小する
+- 新規ファイルは原則 200〜400 行、各関数 80 行以下
+- `SceneRenderer` の public import、constructor、呼び出し方を維持する
+- line data、scene cache payload、subtitle timing、FFmpeg 呼び出し順を変えない
+- wait / talk / image layer の出力順を変えない
+- line clip 並列度、結果順序、PerfSummary、auto tune の意味を変えない
+- CPU smoke と no-voice 再現性を通す
+- 性能比較で有意な悪化がない
+
+### 4.3 タスク一覧
+
+#### 6A-0: 保護テスト追加
+
+- [ ] enter / leave / J カット後の duration と start time を固定する
+- [ ] `wait` / `talk` / `image_layer` の結果順を固定する
+- [ ] base cache hit 時に line clip を生成せず subtitle burn だけ行う経路を固定する
+- [ ] static character / common insert による base 選択条件を固定する
+- [ ] line background override 時に scene base を使わない条件を固定する
+- [ ] scene concat → foreground overlay → subtitle burn → cache 保存の順序を固定する
+- [ ] `generate_no_sub_video` の保存先と source path を固定する
+- [ ] line clip cache payload の主要キーを snapshot する
+- [ ] auto tune の sample 収集と retune 条件を単体テスト可能な形で固定する
+
+#### 6A-1: タイミングと scene context の分離
+
+候補:
+
+- `scene_timing.py`
+- `SceneTimingPlan` / `SceneRenderContext` dataclass
+
+分離する処理:
+
+- line duration padding
+- scene duration
+- `start_time_by_idx`
+- badge line markers
+- subtitle entries
+- subtitle timing key
+- base / subtitle cache component keys
+
+制約:
+
+- この PR では FFmpeg を呼ぶコードを移動しない
+- line data の mutation 順序を維持する
+- cache key の JSON 内容を変更しない
+
+#### 6A-2: scene base 計画と生成の分離
+
+候補:
+
+- `scene_base_plan.py`: 純粋な判定と入力データ
+- `scene_base_renderer.py`: normalize / render の I/O
+
+分離する処理:
+
+- static character の共通部分
+- common insert image / video
+- `should_generate_base`
+- normalized background
+- run base の区間計画
+- run 内 offset
+
+制約:
+
+- scene base の採用条件を変更しない
+- 新しい高速化を同時に導入しない
+- normalize / render の失敗時 fallback を維持する
+
+#### 6A-3: line clip 描画の分離
+
+候補:
+
+- `scene_line_renderer.py`
+- `SceneLineRenderRequest`
+- `SceneLineRenderResult`
+
+分離する処理:
+
+- background config 選択
+- wait clip cache / render
+- talk clip cache payload
+- effective character / insert 解決
+- clip render
+- foreground overlay
+- performance sample
+- semaphore と結果順序
+
+内部ではさらに次へ分ける。
+
+- `render_wait_line`
+- `render_talk_line`
+- `build_line_background_config`
+- `build_talk_clip_cache_data`
+- `record_line_clip_metrics`
+
+制約:
+
+- `process_one` をそのまま別ファイルへ移すだけで完了扱いにしない
+- cache hit / miss の計測定義を変えない
+- image layer は clip を生成しない
+
+#### 6A-4: scene assembly と cache 保存の分離
+
+候補:
+
+- `scene_assembly.py`
+
+分離する処理:
+
+- line clip concat
+- scene foreground overlay
+- base cache store
+- subtitle burn
+- subtitle cache store
+- no-sub cache store
+- temporary scene base cleanup
+
+制約:
+
+- concat、foreground、subtitle の順序を維持する
+- base cache と subtitle cache の source path を取り違えない
+- cache store は生成成功後だけ行う
+
+#### 6A-5: orchestration 縮小
+
+- [ ] `_render_scene_internal` を context 作成、cache short-circuit、fast path、base 準備、line 描画、assembly の呼び出しだけにする
+- [ ] `scene_standard_renderer.py` を 500 行以下にする
+- [ ] `tests/test_scene_renderer_module_split.py` の責務マッピングを更新する
+- [ ] `project_structure.md` と `refactoring_check.md` の導線を更新する
+- [ ] source metrics の前後値を PR に記録する
+
+### 4.4 最初に行う PR
+
+最初の実装 PR は **6A-0 と 6A-1 のみ**とする。
+
+変更対象の目安:
+
+- `scene_standard_renderer.py`
+- 新規 `scene_timing.py`
+- `tests/test_scene_renderer_timing.py`
+- 必要最小限の module split test
+- `source_refactoring_plan.md` の進捗
+
+この PR では次を行わない。
+
+- scene base 判定変更
+- line clip 描画移動
+- FFmpeg command 変更
+- cache key version 更新
+- performance tuning
+- fast path 変更
+
+## 5. 後続フェーズ
+
+### Phase 6B: scene fast path / preparation
 
 対象:
 
-- `components/config/validate.py`
+- `scene_fast_path.py`
+- `scene_preparation.py`
+- public facade の `scene_renderer.py`
 
-分割案:
+主な分割:
 
-- `components/config/validate.py`: `validate_config` の入口と共通処理
-- `components/config/validate_background.py`
-- `components/config/validate_overlays.py`
-- `components/config/validate_badges.py`
-- `components/config/validate_layers.py`
-- `components/config/validate_plugins.py`
-
-理由:
-
-- 純粋な検証処理が中心で、描画や性能経路より回帰範囲を限定しやすい
-- 先に validation の直接テストを追加すれば、安全に責務分割できる
-
-進捗:
-
-- 2026-06-07: 完了
-- `validate.py` を入口へ縮小し、background、overlay、badge、image layer、script traversal を分離
-- 設定 validation 配下は全ファイル 500 行以下、全関数 80 行以下
-
-### Phase 2: Pipeline と AudioPhase の分割
-
-対象:
-
-- `pipeline.py`
-- `components/pipeline_phases/audio_phase.py`
-
-分割案:
-
-- pipeline の品質設定解決、temp directory 選択、最終 summary を専用モジュールへ移す
-- `GenerationPipeline.run` は phase 作成、順序制御、結果受け渡しを中心にする
-- AudioPhase の line 準備、音声生成、voice layer 解決、timeline 更新を分ける
+- fast path eligibility
+- character interval / movement expression
+- filter graph plan
+- command execution
+- background layout / source
+- badge overlay
+- face precache
+- image layer state
+- character / background persistence
 
 注意:
 
-- stats、timeline、cache、VOICEVOX 呼び出し回数を変えない
-- 環境変数読み取りを設定解決箇所へ局所化する
+- fast path の適用条件を広げない
+- scene-unit 巨大 filter graph 化は行わない
+- `scene_renderer.py` の `render_scene` も 80 行以下を目標にする
 
-進捗:
-
-- 2026-07-22: pipeline reporting と高レベル entry を分離し、公開 import を維持
-- 2026-07-22: AudioPhase の依存構築と orchestration を分離し、mouth timeline の monkeypatch seam を保護
-- 2026-07-22: 上記の第一段階責務分割、互換性保護、再計測、後続計画記録をP0完了と正式化
-- 後続: `GenerationPipeline.run` の sidecar 出力分離、`audio_phase_run.py` の line 準備・合成・face timeline 分割
-
-### Phase 3: 字幕 PNG と overlay 計画の分割
-
-対象:
-
-- `components/subtitles/png.py`
-- `components/video/overlays.py`
-- `components/subtitles/generator.py`
-
-分割案:
-
-- subtitle style/background 解決
-- PNG 描画と metadata 管理
-- worker/executor 管理
-- subtitle range/chunk 計画
-- overlay filter 生成
-- overlay 実行
-
-注意:
-
-- PNG サイズ、背景、alpha、字幕 timing、chunk 分割結果を固定する
-- `test_subtitle_png.py`、`test_overlay_alpha_preservation.py`、`test_subtitle_ass.py` を保護テストとして使う
-
-### Phase 4: FFmpeg utility の責務分割
-
-対象:
-
-- `utils/ffmpeg_ops.py`
-- `utils/ffmpeg_capabilities.py`
-- `cache.py`
-
-分割案:
-
-- 背景 filter 生成
-- concat / transition
-- media normalize
-- capability probe / smoke test
-- cache metadata / media probe cache / normalized media cache
-
-注意:
-
-- filter label、A/V sync、cache key、DEBUG ログからのコマンド再現性を維持する
-- transition と normalize はコマンド生成と実行を分離する
-- 性能ベースラインを前後比較する
-
-### Phase 5: Clip renderer の分割
+### Phase 5: clip renderer
 
 対象:
 
@@ -213,91 +328,136 @@ P0-5は、PipelineおよびAudioPhaseの第一段階責務分割、公開互換�
 - `components/video/clip/face.py`
 - `components/video/clip/effects/resolve.py`
 
-分割案:
+主な分割:
 
-- clip 入力収集
-- character / face 状態解決
-- filter graph 計画
-- FFmpeg command 生成
-- command 実行と結果確認
+- input collection
+- character / face state
+- filter graph plan
+- command generation
+- command execution
+- result validation
 
-注意:
-
-- `render_clip` の既存シグネチャを入口として維持する
-- 先に代表的な character、face、effect 組み合わせの characterization test を追加する
-
-### Phase 6: Scene renderer の段階分割
+### Phase 3: subtitle PNG / overlay
 
 対象:
 
-- `components/pipeline_phases/video_phase/scene_renderer.py`
+- `components/subtitles/png.py`
+- `components/video/overlays.py`
+- `components/subtitles/generator.py`
 
-分割案:
+主な分割:
 
-- `scene_preparation.py`: background、character、badge、line 状態の準備
-- `scene_cache.py`: scene base / subtitle cache key と lookup
-- `scene_fast_path.py`: simple scene fast path
-- `scene_line_renderer.py`: line clip の生成と並列実行
-- `scene_assembly.py`: scene base、字幕、最終結合
-- `scene_renderer.py`: 上記を順番に呼ぶ入口
+- style / background
+- PNG draw / metadata
+- executor lifecycle
+- subtitle chunk / range plan
+- overlay filter plan
+- overlay execution
 
-進め方:
+### Phase 4: FFmpeg utility / cache
 
-1. 純粋な cache key と状態準備を抽出する
-2. fast path を抽出して専用テストを追加する
-3. line 処理を抽出する
-4. scene assembly を抽出する
-5. 最後に `_render_scene_internal` を薄い順序制御へ置き換える
+対象:
 
-注意:
+- `utils/ffmpeg_ops.py`
+- `utils/ffmpeg_capabilities.py`
+- `cache.py`
 
-- このフェーズは複数 PR に分ける
-- scene cache hit、subtitle cache、character persistence、background persistence、A/V sync を毎回確認する
-- 巨大 filter graph 化や処理経路の統合は行わない
+主な分割:
 
-進捗:
+- background filters
+- concat / transition
+- media normalize
+- capability probe / smoke
+- media metadata / probe cache / normalized media cache
 
-- 2026-06-27: 責務別モジュールへの第一段階分割を完了
-- 公開入口 `scene_renderer.py` を 2662 行から 222 行へ縮小
-- `scene_preparation.py`、`scene_fast_path.py`、`scene_cache.py`、
-  `scene_standard_renderer.py` を追加
-- `SceneRenderer` の import path、コンストラクタ、cache key、FFmpeg処理順は維持
-- `scene_standard_renderer.py` の `_render_scene_internal` は依然として長大なため、
-  次段階で line計画、base生成、並列clip描画、subtitle合成、cache保存へ分割する
-- `scene_preparation.py` と `scene_fast_path.py` も500行を超えるため、
-  標準描画分割後に純粋な状態解決とFFmpeg graph生成を分離する
-
-### Phase 7: 残存する規約超過の整理
+### Phase 7: 残存超過
 
 対象候補:
 
+- `pipeline_phases/finalize_phase.py`
+- `utils/ffmpeg_runner.py`
 - `components/video/scene_renderer.py`
 - `components/markdown/pipeline.py`
-- `components/pipeline_phases/video_phase/main.py`
-- `components/video/clip/effects/resolve.py`
-- その他 500 行超ファイル
+- `video_phase/main.py`
+- その他 80 行超関数
 
-作業:
+FinalizePhase は 2026-08-05 に cache self-healing と transition wait の修正が入った直後のため、
+回帰テストを安定させてから transition plan、cache、concat へ分ける。
 
-- 残った 500 行超ファイルと 80 行超関数を再計測する
-- 責務とテスト保護状況に応じて、小さな PR に分けて対応する
-- 例外的に上限超過を維持する場合は、理由と再検討条件を記録する
+## 6. 全体方針
 
-## 5. PR ごとの確認項目
+- 1 PR は 1 責務
+- public API、import path、YAML、CLI、cache key、FFmpeg の意味を維持
+- 移動前に characterization test を追加
+- 元の入口は薄い facade / orchestration として残す
+- pure plan と I/O を分離
+- `Dict[str, Any]` を新モジュール内へ無制限に広げず、必要なら dataclass を使う
+- 性能経路では `performance_regression_ledger.md` に従って前後比較
+- 各 PR 後に source metrics を記録
+- 例外を握りつぶす範囲を増やさない
+- リファクタリングと新機能・高速化を同じ PR に混ぜない
 
-- 読んだファイルと読まなかった理由を説明できるか
-- 変更対象の public API と import path を維持しているか
-- 変更対象ファイルと関数の行数が改善しているか
-- pure function と I/O が分離されているか
-- 既存テストと追加テストが通るか
-- FFmpeg、cache、timeline、stats、docs への影響を確認したか
-- 性能経路なら同一条件の前後比較を実施したか
+## 7. PR ごとの検証
 
-## 6. 非対象
+最低限:
 
-- YAML スキーマ変更
+```bash
+git diff --check
+python3 -m compileall -q zundamotion tests
+python3 -m pytest -q -s \
+  tests/test_scene_renderer_module_split.py \
+  tests/test_scene_renderer_subtitle_flow.py \
+  tests/test_scene_cache_fingerprint.py \
+  tests/test_scene_cache_invalidation_diagnostics.py \
+  tests/test_character_movement.py
+python3 -m pytest -q -s
+python3 scripts/report_source_metrics.py \
+  --json-output output/source-metrics.json \
+  --markdown-output output/source-metrics.md
+```
+
+FFmpeg とフォントがある環境:
+
+```bash
+python3 -m zundamotion.main scripts/refactor_validation_check.yaml \
+  -o output/refactor_validation_check.mp4 \
+  --no-voice \
+  --no-cache \
+  --hw-encoder cpu \
+  --quality speed \
+  --debug-log
+```
+
+CI 必須:
+
+- unit tests
+- FFmpeg integration
+- wheel / sdist
+- clean wheel install
+- CPU render smoke
+- no-voice reproducibility
+- source metrics artifact
+
+性能経路を移動した PR:
+
+- 同一 YAML
+- 同一 runtime lock
+- 同一 cache 条件
+- `VideoPhase`
+- line clip total / p90
+- `scene_concat_ms`
+- cache hit / miss
+- FFmpeg / ffprobe call count
+
+を前後比較する。
+
+## 8. 非対象
+
+- YAML schema 変更
 - CLI 仕様変更
 - FFmpeg 処理方式の変更
 - cache key の意図的な変更
-- Formatter、mypy、CI の新規導入
-- 複数の巨大モジュールを同時に分割する大規模 PR
+- fast path の適用範囲拡大
+- 巨大 filter graph 化
+- Formatter / mypy の導入
+- 複数の巨大モジュールを同時に分割する PR
