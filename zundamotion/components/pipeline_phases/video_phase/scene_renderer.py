@@ -15,6 +15,7 @@ from ....utils.logger import logger
 from ....utils import perf_stats
 from .badge_tracker import BadgeTracker
 from .scene_cache import SceneCacheMixin
+from .scene_base_plan import SceneBasePlanMixin
 from .scene_fast_path import SceneFastPathMixin
 from .scene_preparation import ScenePreparationMixin
 from .scene_standard_renderer import SceneStandardRendererMixin
@@ -26,6 +27,7 @@ class SceneRenderer(
     ScenePreparationMixin,
     SceneFastPathMixin,
     SceneCacheMixin,
+    SceneBasePlanMixin,
     SceneTimingMixin,
     SceneStandardRendererMixin,
 ):
