@@ -20,6 +20,7 @@ from .scene_base_renderer import SceneBaseRendererMixin
 from .scene_fast_path import SceneFastPathMixin
 from .scene_preparation import ScenePreparationMixin
 from .scene_run_base_plan import SceneRunBasePlanMixin
+from .scene_run_base_safety import SceneRunBaseSafetyMixin
 from .scene_standard_renderer import SceneStandardRendererMixin
 from .scene_timing import SceneTimingMixin
 from .character_render_state import SCENE_STATE_RESOLUTION_VERSION
@@ -33,6 +34,7 @@ class SceneRenderer(
     SceneBaseRendererMixin,
     SceneRunBasePlanMixin,
     SceneTimingMixin,
+    SceneRunBaseSafetyMixin,
     SceneStandardRendererMixin,
 ):
     """Initialize scene context and coordinate the selected render path."""
