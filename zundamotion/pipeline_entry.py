@@ -29,12 +29,11 @@ def _encoder_policy_environment(hw_encoder: str) -> Iterator[None]:
     try:
         yield
     finally:
-        if not force_cpu:
-            return
-        if previous is None:
-            os.environ.pop("DISABLE_HWENC", None)
-        else:
-            os.environ["DISABLE_HWENC"] = previous
+        if force_cpu:
+            if previous is None:
+                os.environ.pop("DISABLE_HWENC", None)
+            else:
+                os.environ["DISABLE_HWENC"] = previous
 
 
 async def run_generation(
