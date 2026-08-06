@@ -20,6 +20,7 @@ from zundamotion.utils.face_anim import (
     deterministic_seed_from_text,
 )
 
+from .audio_duration_cache import AudioDurationCacheProxy
 from .audio_phase_run import AudioPhaseRunMixin
 
 
@@ -33,7 +34,7 @@ class AudioPhase(AudioPhaseRunMixin):
     ):
         self.config = config
         self.temp_dir = temp_dir
-        self.cache_manager = cache_manager
+        self.cache_manager = AudioDurationCacheProxy(cache_manager)
         self.audio_params = audio_params
         self.audio_gen = AudioGenerator(
             self.config, self.temp_dir, audio_params, self.cache_manager
