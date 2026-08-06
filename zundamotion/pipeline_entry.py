@@ -2,13 +2,38 @@
 
 from __future__ import annotations
 
+import os
+from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterator, List, Optional
 
 from .components.script import load_script_and_config
 from .components.subtitles.lifecycle import shutdown_subtitle_executor
 from .plugins.manager import initialize_plugins
 from .utils.logger import logger
+
+
+@contextmanager
+def _encoder_policy_environment(hw_encoder: str) -> Iterator[None]:
+    """Propagate an explicit CPU request to every downstream FFmpeg path.
+
+    Several internal helpers only receive the process environment rather than
+    the original CLI option. Keep the override scoped to one generation call so
+    sequential renders in the same Python process do not inherit it.
+    """
+
+    previous = os.environ.get("DISABLE_HWENC")
+    force_cpu = str(hw_encoder or "auto").strip().lower() == "cpu"
+    if force_cpu:
+        os.environ["DISABLE_HWENC"] = "1"
+    try:
+        yield
+    finally:
+        if force_cpu:
+            if previous is None:
+                os.environ.pop("DISABLE_HWENC", None)
+            else:
+                os.environ["DISABLE_HWENC"] = previous
 
 
 async def run_generation(
@@ -80,20 +105,21 @@ async def run_generation(
         except Exception:
             logger.warning("[PluginLoader] Plugin initialization failed; continuing with built-ins")
 
-    # Resolve VideoParams and AudioParams once from the preset-expanded config.
-    pipeline = DiagnosticGenerationPipeline(
-        config,
-        no_cache,
-        cache_refresh,
-        jobs,
-        hw_encoder=hw_encoder,
-        quality=quality,
-        final_copy_only=final_copy_only,
-    )
-    try:
-        await pipeline.run(output_path)
-    except BaseException as exc:
-        pipeline.write_failure_summary(output_path, exc)
-        raise
-    finally:
-        shutdown_subtitle_executor()
+    with _encoder_policy_environment(hw_encoder):
+        # Resolve VideoParams and AudioParams once from the preset-expanded config.
+        pipeline = DiagnosticGenerationPipeline(
+            config,
+            no_cache,
+            cache_refresh,
+            jobs,
+            hw_encoder=hw_encoder,
+            quality=quality,
+            final_copy_only=final_copy_only,
+        )
+        try:
+            await pipeline.run(output_path)
+        except BaseException as exc:
+            pipeline.write_failure_summary(output_path, exc)
+            raise
+        finally:
+            shutdown_subtitle_executor()
