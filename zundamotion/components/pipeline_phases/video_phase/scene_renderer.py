@@ -19,6 +19,7 @@ from .scene_base_plan import SceneBasePlanMixin
 from .scene_base_renderer import SceneBaseRendererMixin
 from .scene_fast_path import SceneFastPathMixin
 from .scene_preparation import ScenePreparationMixin
+from .scene_run_base_plan import SceneRunBasePlanMixin
 from .scene_standard_renderer import SceneStandardRendererMixin
 from .scene_timing import SceneTimingMixin
 from .character_render_state import SCENE_STATE_RESOLUTION_VERSION
@@ -30,6 +31,7 @@ class SceneRenderer(
     SceneCacheMixin,
     SceneBasePlanMixin,
     SceneBaseRendererMixin,
+    SceneRunBasePlanMixin,
     SceneTimingMixin,
     SceneStandardRendererMixin,
 ):
@@ -66,7 +68,6 @@ class SceneRenderer(
         self.audio_params = phase.audio_params
         self.video_extensions = phase.video_extensions
         self._norm_char_entries = phase._norm_char_entries
-
 
     async def render_scene(self) -> List[Path]:
         scene = self.scene
