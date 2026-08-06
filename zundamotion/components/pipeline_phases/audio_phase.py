@@ -19,9 +19,11 @@ from zundamotion.utils.face_anim import (
     generate_blink_timeline,
     deterministic_seed_from_text,
 )
+from zundamotion.utils.logger import logger
 
 from .audio_duration_cache import AudioDurationCacheProxy
 from .audio_phase_run import AudioPhaseRunMixin
+from .audio_worker_policy import AudioWorkerPolicy, resolve_audio_worker_policy
 
 
 class AudioPhase(AudioPhaseRunMixin):
@@ -46,24 +48,28 @@ class AudioPhase(AudioPhaseRunMixin):
         self.used_voicevox_info: List[Tuple[int, str]] = (
             []
         )  # Initialize list to store (speaker_id, text)
-        self.audio_workers = self._determine_audio_workers()
+        self.audio_worker_policy = self._resolve_audio_worker_policy()
+        self.audio_workers = self.audio_worker_policy.resolved
+        logger.info(
+            "[AudioConcurrency] requested=%s resolved=%d source=%s automatic=%s fallback=%s",
+            self.audio_worker_policy.requested,
+            self.audio_worker_policy.resolved,
+            self.audio_worker_policy.source,
+            str(self.audio_worker_policy.automatic).lower(),
+            self.audio_worker_policy.fallback_reason or "none",
+        )
+
+    def _resolve_audio_worker_policy(self) -> AudioWorkerPolicy:
+        voice_cfg = self.config.get("voice", {}) if isinstance(self.config, dict) else {}
+        return resolve_audio_worker_policy(
+            voice_cfg,
+            os.environ,
+            cpu_count=os.cpu_count(),
+        )
 
     def _determine_audio_workers(self) -> int:
-        voice_cfg = self.config.get("voice", {}) if isinstance(self.config, dict) else {}
-        raw = os.getenv(
-            "ZUNDAMOTION_AUDIO_WORKERS",
-            voice_cfg.get("parallel_workers", "auto"),
-        )
-        try:
-            if isinstance(raw, str):
-                normalized = raw.strip().lower()
-                if normalized in {"", "auto", "0"}:
-                    cpu_count = os.cpu_count() or 2
-                    return max(1, min(2, cpu_count))
-                return max(1, int(normalized))
-            return max(1, int(raw))
-        except Exception:
-            return 2
+        """Compatibility helper retained for tests and external monkeypatches."""
+        return self._resolve_audio_worker_policy().resolved
 
     @staticmethod
     def _is_face_anim_target_hidden(line: Dict[str, Any], target_name: str) -> bool:
