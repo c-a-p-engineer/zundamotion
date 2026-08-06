@@ -164,6 +164,11 @@ Phase 6A 全体の完了条件:
 
 #### 6A-1: タイミングと scene context の分離
 
+進捗:
+
+- 2026-08-06: enter / leave / J カット、scene duration、開始時刻、badge marker、subtitle timing、cache component context を `scene_timing.py` へ分離
+- timing の characterization test を追加。6A-0 の base / line / assembly 保護は後続 PR で継続
+
 候補:
 
 - `scene_timing.py`

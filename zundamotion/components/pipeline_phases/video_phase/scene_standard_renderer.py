@@ -55,69 +55,18 @@ class SceneStandardRendererMixin:
             for line in scene.get("lines", [])
         )
 
-        # キャラクターの登場/退場アニメーション秒数を行ごとに反映
-        for idx, line in enumerate(scene.get("lines", []), start=1):
-            line_id = f"{scene_id}_{idx}"
-            data = line_data_map.get(line_id)
-            if not data:
-                continue
-            chars = line.get("characters", []) or []
-
-            def _max_dur(key: str) -> float:
-                """Return max duration for enter/leave across characters."""
-                dur = 0.0
-                flag = key.replace("_duration", "")
-                for ch in chars:
-                    if ch.get(flag):
-                        try:
-                            d = float(ch.get(key, 0.0))
-                        except Exception:
-                            d = 0.0
-                        dur = max(dur, d)
-                return dur
-
-            enter_pad = _max_dur("enter_duration")
-            leave_pad = _max_dur("leave_duration")
-            j_cut_cfg = line.get("j_cut")
-            try:
-                j_cut_pad = float(
-                    (j_cut_cfg or {}).get(
-                        "duration",
-                        line.get("audio_delay", 0.0),
-                    )
-                    if isinstance(j_cut_cfg, dict)
-                    else line.get("audio_delay", 0.0)
-                )
-            except Exception:
-                j_cut_pad = 0.0
-            j_cut_pad = max(0.0, j_cut_pad)
-            data["pre_duration"] = enter_pad + j_cut_pad
-            data["post_duration"] = leave_pad
-            data["duration"] = float(data.get("duration", 0.0)) + enter_pad + j_cut_pad + leave_pad
-
-        scene_duration = sum(
-            line_data_map[f"{scene_id}_{idx + 1}"]["duration"]
-            for idx, line in enumerate(scene.get("lines", []))
+        timing_plan = self._build_scene_timing_plan(
+            scene=scene,
+            scene_hash_data=scene_hash_data,
+            scene_base_hash_data=scene_base_hash_data,
         )
-
-        lines = list(enumerate(scene.get("lines", []), start=1))
-        start_time_by_idx: Dict[int, float] = {}
-        t_acc = 0.0
-        for idx, _line in lines:
-            line_id2 = f"{scene_id}_{idx}"
-            d = line_data_map[line_id2]["duration"]
-            start_time_by_idx[idx] = t_acc
-            t_acc += d
-        badge_line_markers = self._build_badge_line_markers(
-            start_time_by_idx=start_time_by_idx,
-        )
-        subtitle_entries = self._build_subtitle_entries(scene_id, start_time_by_idx)
-        component_keys = self._scene_cache_component_keys(
-            scene_hash_data,
-            scene_base_hash_data,
-        )
-        subtitle_timing_key = self._subtitle_timing_key(subtitle_entries)
-        component_keys["subtitle_timing_key"] = subtitle_timing_key
+        lines = timing_plan.lines
+        scene_duration = timing_plan.scene_duration
+        start_time_by_idx = timing_plan.start_time_by_idx
+        badge_line_markers = timing_plan.badge_line_markers
+        subtitle_entries = timing_plan.subtitle_entries
+        component_keys = timing_plan.component_keys
+        subtitle_timing_key = timing_plan.subtitle_timing_key
 
         if cache_scene_base_video:
             cached_base_scene_path = self.cache_manager.get_cached_path(
