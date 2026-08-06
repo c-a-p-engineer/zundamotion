@@ -69,6 +69,7 @@ def test_scene_base_plan_extracts_common_characters_and_insert_image(
     assert plan.static_insert_in_base is True
     assert plan.common_insert_video_path is None
     assert plan.should_generate_base is True
+    assert plan.base_background_layout["fit"] == "stretch"
     assert plan.detection_error is None
 
 
