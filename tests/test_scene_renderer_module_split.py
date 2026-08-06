@@ -9,6 +9,7 @@ def test_scene_renderer_public_facade_keeps_internal_responsibilities() -> None:
         "_render_simple_scene_fast": "scene_fast_path",
         "_scene_base_cache_data": "scene_cache",
         "_build_scene_base_plan": "scene_base_plan",
+        "_prepare_scene_base": "scene_base_renderer",
         "_build_scene_timing_plan": "scene_timing",
         "_render_scene_internal": "scene_standard_renderer",
     }
