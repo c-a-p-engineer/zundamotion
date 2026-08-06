@@ -75,6 +75,31 @@ python scripts/benchmark_cpu_gpu.py
 CPU 使用率のサンプル、FFmpeg プロセス数を残します。比較対象の条件を変えないため、
 このスクリプトは `--no-cache`、`--jobs 1`、`FFMPEG_PROFILE_MODE=1` を固定します。
 
+## cold / warm 固定ベンチマーク
+
+同一YAML・同一runtime lock・同一エンコーダー条件で、cache refreshによるcold 1回と
+cache再利用によるwarm 2回を比較します。
+
+```bash
+python tools/zundamotion_cold_warm_benchmark.py \
+  scripts/smoke_minimal.yaml \
+  --output-dir output/benchmarks/cold-warm \
+  --hw-encoder cpu \
+  --quality speed \
+  --jobs 1 \
+  --no-voice
+```
+
+cold実行は`--cache-refresh`を使用し、対象台本が参照したキーだけを再生成します。
+既存cache全体の削除は行いません。結果の`cold-warm-benchmark.json`には、各実行の
+phase時間、line clip p50/p95、字幕焼き込み時間、FFmpeg/ffprobe回数、cache
+HIT/MISS/WRITE、A/V警告数、入力YAMLとruntime lockのSHA-256を保存します。
+各実行の生PerfSummary、ログ、動画も同じディレクトリへ保存されます。
+
+GitHub Actionsの`Performance Smoke`は`smoke_minimal.yaml`をCPU・音声なしで実行し、
+比較JSONと生PerfSummaryをartifactとして保存します。長尺台本の性能判定では、この
+短尺CIだけで結論を出さず、同一runtime lockのローカルまたは専用runnerで再計測します。
+
 ## 自動チューニング
 
 - `video.auto_tune: true` で先頭クリップを軽く計測
