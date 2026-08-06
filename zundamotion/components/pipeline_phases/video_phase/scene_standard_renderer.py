@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ....exceptions import PipelineError
-from ....utils.ffmpeg_ops import normalize_media
 from ....utils.logger import logger
 from ....utils import perf_stats
 from ....utils.subtitle_text import is_effective_subtitle_text
@@ -281,150 +280,19 @@ class SceneStandardRendererMixin:
                 scene_id,
                 base_plan.detection_error,
             )
+        base_result = await self._prepare_scene_base(
+            scene_id=scene_id,
+            background=bg_image,
+            is_background_video=is_bg_video,
+            scene_duration=scene_duration,
+            plan=base_plan,
+        )
         static_overlays = base_plan.static_overlays
         static_char_keys = base_plan.static_character_keys
         static_insert_in_base = base_plan.static_insert_in_base
-        scene_level_insert_video: Optional[Path] = None
-        if base_plan.common_insert_video_path is not None:
-            try:
-                scene_level_insert_video = await normalize_media(
-                    input_path=base_plan.common_insert_video_path,
-                    video_params=self.video_params,
-                    audio_params=self.audio_params,
-                    cache_manager=self.cache_manager,
-                )
-                logger.info(
-                    "Scene %s: pre-normalized common insert video -> %s",
-                    scene_id,
-                    scene_level_insert_video.name,
-                )
-                if base_plan.scene_copy:
-                    scene_level_insert_video = None
-            except Exception as error:
-                logger.warning(
-                    "Scene %s: failed to pre-normalize common insert video %s: %s",
-                    scene_id,
-                    base_plan.common_insert_video_path.name,
-                    error,
-                )
-
-        scene_base_path: Optional[Path] = None
-        normalized_bg_path: Optional[Path] = None
-        total_lines_in_scene = base_plan.total_lines
-        min_lines_for_base = base_plan.minimum_lines
-        should_generate_base = base_plan.should_generate_base
-        base_bg_layout = base_plan.base_background_layout
-
-        if should_generate_base:
-            try:
-                bg_config_for_base = {
-                    "type": "video" if is_bg_video else "image",
-                    "path": str(bg_image),
-                    "fit": base_bg_layout["fit"],
-                    "fill_color": base_bg_layout["fill_color"],
-                    "anchor": base_bg_layout["anchor"],
-                    "position": dict(base_bg_layout["position"]),
-                }
-                scene_base_filename = f"scene_base_{scene_id}"
-                if static_overlays:
-                    scene_base_path = await self.video_renderer.render_scene_base_composited(
-                        bg_config_for_base,
-                        scene_duration,
-                        scene_base_filename,
-                        static_overlays,
-                    )
-                    # ベースに取り込んだ静的オーバーレイの種類は per-line で個別に除外処理
-                else:
-                    shared_base_key_data = {
-                        "type": "shared_scene_base",
-                        "version": "20260502_v1",
-                        "background_config": bg_config_for_base,
-                        "duration": round(float(scene_duration), 3),
-                        "video_params": self.video_params.__dict__,
-                        "audio_params": self.audio_params.__dict__,
-                        "hw_kind": self.hw_kind,
-                    }
-
-                    async def shared_base_creator(output_path: Path) -> Path:
-                        return await self.video_renderer.render_scene_base(
-                            bg_config_for_base,
-                            scene_duration,
-                            output_path.stem,
-                        )
-
-                    scene_base_path = await self.cache_manager.get_or_create(
-                        key_data=shared_base_key_data,
-                        file_name="scene_base_shared",
-                        extension="mp4",
-                        creator_func=shared_base_creator,
-                    )
-                if scene_base_path:
-                    logger.info(
-                        f"Scene {scene_id}: generated base with {len(static_overlays)} static overlay(s) -> {scene_base_path.name}"
-                    )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to generate scene base for scene {scene_id}: {e}"
-                )
-                # フォールバック: 動画背景なら従来のループ生成を試みる
-                if is_bg_video:
-                    try:
-                        normalized_bg_path = await normalize_media(
-                            input_path=Path(bg_image),
-                            video_params=self.video_params,
-                            audio_params=self.audio_params,
-                            cache_manager=self.cache_manager,
-                            fit_mode=base_bg_layout["fit"],
-                            fill_color=base_bg_layout["fill_color"],
-                            anchor=base_bg_layout["anchor"],
-                            position=base_bg_layout["position"],
-                            scale_flags=self.video_renderer.scale_flags,
-                        )
-                        scene_base_path = await self.video_renderer.render_looped_background_video(
-                            str(normalized_bg_path),
-                            scene_duration,
-                            f"scene_bg_{scene_id}",
-                            fit_mode=base_bg_layout["fit"],
-                            fill_color=base_bg_layout["fill_color"],
-                            anchor=base_bg_layout["anchor"],
-                            position=base_bg_layout["position"],
-                        )
-                        if scene_base_path:
-                            logger.debug(
-                                f"Fallback generated looped background -> {scene_base_path.name}"
-                            )
-                    except Exception as e2:
-                        logger.warning(
-                            f"Fallback looped BG generation also failed for scene {scene_id}: {e2}"
-                        )
-        else:
-            # ベース生成をスキップ。動画背景はシーン単位で一度だけ正規化して各行へ伝搬
-            if is_bg_video:
-                try:
-                    normalized_bg_path = await normalize_media(
-                        input_path=Path(bg_image),
-                        video_params=self.video_params,
-                        audio_params=self.audio_params,
-                        cache_manager=self.cache_manager,
-                        fit_mode=base_bg_layout["fit"],
-                        fill_color=base_bg_layout["fill_color"],
-                        anchor=base_bg_layout["anchor"],
-                        position=base_bg_layout["position"],
-                        scale_flags=self.video_renderer.scale_flags,
-                    )
-                    logger.info(
-                        "Scene %s: skipping base generation (static_overlays=%d, lines=%d < threshold=%d). Using pre-normalized background.",
-                        scene_id,
-                        len(static_overlays),
-                        total_lines_in_scene,
-                        min_lines_for_base,
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "Scene %s: background pre-normalization failed (%s). Proceeding as-is without base.",
-                        scene_id,
-                        e,
-                    )
+        scene_level_insert_video = base_result.scene_level_insert_video
+        scene_base_path = base_result.scene_base_path
+        normalized_bg_path = base_result.normalized_background_path
 
         # 連続行で静的レイヤが不変な“ラン”のベース（行ブロック前処理）を検討
         run_bases: List[Dict[str, Any]] = []
