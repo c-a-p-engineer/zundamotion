@@ -16,6 +16,8 @@ AI / Codex 向けの常時ルールはリポジトリ直下の `AGENTS.md`、低
 
 ## Guides
 
+- [`guides/current_task_plan_20260807.md`](./guides/current_task_plan_20260807.md): 最新masterの完了状況、未検証事項、次の実装PR単位
+- [`guides/render_log_analysis_20260806.md`](./guides/render_log_analysis_20260806.md): 2件の実レンダーログから抽出した性能・cache・診断課題
 - [`guides/setup_and_runtime.md`](./guides/setup_and_runtime.md): セットアップ、CLI 実行、ログ形式、GPU/NVENC 確認
 - [`guides/runtime_version_policy.md`](./guides/runtime_version_policy.md): runtime lock、digest、固定値更新、ロールバック
 - [`guides/reproducibility_contract.md`](./guides/reproducibility_contract.md): 入力・メディア意味・byte 一致の再現性契約と検証
