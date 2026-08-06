@@ -15,6 +15,7 @@ from ....utils.logger import logger
 from ....utils import perf_stats
 from .badge_tracker import BadgeTracker
 from .scene_cache import SceneCacheMixin
+from .scene_cache_latency import SceneCacheLatencyProxy
 from .scene_base_plan import SceneBasePlanMixin
 from .scene_base_renderer import SceneBaseRendererMixin
 from .scene_fast_path import SceneFastPathMixin
@@ -62,7 +63,10 @@ class SceneRenderer(
 
         # Shortcuts to frequently used phase attributes
         self.config = phase.config
-        self.cache_manager = phase.cache_manager
+        self.cache_manager = SceneCacheLatencyProxy(
+            phase.cache_manager,
+            scene_id=str(scene.get("id") or "unknown"),
+        )
         self.video_renderer = phase.video_renderer
         self.temp_dir = phase.temp_dir
         self.hw_kind = phase.hw_kind
