@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -86,134 +87,144 @@ def _renderer(tmp_path: Path) -> SceneRenderer:
     return renderer
 
 
-@pytest.mark.asyncio
-async def test_prepare_scene_base_renders_static_overlays(tmp_path: Path) -> None:
-    renderer = _renderer(tmp_path)
-    overlay = {"path": str(tmp_path / "character.png")}
+def test_prepare_scene_base_renders_static_overlays(tmp_path: Path) -> None:
+    async def _run() -> None:
+        renderer = _renderer(tmp_path)
+        overlay = {"path": str(tmp_path / "character.png")}
 
-    result = await renderer._prepare_scene_base(
-        scene_id="demo",
-        background="background.png",
-        is_background_video=False,
-        scene_duration=2.5,
-        plan=_plan(static_overlays=[overlay]),
-    )
+        result = await renderer._prepare_scene_base(
+            scene_id="demo",
+            background="background.png",
+            is_background_video=False,
+            scene_duration=2.5,
+            plan=_plan(static_overlays=[overlay]),
+        )
 
-    assert result.scene_base_path == tmp_path / "composited.mp4"
-    assert renderer.video_renderer.composited_calls[0][3] == [overlay]
-    assert renderer.cache_manager.calls == []
+        assert result.scene_base_path == tmp_path / "composited.mp4"
+        assert renderer.video_renderer.composited_calls[0][3] == [overlay]
+        assert renderer.cache_manager.calls == []
+
+    asyncio.run(_run())
 
 
-@pytest.mark.asyncio
-async def test_prepare_scene_base_uses_shared_cache_without_overlays(
+def test_prepare_scene_base_uses_shared_cache_without_overlays(
     tmp_path: Path,
 ) -> None:
-    renderer = _renderer(tmp_path)
+    async def _run() -> None:
+        renderer = _renderer(tmp_path)
 
-    result = await renderer._prepare_scene_base(
-        scene_id="demo",
-        background="background.png",
-        is_background_video=False,
-        scene_duration=2.5,
-        plan=_plan(),
-    )
+        result = await renderer._prepare_scene_base(
+            scene_id="demo",
+            background="background.png",
+            is_background_video=False,
+            scene_duration=2.5,
+            plan=_plan(),
+        )
 
-    assert result.scene_base_path == tmp_path / "shared.mp4"
-    call = renderer.cache_manager.calls[0]
-    assert call["file_name"] == "scene_base_shared"
-    assert call["key_data"]["version"] == "20260502_v1"
+        assert result.scene_base_path == tmp_path / "shared.mp4"
+        call = renderer.cache_manager.calls[0]
+        assert call["file_name"] == "scene_base_shared"
+        assert call["key_data"]["version"] == "20260502_v1"
 
-
-@pytest.mark.asyncio
-async def test_prepare_scene_base_falls_back_for_video_background(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    renderer = _renderer(tmp_path)
-    renderer.video_renderer.fail_composited = True
-    normalized = tmp_path / "normalized.mp4"
-    normalized.write_bytes(b"normalized")
-    calls = []
-
-    async def fake_normalize(**kwargs):
-        calls.append(kwargs)
-        return normalized
-
-    monkeypatch.setattr(base_module, "normalize_media", fake_normalize)
-
-    result = await renderer._prepare_scene_base(
-        scene_id="demo",
-        background="background.mp4",
-        is_background_video=True,
-        scene_duration=2.5,
-        plan=_plan(static_overlays=[{"path": "character.png"}]),
-    )
-
-    assert result.scene_base_path == tmp_path / "loop.mp4"
-    assert result.normalized_background_path == normalized
-    assert calls[0]["fit_mode"] == "stretch"
-    assert len(renderer.video_renderer.loop_calls) == 1
+    asyncio.run(_run())
 
 
-@pytest.mark.asyncio
-async def test_prepare_scene_base_only_normalizes_when_base_is_skipped(
+def test_prepare_scene_base_falls_back_for_video_background(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    renderer = _renderer(tmp_path)
-    normalized = tmp_path / "normalized.mp4"
-    normalized.write_bytes(b"normalized")
+    async def _run() -> None:
+        renderer = _renderer(tmp_path)
+        renderer.video_renderer.fail_composited = True
+        normalized = tmp_path / "normalized.mp4"
+        normalized.write_bytes(b"normalized")
+        calls = []
 
-    async def fake_normalize(**_kwargs):
-        return normalized
+        async def fake_normalize(**kwargs):
+            calls.append(kwargs)
+            return normalized
 
-    monkeypatch.setattr(base_module, "normalize_media", fake_normalize)
+        monkeypatch.setattr(base_module, "normalize_media", fake_normalize)
 
-    result = await renderer._prepare_scene_base(
-        scene_id="demo",
-        background="background.mp4",
-        is_background_video=True,
-        scene_duration=2.5,
-        plan=_plan(should_generate_base=False),
-    )
+        result = await renderer._prepare_scene_base(
+            scene_id="demo",
+            background="background.mp4",
+            is_background_video=True,
+            scene_duration=2.5,
+            plan=_plan(static_overlays=[{"path": "character.png"}]),
+        )
 
-    assert result.scene_base_path is None
-    assert result.normalized_background_path == normalized
-    assert renderer.video_renderer.base_calls == []
-    assert renderer.video_renderer.composited_calls == []
+        assert result.scene_base_path == tmp_path / "loop.mp4"
+        assert result.normalized_background_path == normalized
+        assert calls[0]["fit_mode"] == "stretch"
+        assert len(renderer.video_renderer.loop_calls) == 1
+
+    asyncio.run(_run())
 
 
-@pytest.mark.asyncio
+def test_prepare_scene_base_only_normalizes_when_base_is_skipped(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    async def _run() -> None:
+        renderer = _renderer(tmp_path)
+        normalized = tmp_path / "normalized.mp4"
+        normalized.write_bytes(b"normalized")
+
+        async def fake_normalize(**_kwargs):
+            return normalized
+
+        monkeypatch.setattr(base_module, "normalize_media", fake_normalize)
+
+        result = await renderer._prepare_scene_base(
+            scene_id="demo",
+            background="background.mp4",
+            is_background_video=True,
+            scene_duration=2.5,
+            plan=_plan(should_generate_base=False),
+        )
+
+        assert result.scene_base_path is None
+        assert result.normalized_background_path == normalized
+        assert renderer.video_renderer.base_calls == []
+        assert renderer.video_renderer.composited_calls == []
+
+    asyncio.run(_run())
+
+
 @pytest.mark.parametrize(("scene_copy", "expected"), [(False, True), (True, False)])
-async def test_prepare_scene_base_normalizes_common_insert_before_scene_copy_reset(
+def test_prepare_scene_base_normalizes_common_insert_before_scene_copy_reset(
     tmp_path: Path,
     monkeypatch,
     scene_copy: bool,
     expected: bool,
 ) -> None:
-    renderer = _renderer(tmp_path)
-    insert = tmp_path / "insert.mp4"
-    normalized = tmp_path / "insert-normalized.mp4"
-    insert.write_bytes(b"insert")
-    normalized.write_bytes(b"normalized")
-    calls = []
+    async def _run() -> None:
+        renderer = _renderer(tmp_path)
+        insert = tmp_path / "insert.mp4"
+        normalized = tmp_path / "insert-normalized.mp4"
+        insert.write_bytes(b"insert")
+        normalized.write_bytes(b"normalized")
+        calls = []
 
-    async def fake_normalize(**kwargs):
-        calls.append(kwargs)
-        return normalized
+        async def fake_normalize(**kwargs):
+            calls.append(kwargs)
+            return normalized
 
-    monkeypatch.setattr(base_module, "normalize_media", fake_normalize)
+        monkeypatch.setattr(base_module, "normalize_media", fake_normalize)
 
-    result = await renderer._prepare_scene_base(
-        scene_id="demo",
-        background="background.png",
-        is_background_video=False,
-        scene_duration=2.5,
-        plan=_plan(
-            common_insert_video_path=insert,
-            scene_copy=scene_copy,
-        ),
-    )
+        result = await renderer._prepare_scene_base(
+            scene_id="demo",
+            background="background.png",
+            is_background_video=False,
+            scene_duration=2.5,
+            plan=_plan(
+                common_insert_video_path=insert,
+                scene_copy=scene_copy,
+            ),
+        )
 
-    assert calls[0]["input_path"] == insert
-    assert (result.scene_level_insert_video == normalized) is expected
+        assert calls[0]["input_path"] == insert
+        assert (result.scene_level_insert_video == normalized) is expected
+
+    asyncio.run(_run())
