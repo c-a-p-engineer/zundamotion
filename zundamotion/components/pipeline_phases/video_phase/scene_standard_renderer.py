@@ -370,31 +370,16 @@ class SceneStandardRendererMixin:
 
         await self._maybe_retune_line_workers()
 
-        # 順序維持で集約
-        scene_line_clips: List[Path] = [p for p in results if p is not None]
-
-        if scene_line_clips:
-            scene_output_path = self.temp_dir / f"scene_output_{scene_id}.mp4"
-            concat_started = _time.time()
-            await self.video_renderer.concat_clips(
-                scene_line_clips, str(scene_output_path)
-            )
-            perf_stats.add_ms("scene_concat_ms", (_time.time() - concat_started) * 1000.0)
-            logger.info(f"Concatenated scene clips -> {scene_output_path.name}")
-
-            fg_overlays = await self._resolve_visual_overlays(
-                scene,
-                scope_id=scene_id,
-                line_markers=badge_line_markers,
-            )
-            scene_output_no_sub_path = scene_output_path
-            if fg_overlays:
-                scene_output_no_sub_path = await self.video_renderer.apply_foreground_overlays(
-                    scene_output_path, fg_overlays
-                )
-                logger.info(
-                    f"Applied foreground overlays -> {scene_output_no_sub_path.name}"
-                )
+        assembly = await self._assemble_scene_media(
+            scene_id=scene_id,
+            line_results=results,
+            scene=scene,
+            badge_line_markers=badge_line_markers,
+            subtitle_entries=subtitle_entries,
+        )
+        if assembly is not None:
+            scene_output_no_sub_path = assembly.no_sub_path
+            scene_output_path = assembly.final_path
             if cache_scene_base_video:
                 self.cache_manager.cache_file(
                     source_path=scene_output_no_sub_path,
@@ -410,10 +395,6 @@ class SceneStandardRendererMixin:
                     scene_id,
                 )
             if subtitle_entries:
-                scene_output_path = await self.video_renderer.apply_subtitle_overlays(
-                    scene_output_no_sub_path, subtitle_entries, scene_id=scene_id
-                )
-                logger.info(f"Applied subtitles -> {scene_output_path.name}")
                 self.cache_manager.cache_file(
                     source_path=scene_output_path,
                     key_data=scene_sub_hash_data,
@@ -441,7 +422,6 @@ class SceneStandardRendererMixin:
                         extension="mp4",
                     )
             else:
-                scene_output_path = scene_output_no_sub_path
                 self.cache_manager.cache_file(
                     source_path=scene_output_path,
                     key_data=scene_hash_data,
