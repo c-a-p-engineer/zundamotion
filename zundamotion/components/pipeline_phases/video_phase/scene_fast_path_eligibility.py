@@ -107,6 +107,8 @@ class SceneFastPathEligibilityMixin:
         generate_no_sub_video: bool,
         start_time_by_idx: Dict[int, float],
     ) -> FastPathEligibility:
+        subtitle_mode = self._resolve_fast_path_subtitle_mode()
+        has_hw_encoder = bool(self.hw_kind)
         scene_background_is_static_image = bool(
             bg_image and Path(bg_image).suffix.lower() not in self.video_extensions
         )
@@ -114,6 +116,18 @@ class SceneFastPathEligibilityMixin:
             (self.scene.get("fg_overlays") or [])
             or any(line.get("fg_overlays") for line in self.scene.get("lines", []))
         )
+        top_level = FastPathEligibility(
+            has_hw_encoder=has_hw_encoder,
+            generate_no_sub_video=generate_no_sub_video,
+            scene_background_is_static_image=scene_background_is_static_image,
+            has_foreground_overlays=has_foreground_overlays,
+            scene_duration=scene_duration,
+            subtitle_mode=subtitle_mode,
+            lines=(),
+        )
+        if evaluate_fast_path_eligibility(top_level) != (True, "ok"):
+            return top_level
+
         line_facts = []
         for idx, line in enumerate(self.scene.get("lines", []) or [], start=1):
             line_id = f"{self.scene['id']}_{idx}"
@@ -145,12 +159,12 @@ class SceneFastPathEligibilityMixin:
                 )
             )
         return FastPathEligibility(
-            has_hw_encoder=bool(self.hw_kind),
+            has_hw_encoder=has_hw_encoder,
             generate_no_sub_video=generate_no_sub_video,
             scene_background_is_static_image=scene_background_is_static_image,
             has_foreground_overlays=has_foreground_overlays,
             scene_duration=scene_duration,
-            subtitle_mode=self._resolve_fast_path_subtitle_mode(),
+            subtitle_mode=subtitle_mode,
             lines=tuple(line_facts),
         )
 
