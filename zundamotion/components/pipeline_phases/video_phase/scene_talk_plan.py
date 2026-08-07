@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from ....utils.subtitle_text import is_effective_subtitle_text
 from .scene_line_context import SceneLineContext
@@ -19,7 +19,7 @@ class SceneTalkPlan:
 
     effective_characters: tuple[Dict[str, Any], ...]
     effective_insert: Optional[Dict[str, Any]]
-    face_animations: tuple[Dict[str, Any], ...]
+    face_animations: tuple[Any, ...]
     animation_meta: Dict[str, Any]
     has_subtitle: bool
     has_visible_characters: bool
@@ -99,10 +99,10 @@ class SceneTalkPlanMixin:
         )
 
     @staticmethod
-    def _normalize_face_animations(raw: Any) -> list[Dict[str, Any]]:
+    def _normalize_face_animations(raw: Any) -> list[Any]:
         if isinstance(raw, list):
-            return [item for item in raw if isinstance(item, dict)]
-        if isinstance(raw, dict):
+            return list(raw)
+        if raw:
             return [raw]
         return []
 
