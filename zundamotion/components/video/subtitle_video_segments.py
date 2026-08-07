@@ -1,4 +1,4 @@
-"""Video-only subtitle segment generation and concat primitives."""
+"""Video-only subtitle segment generation, concat, and final mux primitives."""
 
 from __future__ import annotations
 
@@ -178,6 +178,57 @@ class SubtitleVideoSegmentMixin:
                 "operation": "subtitle_video_segment_concat",
                 "scene_id": scene_id,
                 "input_paths": [str(path) for path in ordered_paths],
+                "output_path": str(output_path),
+            },
+        )
+        return output_path
+
+    async def _mux_subtitle_video_with_source_audio(
+        self,
+        video_only_path: Path,
+        source_media_path: Path,
+        output_path: Path,
+        *,
+        duration: Optional[float] = None,
+        scene_id: Optional[str] = None,
+    ) -> Path:
+        """Copy the original audio once onto the completed video-only stream."""
+        cmd: List[str] = [
+            self.ffmpeg_path,
+            "-y",
+            "-nostdin",
+            "-i",
+            str(video_only_path),
+            "-i",
+            str(source_media_path),
+        ]
+        cmd.extend(self._single_job_thread_flags())
+        cmd.extend(
+            [
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a?",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "copy",
+                "-avoid_negative_ts",
+                "make_zero",
+                "-movflags",
+                "+faststart",
+            ]
+        )
+        if duration is not None and float(duration) > 0.0:
+            cmd.extend(["-t", f"{float(duration):.6f}"])
+        cmd.append(str(output_path))
+        await _run_ffmpeg(
+            cmd,
+            context={
+                "phase": "VideoPhase",
+                "operation": "subtitle_final_audio_mux",
+                "scene_id": scene_id,
+                "input_paths": [str(video_only_path), str(source_media_path)],
                 "output_path": str(output_path),
             },
         )
