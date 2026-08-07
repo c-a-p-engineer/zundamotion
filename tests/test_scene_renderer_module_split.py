@@ -5,7 +5,13 @@ from zundamotion.components.pipeline_phases.video_phase.scene_renderer import (
 
 def test_scene_renderer_public_facade_keeps_internal_responsibilities() -> None:
     method_modules = {
-        "_resolve_background_layout": "scene_preparation",
+        "_resolve_background_layout": "scene_background_preparation",
+        "_resolve_background_source": "scene_background_preparation",
+        "_resolve_visual_overlays": "scene_background_preparation",
+        "_build_badge_line_markers": "scene_background_preparation",
+        "_precache_face_overlays": "scene_face_precache",
+        "_collect_image_layers_by_line": "scene_image_layer_preparation",
+        "_build_image_layer_overlays": "scene_image_layer_preparation",
         "_render_simple_scene_fast": "scene_fast_path",
         "_scene_base_cache_data": "scene_cache",
         "_assemble_scene_media": "scene_assembly",
