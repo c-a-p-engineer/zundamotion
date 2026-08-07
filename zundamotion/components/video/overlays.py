@@ -1084,6 +1084,7 @@ class OverlayMixin:
         *,
         scene_id: Optional[str] = None,
         chunk_index: Optional[int] = None,
+        video_only: bool = False,
     ) -> Path:
         subtitle_mode = self._subtitle_render_mode(subtitles)
         try:
@@ -1151,9 +1152,14 @@ class OverlayMixin:
                 len(filter_complex),
                 enable_count,
             )
-        cmd.extend(["-filter_complex", filter_complex, "-map", prev_stream, "-map", "0:a?"])
+        cmd.extend(["-filter_complex", filter_complex, "-map", prev_stream])
+        if video_only:
+            cmd.append("-an")
+        else:
+            cmd.extend(["-map", "0:a?"])
         cmd.extend(self._subtitle_burn_video_opts(subtitle_mode))
-        cmd.extend(["-c:a", "copy"])
+        if not video_only:
+            cmd.extend(["-c:a", "copy"])
         if base_dur and base_dur > 0:
             cmd.extend(["-t", f"{base_dur:.3f}"])
         cmd.append(str(output_path))
