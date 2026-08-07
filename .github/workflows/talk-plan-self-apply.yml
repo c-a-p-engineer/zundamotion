@@ -1,0 +1,42 @@
+name: Talk plan self apply
+
+on:
+  push:
+    branches:
+      - refactor/issue-39-talk-plan
+    paths:
+      - .github/workflows/talk-plan-self-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/issue-39-talk-plan
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Apply validated section patch
+        run: python tools/apply_talk_plan_patch.py
+      - name: Validate generated sources
+        run: |
+          git diff --check
+          python -m py_compile \
+            zundamotion/components/pipeline_phases/video_phase/scene_talk_plan.py \
+            zundamotion/components/pipeline_phases/video_phase/scene_standard_renderer.py \
+            zundamotion/components/pipeline_phases/video_phase/scene_renderer.py \
+            tests/test_scene_talk_plan.py \
+            tests/test_scene_renderer_module_split.py
+          test "$(wc -l < zundamotion/components/pipeline_phases/video_phase/scene_standard_renderer.py)" -lt 720
+      - name: Commit generated patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor: extract SceneTalkPlan"
+          git push origin HEAD:refactor/issue-39-talk-plan
