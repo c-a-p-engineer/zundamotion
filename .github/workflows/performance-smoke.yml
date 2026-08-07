@@ -22,7 +22,7 @@ jobs:
       DISABLE_HWENC: "1"
       HW_FILTER_MODE: cpu
       USE_RAMDISK: "0"
-      FFMPEG_STALL_TIMEOUT_SEC: "120"
+      FFMPEG_STALL_TIMEOUT_SEC: "30"
 
     steps:
       - name: Checkout
