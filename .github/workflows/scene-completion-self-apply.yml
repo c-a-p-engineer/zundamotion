@@ -1,6 +1,6 @@
 name: Scene completion self apply
 
-# retry: trigger branch self-application
+# retry: corrected target-block validation
 on:
   push:
     branches:
