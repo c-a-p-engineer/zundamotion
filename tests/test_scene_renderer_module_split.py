@@ -13,6 +13,7 @@ def test_scene_renderer_public_facade_keeps_internal_responsibilities() -> None:
         "_build_scene_line_context": "scene_line_context",
         "_render_wait_line": "scene_wait_renderer",
         "_build_scene_talk_plan": "scene_talk_plan",
+        "_render_talk_line": "scene_talk_renderer",
         "_prepare_run_bases": "scene_run_base_renderer",
         "_build_scene_timing_plan": "scene_timing",
         "_render_scene_internal": "scene_standard_renderer",
