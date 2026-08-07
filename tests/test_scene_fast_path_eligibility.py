@@ -1,6 +1,9 @@
+from types import SimpleNamespace
+
 from zundamotion.components.pipeline_phases.video_phase.scene_fast_path_eligibility import (
     FastPathEligibility,
     FastPathLineEligibility,
+    SceneFastPathEligibilityMixin,
     evaluate_fast_path_eligibility,
 )
 
@@ -59,3 +62,32 @@ def test_fast_path_eligibility_keeps_first_line_failure_reason() -> None:
         )
     )
     assert evaluate_fast_path_eligibility(facts) == (False, "effects:2")
+
+
+def test_cpu_short_circuit_does_not_resolve_character_assets() -> None:
+    class _Renderer(SceneFastPathEligibilityMixin):
+        hw_kind = None
+        scene = {"id": "demo", "lines": [{"characters": [{"name": "missing"}]}]}
+        line_data_map = {"demo_1": {"type": "talk", "line_config": {}}}
+        video_extensions = {".mp4"}
+        video_renderer = SimpleNamespace(
+            subtitle_gen=SimpleNamespace(subtitle_render_mode=lambda: "ass")
+        )
+
+        def _extract_simple_character_state(self, _line):
+            raise AssertionError("CPU rejection must happen before character asset resolution")
+
+        def _resolve_background_layout(self, _line_config):
+            raise AssertionError("CPU rejection must happen before line layout resolution")
+
+        def _resolve_background_source(self, _line_config, _bg_image):
+            raise AssertionError("CPU rejection must happen before line background resolution")
+
+    renderer = _Renderer()
+    result = renderer._can_use_simple_scene_fast_path(
+        scene_duration=1.0,
+        bg_image="assets/bg/default.png",
+        generate_no_sub_video=False,
+        start_time_by_idx={1: 0.0},
+    )
+    assert result == (False, "cpu_encoder")
