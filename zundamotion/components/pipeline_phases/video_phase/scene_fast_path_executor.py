@@ -50,12 +50,13 @@ class SceneFastPathExecutorMixin:
             )
             return None
 
-        self.cache_manager.cache_file(
-            source_path=output_path,
-            key_data=scene_hash_data,
-            file_name=f"scene_{scene_id}",
-            extension="mp4",
-        )
+        if not getattr(self.cache_manager, "no_cache", False):
+            self.cache_manager.cache_file(
+                source_path=output_path,
+                key_data=scene_hash_data,
+                file_name=f"scene_{scene_id}",
+                extension="mp4",
+            )
         logger.info(
             "Scene %s: rendered via simple fast path -> %s",
             scene_id,
