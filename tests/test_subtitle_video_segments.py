@@ -162,6 +162,7 @@ def test_subtitle_burn_requests_explicit_video_only_mode() -> None:
         "scene_id": "scene-a",
         "chunk_index": 2,
         "video_only": True,
+        "segment_workers": None,
     }
 
 

@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional
 from importlib import import_module
 
 from ...utils.ffmpeg_probe import get_media_duration
-from ...utils.ffmpeg_ops import concat_videos_safe
 from ...utils.filter_presets import get_video_filter_chain
 from ...utils.logger import logger
 from ...utils import perf_stats
@@ -786,178 +785,38 @@ class OverlayMixin:
                 timing_stats["longest_zone"],
             )
             if segment_plan.use_segment_mode:
-                perf_stats.incr("subtitle_chunks", len(ranges))
+                perf_stats.incr("subtitle_chunks", len(segment_plan.ranges))
+                worker_count = self._subtitle_segment_worker_count()
+                self.subtitle_overlay_stats["segment_workers"] = worker_count
                 logger.info(
-                    "[SubtitleOverlay] Segment mode: re-encoding %d subtitle chunk(s), copying gaps (base=%.2fs, subtitles=%d, png_chunk_size=%d)",
-                    len(ranges),
+                    "[SubtitleOverlay] Segment mode: video-only chunks=%d segments=%d workers=%d "
+                    "(base=%.2fs, subtitles=%d, png_chunk_size=%d)",
+                    len(segment_plan.ranges),
+                    len(segment_plan.segments),
+                    worker_count,
                     float(base_dur),
                     len(subtitles),
                     png_chunk_size,
                 )
-                segment_paths: List[Path] = []
-                cursor = 0.0
-                gap_count = 0
-                exact_gap_duration = 0.0
-                reencoded_gap_duration = 0.0
-                gap_fallback_reason = "none"
-                slowest_chunk_ms = 0.0
-                for seg_idx, item in enumerate(ranges):
-                    start = float(item["start"])
-                    end = float(item["end"])
-                    if start > cursor + 0.02:
-                        gap_duration = start - cursor
-                        logger.info(
-                            "[SubtitleGap] start=%.3f end=%.3f duration=%.3f mode=exact",
-                            cursor,
-                            start,
-                            gap_duration,
-                        )
-                        try:
-                            copied = await self._cut_video_segment_exact(
-                                base_video,
-                                self.temp_dir / f"{base_video.stem}_sub_gap_{seg_idx:03d}.mp4",
-                                cursor,
-                                gap_duration,
-                            )
-                        except Exception as err:
-                            copied = None
-                            gap_fallback_reason = f"exact_cut_failed:{type(err).__name__}"
-                            logger.warning(
-                                "[SubtitleGap] exact cut failed start=%.3f duration=%.3f (%s); falling back to full subtitle burn",
-                                cursor,
-                                gap_duration,
-                                err,
-                            )
-                        if copied:
-                            gap_count += 1
-                            exact_gap_duration += gap_duration
-                            segment_paths.append(copied)
-                        else:
-                            reencoded_gap_duration += gap_duration
-
-                    adjusted: List[Dict[str, Any]] = []
-                    for sub in item["subtitles"]:
-                        copied_sub = dict(sub)
-                        copied_sub["start"] = max(0.0, float(sub["start"]) - start)
-                        adjusted.append(copied_sub)
-                    seg_base = self.temp_dir / f"{base_video.stem}_sub_base_{seg_idx:03d}.mp4"
-                    await self._cut_video_segment_exact(
+                try:
+                    result = await self._render_subtitle_segment_pipeline(
                         base_video,
-                        seg_base,
-                        start,
-                        end - start,
-                    )
-                    chunk_started = time.perf_counter()
-                    burned = await self._apply_subtitle_overlays_full(
-                        seg_base,
-                        adjusted,
-                        self.temp_dir / f"{base_video.stem}_sub_burn_{seg_idx:03d}.mp4",
+                        segment_plan,
+                        output_path,
+                        base_duration=float(base_dur),
                         scene_id=resolved_scene_id,
-                        chunk_index=seg_idx,
+                        worker_count=worker_count,
                     )
-                    chunk_ms = (time.perf_counter() - chunk_started) * 1000.0
-                    perf_stats.add_ms("subtitle_burn_ms", chunk_ms)
-                    current_perf = perf_stats.current_perf_stats()
-                    if current_perf is not None:
-                        current_perf.record_subtitle_burn_chunk(
-                            scene_id=resolved_scene_id,
-                            chunk_index=seg_idx,
-                            chunk_count=len(ranges),
-                            subtitle_count=len(adjusted),
-                            input_video_duration=end - start,
-                            burn_duration_ms=chunk_ms,
-                            output_path=str(burned),
-                            ffmpeg_call_count=1,
-                            start_time=start,
-                            end_time=end,
-                        )
-                    slowest_chunk_ms = max(slowest_chunk_ms, chunk_ms)
-                    logger.info(
-                        "[SubtitleChunk] index=%d subtitles=%d duration=%.3f gap_copy_before=%.3f ffmpeg_ms=%.1f",
-                        seg_idx + 1,
-                        len(adjusted),
-                        end - start,
-                        max(0.0, start - cursor),
-                        chunk_ms,
+                    self.subtitle_overlay_stats_history.append(
+                        dict(self.subtitle_overlay_stats)
                     )
-                    segment_paths.append(burned)
-                    cursor = end
-
-                if float(base_dur) > cursor + self._min_exact_segment_duration():
-                    gap_duration = float(base_dur) - cursor
-                    logger.info(
-                        "[SubtitleGap] start=%.3f end=%.3f duration=%.3f mode=exact",
-                        cursor,
-                        float(base_dur),
-                        gap_duration,
-                    )
-                    try:
-                        copied = await self._cut_video_segment_exact(
-                            base_video,
-                            self.temp_dir / f"{base_video.stem}_sub_gap_tail.mp4",
-                            cursor,
-                            gap_duration,
-                        )
-                    except Exception as err:
-                        copied = None
-                        gap_fallback_reason = f"exact_cut_failed:{type(err).__name__}"
-                        logger.warning(
-                            "[SubtitleGap] exact tail cut failed start=%.3f duration=%.3f (%s); falling back to full subtitle burn",
-                            cursor,
-                            gap_duration,
-                            err,
-                        )
-                    if copied:
-                        gap_count += 1
-                        exact_gap_duration += gap_duration
-                        segment_paths.append(copied)
-                    else:
-                        reencoded_gap_duration += gap_duration
-                logger.info(
-                    "[SubtitleGap] count=%d total=%.3f exact=%.3f fallback=%.3f fail_reason=%s slowest_chunk_ms=%.1f",
-                    gap_count,
-                    exact_gap_duration + reencoded_gap_duration,
-                    exact_gap_duration,
-                    reencoded_gap_duration,
-                    gap_fallback_reason
-                    if gap_fallback_reason != "none"
-                    else (
-                        "none"
-                        if reencoded_gap_duration <= 0.0
-                        else "exact_segment_returned_none"
-                    ),
-                    slowest_chunk_ms,
-                )
-
-                if reencoded_gap_duration > 0.0:
+                    return result
+                except Exception as err:
                     logger.warning(
-                        "[SubtitleOverlay] Segment gap extraction was incomplete (%.3fs, reason=%s). Falling back to full subtitle burn.",
-                        reencoded_gap_duration,
-                        gap_fallback_reason,
+                        "[SubtitleOverlay] Video-only segment pipeline failed (%s). "
+                        "Falling back to full subtitle burn.",
+                        err,
                     )
-                else:
-                    try:
-                        await concat_videos_safe(
-                            [str(path.resolve()) for path in segment_paths],
-                            str(output_path),
-                            self.audio_params,
-                            self.ffmpeg_path,
-                            context={
-                                "phase": "VideoPhase",
-                                "operation": "subtitle_scene_concat",
-                                "scene_id": resolved_scene_id,
-                                "output_path": str(output_path),
-                            },
-                        )
-                        self.subtitle_overlay_stats_history.append(
-                            dict(self.subtitle_overlay_stats)
-                        )
-                        return output_path
-                    except Exception as err:
-                        logger.warning(
-                            "[SubtitleOverlay] Segment concat failed (%s). Falling back to full subtitle burn.",
-                            err,
-                        )
 
         self.subtitle_overlay_stats["chunks"] = 1
         perf_stats.incr("subtitle_chunks", 1)
@@ -1085,6 +944,7 @@ class OverlayMixin:
         scene_id: Optional[str] = None,
         chunk_index: Optional[int] = None,
         video_only: bool = False,
+        segment_workers: Optional[int] = None,
     ) -> Path:
         subtitle_mode = self._subtitle_render_mode(subtitles)
         try:
@@ -1130,7 +990,10 @@ class OverlayMixin:
                 filter_parts.append(snippet)
                 prev_stream = f"[with_subtitle_{idx + 1}]"
 
-        cmd.extend(self._single_job_thread_flags())
+        if segment_workers is None:
+            cmd.extend(self._single_job_thread_flags())
+        else:
+            cmd.extend(self._subtitle_segment_thread_flags(segment_workers))
         filter_complex = ";".join(filter_parts)
         if subtitle_mode == "png":
             unique_inputs = len(set(subtitle_png_inputs))
