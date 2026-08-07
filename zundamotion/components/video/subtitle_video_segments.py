@@ -1,15 +1,15 @@
-"""Video-only subtitle segment generation primitives."""
+"""Video-only subtitle segment generation and concat primitives."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from .overlays import _run_ffmpeg
 
 
 class SubtitleVideoSegmentMixin:
-    """Generate zero-based CFR video segments without audio streams."""
+    """Generate and concatenate zero-based CFR video segments without audio."""
 
     def _subtitle_video_segment_filter(
         self,
@@ -105,3 +105,80 @@ class SubtitleVideoSegmentMixin:
             chunk_index=segment_index,
             video_only=True,
         )
+
+    @staticmethod
+    def _escape_ffconcat_path(path: Path) -> str:
+        """Escape one absolute path for a single-quoted ffconcat file entry."""
+        return str(path.resolve()).replace("'", "'\\''")
+
+    def _write_subtitle_video_concat_list(
+        self,
+        segment_paths: Sequence[Path],
+        *,
+        output_path: Path,
+    ) -> Path:
+        """Write an ffconcat list in caller-supplied segment order."""
+        if not segment_paths:
+            raise ValueError("subtitle video concat requires at least one segment")
+        list_path = self.temp_dir / f"{output_path.stem}_segments.ffconcat"
+        list_path.parent.mkdir(parents=True, exist_ok=True)
+        lines = ["ffconcat version 1.0"]
+        lines.extend(
+            f"file '{self._escape_ffconcat_path(Path(path))}'"
+            for path in segment_paths
+        )
+        list_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return list_path
+
+    async def _concat_subtitle_video_segments(
+        self,
+        segment_paths: Sequence[Path],
+        output_path: Path,
+        *,
+        scene_id: Optional[str] = None,
+    ) -> Path:
+        """Concatenate normalized video-only segments without re-encoding."""
+        ordered_paths = tuple(Path(path) for path in segment_paths)
+        list_path = self._write_subtitle_video_concat_list(
+            ordered_paths,
+            output_path=output_path,
+        )
+        cmd: List[str] = [
+            self.ffmpeg_path,
+            "-y",
+            "-nostdin",
+            "-fflags",
+            "+genpts",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_path),
+        ]
+        cmd.extend(self._single_job_thread_flags())
+        cmd.extend(
+            [
+                "-map",
+                "0:v:0",
+                "-an",
+                "-c:v",
+                "copy",
+                "-avoid_negative_ts",
+                "make_zero",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ]
+        )
+        await _run_ffmpeg(
+            cmd,
+            context={
+                "phase": "VideoPhase",
+                "operation": "subtitle_video_segment_concat",
+                "scene_id": scene_id,
+                "input_paths": [str(path) for path in ordered_paths],
+                "output_path": str(output_path),
+            },
+        )
+        return output_path
