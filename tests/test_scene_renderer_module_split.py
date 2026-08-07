@@ -10,6 +10,7 @@ def test_scene_renderer_public_facade_keeps_internal_responsibilities() -> None:
         "_scene_base_cache_data": "scene_cache",
         "_assemble_scene_media": "scene_assembly",
         "_store_scene_result_cache": "scene_result_cache",
+        "_complete_scene_render": "scene_completion",
         "_build_scene_base_plan": "scene_base_plan",
         "_prepare_scene_base": "scene_base_renderer",
         "_build_scene_line_context": "scene_line_context",
