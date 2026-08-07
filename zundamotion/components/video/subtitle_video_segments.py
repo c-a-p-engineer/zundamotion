@@ -30,6 +30,17 @@ class SubtitleVideoSegmentMixin:
             "setpts=N[v]"
         )
 
+    def _subtitle_video_thread_flags(
+        self,
+        worker_count: Optional[int],
+    ) -> List[str]:
+        """Use the executor's shared budget when a bounded worker count is active."""
+        if worker_count is not None:
+            resolver = getattr(self, "_subtitle_segment_thread_flags", None)
+            if callable(resolver):
+                return list(resolver(int(worker_count)))
+        return list(self._single_job_thread_flags())
+
     async def _cut_subtitle_video_segment(
         self,
         base_video: Path,
@@ -39,6 +50,7 @@ class SubtitleVideoSegmentMixin:
         duration: float,
         scene_id: Optional[str] = None,
         segment_index: Optional[int] = None,
+        worker_count: Optional[int] = None,
     ) -> Optional[Path]:
         """Encode one exact video-only interval with normalized timestamps."""
         if duration <= self._min_exact_segment_duration():
@@ -51,7 +63,7 @@ class SubtitleVideoSegmentMixin:
             "-i",
             str(base_video),
         ]
-        cmd.extend(self._single_job_thread_flags())
+        cmd.extend(self._subtitle_video_thread_flags(worker_count))
         cmd.extend(
             [
                 "-filter_complex",
@@ -81,6 +93,7 @@ class SubtitleVideoSegmentMixin:
                 "operation": "subtitle_video_segment_cut",
                 "scene_id": scene_id,
                 "segment_index": segment_index,
+                "subtitle_segment_workers": worker_count,
                 "input_paths": [str(base_video)],
                 "output_path": str(output_path),
             },
@@ -95,6 +108,7 @@ class SubtitleVideoSegmentMixin:
         *,
         scene_id: Optional[str] = None,
         segment_index: Optional[int] = None,
+        worker_count: Optional[int] = None,
     ) -> Path:
         """Burn subtitles into a video-only segment without audio mapping."""
         return await self._apply_subtitle_overlays_full(
@@ -104,6 +118,7 @@ class SubtitleVideoSegmentMixin:
             scene_id=scene_id,
             chunk_index=segment_index,
             video_only=True,
+            segment_workers=worker_count,
         )
 
     @staticmethod
@@ -192,7 +207,7 @@ class SubtitleVideoSegmentMixin:
         duration: Optional[float] = None,
         scene_id: Optional[str] = None,
     ) -> Path:
-        """Copy the original audio once onto the completed video-only stream."""
+        """Copy source audio once without shifting the zero-based video timeline."""
         cmd: List[str] = [
             self.ffmpeg_path,
             "-y",
@@ -213,8 +228,6 @@ class SubtitleVideoSegmentMixin:
                 "copy",
                 "-c:a",
                 "copy",
-                "-avoid_negative_ts",
-                "make_zero",
                 "-movflags",
                 "+faststart",
             ]
