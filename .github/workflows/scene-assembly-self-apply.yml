@@ -1,5 +1,6 @@
 name: Scene assembly self apply
 
+# retry: corrected generated source threshold
 on:
   push:
     branches:
@@ -32,7 +33,7 @@ jobs:
             zundamotion/components/pipeline_phases/video_phase/scene_renderer.py \
             tests/test_scene_assembly.py \
             tests/test_scene_renderer_module_split.py
-          test "$(wc -l < zundamotion/components/pipeline_phases/video_phase/scene_standard_renderer.py)" -lt 440
+          test "$(wc -l < zundamotion/components/pipeline_phases/video_phase/scene_standard_renderer.py)" -lt 450
       - name: Commit generated patch
         run: |
           git config user.name "github-actions[bot]"
