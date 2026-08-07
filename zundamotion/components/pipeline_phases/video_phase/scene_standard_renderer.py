@@ -330,16 +330,7 @@ class SceneStandardRendererMixin:
                     image_layers_by_line=image_layers_by_line,
                 )
                 line_id = context.line_id
-                line_data = context.line_data
-                duration = context.duration
-                pre_dur = context.pre_duration
-                line_config = context.line_config
-                extra_audio_overlays = list(context.extra_audio_overlays)
-                bg_layout = context.background_layout
-                line_bg_image = context.background_source
                 line_is_bg_video = context.background_is_video
-                background_config = context.background_config
-                line_image_layers = list(context.image_layer_overlays)
 
                 if context.line_type == "image_layer":
                     results[idx - 1] = None
@@ -356,130 +347,39 @@ class SceneStandardRendererMixin:
                     f"Rendering clip for line '{text[:30]}...' (Scene '{scene_id}', Line {idx})"
                 )
 
-                audio_cache_key_data = {
-                    "text": text,
-                    "line_config": line_config,
-                    "voice_config": self.config.get("voice", {}),
-                }
                 talk_plan = self._build_scene_talk_plan(
                     context=context,
                     static_character_keys=static_char_keys,
                     static_insert_in_base=static_insert_in_base,
                     scene_level_insert_video=scene_level_insert_video,
                 )
-                effective_characters = list(talk_plan.effective_characters)
-                effective_insert = talk_plan.effective_insert
-                face_anim_list = list(talk_plan.face_animations)
-                anim_meta = talk_plan.animation_meta
+                render_outcome = await self._render_talk_line(
+                    context=context,
+                    plan=talk_plan,
+                    static_character_keys=static_char_keys,
+                    static_insert_in_base=static_insert_in_base,
+                )
+                clip_path = render_outcome.path
+                total_ms = (
+                    render_outcome.finished_at - line_total_started
+                ) * 1000.0
+                cache_status = render_outcome.cache_status
+                cache_lookup_ms = render_outcome.cache_lookup_ms
+                cache_store_ms = render_outcome.cache_store_ms
+                render_ms = render_outcome.render_ms
+                prepare_ms = max(
+                    0.0,
+                    (
+                        render_outcome.cache_started_at - line_total_started
+                    )
+                    * 1000.0,
+                )
                 has_subtitle = talk_plan.has_subtitle
                 any_chars = talk_plan.has_visible_characters
                 insert_is_image = talk_plan.insert_is_image
                 has_move = talk_plan.has_move
                 has_effect = talk_plan.has_effect
-
-                video_cache_data = {
-                    "type": "talk",
-                    "clip_render_version": "20260330_face_overlay_args_v2",
-                    "audio_cache_key": self.cache_manager._generate_hash(
-                        audio_cache_key_data
-                    ),
-                    "duration": duration,
-                    "audio_delay": pre_dur,
-                    "post_duration": float(line_data.get("post_duration", 0.0)),
-                    "bg_image_path": line_bg_image,
-                    "is_bg_video": line_is_bg_video,
-                    "start_time": start_time_by_idx[idx],
-                    "video_config": self.config.get("video", {}),
-                    "bgm_config": self.config.get("bgm", {}),
-                    "insert_config": effective_insert,
-                    "image_layer_overlays": line_image_layers,
-                    "extra_audio_overlays": extra_audio_overlays,
-                    "static_chars_in_base": bool(static_char_keys),
-                    "static_insert_in_base": static_insert_in_base,
-                    "hw_kind": self.hw_kind,
-                    "video_params": self.video_params.__dict__,
-                    "audio_params": self.audio_params.__dict__,
-                    # Minimal cache key for face animation
-                    "lip_eye_version": "v2",
-                    "face_anim_enabled": bool(face_anim_list),
-                    "mouth_fps": anim_meta.get("mouth_fps"),
-                    "thr_half": anim_meta.get("thr_half"),
-                    "thr_open": anim_meta.get("thr_open"),
-                    "blink_min_interval": anim_meta.get("blink_min_interval"),
-                    "blink_max_interval": anim_meta.get("blink_max_interval"),
-                    "blink_close_frames": anim_meta.get("blink_close_frames"),
-                    "screen_effects": line_config.get("screen_effects"),
-                    "background_effects": line_config.get("background_effects"),
-                    "background_layout": bg_layout,
-                    "video_filter": background_config.get("video_filter"),
-                }
-
-                creator_started: Optional[float] = None
-                creator_finished: Optional[float] = None
-                render_ms = 0.0
-
-                async def clip_creator_func(output_path: Path) -> Path:
-                    nonlocal creator_started, creator_finished, render_ms
-                    creator_started = _time.perf_counter()
-                    render_started = creator_started
-                    clip_path = await self.video_renderer.render_clip(
-                        audio_path=audio_path,
-                        duration=duration,
-                        background_config=background_config,
-                        characters_config=effective_characters,
-                        output_filename=output_path.stem,
-                        # Scene-level subtitle burn-in remains the source of truth.
-                        # Only pass line_config so face overlay fallback can recover
-                        # character placement when the base scene already contains it.
-                        subtitle_text=None,
-                        subtitle_line_config=line_config,
-                        insert_config=effective_insert,
-                        image_layer_overlays=line_image_layers,
-                        extra_audio_overlays=extra_audio_overlays,
-                        background_effects=line_config.get("background_effects"),
-                        screen_effects=line_config.get("screen_effects"),
-                        face_anim=face_anim_list,
-                        audio_delay=pre_dur,
-                        _force_cpu=bool(line_image_layers),
-                    )
-                    if clip_path is None:
-                        raise PipelineError(
-                            f"Clip rendering failed for line: {line_id}"
-                        )
-                    creator_finished = _time.perf_counter()
-                    render_ms = (creator_finished - render_started) * 1000.0
-                    return clip_path
-
-                cache_started = _time.perf_counter()
-                clip_path = await self.cache_manager.get_or_create(
-                    key_data=video_cache_data,
-                    file_name=line_id,
-                    extension="mp4",
-                    creator_func=clip_creator_func,
-                )
-                cache_finished = _time.perf_counter()
-                fg_overlays = await self._resolve_visual_overlays(
-                    line,
-                    scope_id=line_id,
-                )
-                if fg_overlays:
-                    clip_path = await self.video_renderer.apply_foreground_overlays(
-                        clip_path, fg_overlays
-                    )
-                total_finished = _time.perf_counter()
-                total_ms = (total_finished - line_total_started) * 1000.0
-                cache_status = "miss" if creator_started is not None else "hit"
-                cache_lookup_ms = (
-                    (creator_started - cache_started) * 1000.0
-                    if creator_started is not None
-                    else (cache_finished - cache_started) * 1000.0
-                )
-                cache_store_ms = (
-                    max(0.0, (cache_finished - creator_finished) * 1000.0)
-                    if creator_finished is not None
-                    else 0.0
-                )
-                prepare_ms = max(0.0, (cache_started - line_total_started) * 1000.0)
+                face_anim_list = list(talk_plan.face_animations)
                 # Collect lightweight samples for auto-tune
                 if (
                     self.phase.auto_tune_enabled
