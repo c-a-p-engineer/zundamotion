@@ -1,0 +1,47 @@
+name: Subtitle segment worker benchmark temp
+
+on:
+  push:
+    branches:
+      - refactor/issue-40-subtitle-executor
+    paths:
+      - .github/workflows/subtitle-segment-benchmark-temp.yml
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHON_VERSION: "3.14.6"
+      DISABLE_HWENC: "1"
+      HW_FILTER_MODE: cpu
+      USE_RAMDISK: "0"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refactor/issue-40-subtitle-executor
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates fontconfig fonts-ipafont-gothic
+          fc-match IPAGothic
+      - name: Install checksum-locked FFmpeg
+        run: |
+          sudo python scripts/install_locked_ffmpeg.py --lock .devcontainer/runtime.lock.json --prefix /opt/ffmpeg
+          ffmpeg -version | head -n 1
+      - name: Install Python dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Run subtitle segment worker benchmark
+        run: python tools/subtitle_segment_worker_benchmark.py
+      - name: Upload benchmark
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: subtitle-segment-worker-benchmark
+          retention-days: 14
+          path: output/benchmarks/subtitle-segment-workers/**
