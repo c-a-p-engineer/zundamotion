@@ -21,6 +21,7 @@ from .scene_completion import SceneCompletionMixin
 from .scene_cache_latency import SceneCacheLatencyProxy
 from .scene_base_plan import SceneBasePlanMixin
 from .scene_base_renderer import SceneBaseRendererMixin
+from .scene_fast_path_eligibility import SceneFastPathEligibilityMixin
 from .scene_fast_path import SceneFastPathMixin
 from .scene_line_context import SceneLineContextMixin
 from .scene_line_executor import SceneLineExecutorMixin
@@ -41,6 +42,7 @@ from .character_render_state import SCENE_STATE_RESOLUTION_VERSION
 
 class SceneRenderer(
     ScenePreparationMixin,
+    SceneFastPathEligibilityMixin,
     SceneFastPathMixin,
     SceneCacheMixin,
     SceneAssemblyMixin,
@@ -85,7 +87,6 @@ class SceneRenderer(
         self.timeline = timeline
         self.pbar_scenes = pbar_scenes
 
-        # Shortcuts to frequently used phase attributes
         self.config = phase.config
         self.cache_manager = SceneCacheLatencyProxy(
             phase.cache_manager,
