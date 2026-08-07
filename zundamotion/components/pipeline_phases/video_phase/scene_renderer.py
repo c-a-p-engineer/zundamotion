@@ -20,6 +20,7 @@ from .scene_base_plan import SceneBasePlanMixin
 from .scene_base_renderer import SceneBaseRendererMixin
 from .scene_fast_path import SceneFastPathMixin
 from .scene_line_context import SceneLineContextMixin
+from .scene_line_executor import SceneLineExecutorMixin
 from .scene_preparation import ScenePreparationMixin
 from .scene_run_base_plan import SceneRunBasePlanMixin
 from .scene_run_base_renderer import SceneRunBaseRendererMixin
@@ -38,6 +39,7 @@ class SceneRenderer(
     SceneBasePlanMixin,
     SceneBaseRendererMixin,
     SceneLineContextMixin,
+    SceneLineExecutorMixin,
     SceneRunBasePlanMixin,
     SceneRunBaseRendererMixin,
     SceneTimingMixin,

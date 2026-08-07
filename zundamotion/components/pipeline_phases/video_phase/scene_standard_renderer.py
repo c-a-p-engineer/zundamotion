@@ -307,137 +307,133 @@ class SceneStandardRendererMixin:
             [line for _, line in lines]
         )
 
-        # 並列レンダリング用のタスクを構築
-        import asyncio
+        # 行処理本体。並列度・順序・cancelはSceneLineExecutorが管理する。
+        async def process_one(
+            idx: int, line: Dict[str, Any]
+        ) -> Optional[Path]:
+            import time as _time
+            line_total_started = _time.perf_counter()
+            context = self._build_scene_line_context(
+                scene_id=scene_id,
+                line_index=idx,
+                line=line,
+                scene_background=str(bg_image),
+                scene_base_path=scene_base_path,
+                normalized_background_path=normalized_bg_path,
+                start_time_by_index=start_time_by_idx,
+                run_bases=run_bases,
+                image_layers_by_line=image_layers_by_line,
+            )
+            line_id = context.line_id
+            line_is_bg_video = context.background_is_video
 
-        # If auto-tune has retuned clip_workers, new sem will reflect it
-        sem = asyncio.Semaphore(self.phase.clip_workers)
-        results: List[Optional[Path]] = [None] * len(lines)
+            if context.line_type == "image_layer":
+                return None
 
-        async def process_one(idx: int, line: Dict[str, Any]):
-            async with sem:
-                import time as _time
-                line_total_started = _time.perf_counter()
-                context = self._build_scene_line_context(
-                    scene_id=scene_id,
-                    line_index=idx,
-                    line=line,
-                    scene_background=str(bg_image),
-                    scene_base_path=scene_base_path,
-                    normalized_background_path=normalized_bg_path,
-                    start_time_by_index=start_time_by_idx,
-                    run_bases=run_bases,
-                    image_layers_by_line=image_layers_by_line,
+            if context.line_type == "wait":
+                return await self._render_wait_line(context)
+
+            # Talk step
+            text = context.text
+            audio_path = context.audio_path
+            logger.debug(
+                f"Rendering clip for line '{text[:30]}...' (Scene '{scene_id}', Line {idx})"
+            )
+
+            talk_plan = self._build_scene_talk_plan(
+                context=context,
+                static_character_keys=static_char_keys,
+                static_insert_in_base=static_insert_in_base,
+                scene_level_insert_video=scene_level_insert_video,
+            )
+            render_outcome = await self._render_talk_line(
+                context=context,
+                plan=talk_plan,
+                static_character_keys=static_char_keys,
+                static_insert_in_base=static_insert_in_base,
+            )
+            clip_path = render_outcome.path
+            total_ms = (
+                render_outcome.finished_at - line_total_started
+            ) * 1000.0
+            cache_status = render_outcome.cache_status
+            cache_lookup_ms = render_outcome.cache_lookup_ms
+            cache_store_ms = render_outcome.cache_store_ms
+            render_ms = render_outcome.render_ms
+            prepare_ms = max(
+                0.0,
+                (
+                    render_outcome.cache_started_at - line_total_started
                 )
-                line_id = context.line_id
-                line_is_bg_video = context.background_is_video
-
-                if context.line_type == "image_layer":
-                    results[idx - 1] = None
-                    return
-
-                if context.line_type == "wait":
-                    results[idx - 1] = await self._render_wait_line(context)
-                    return
-
-                # Talk step
-                text = context.text
-                audio_path = context.audio_path
-                logger.debug(
-                    f"Rendering clip for line '{text[:30]}...' (Scene '{scene_id}', Line {idx})"
+                * 1000.0,
+            )
+            has_subtitle = talk_plan.has_subtitle
+            any_chars = talk_plan.has_visible_characters
+            insert_is_image = talk_plan.insert_is_image
+            has_move = talk_plan.has_move
+            has_effect = talk_plan.has_effect
+            face_anim_list = list(talk_plan.face_animations)
+            # Collect lightweight samples for auto-tune
+            if (
+                self.phase.auto_tune_enabled
+                and not getattr(self.phase, "parallel_scene_rendering", False)
+                and len(self.phase._profile_samples) < self.phase.profile_limit
+            ):
+                self.phase._profile_samples.append(
+                    {
+                        "cpu_overlay": has_subtitle or any_chars or insert_is_image,
+                        "elapsed": total_ms / 1000.0,
+                    }
                 )
+            try:
+                task = asyncio.current_task()
+                worker_id = task.get_name() if task is not None else "async-main"
+                perf_stats.record_line_clip(
+                    {
+                        "scene_id": scene_id,
+                        "line_index": idx,
+                        "clip_id": line_id,
+                        "duration_ms": total_ms,
+                        "cache_status": cache_status,
+                        "worker_id": worker_id,
+                        "render_path": str(clip_path),
+                        "has_subtitle": has_subtitle,
+                        "has_face_overlay": bool(face_anim_list),
+                        "has_move": has_move,
+                        "has_effect": has_effect,
+                        "cache_lookup_ms": cache_lookup_ms,
+                        "render_ms": render_ms,
+                        "prepare_ms": prepare_ms,
+                        "cache_store_ms": cache_store_ms,
+                    }
+                )
+                self.phase._clip_samples_all.append(
+                    {
+                        "scene": scene_id,
+                        "line": idx,
+                        "elapsed": total_ms / 1000.0,
+                        "subtitle": has_subtitle,
+                        "chars": any_chars,
+                        "insert_img": insert_is_image,
+                        "is_bg_video": line_is_bg_video,
+                        "cache": cache_status,
+                    }
+                )
+            except Exception as measurement_error:
+                logger.warning(
+                    "Failed to record line clip performance scene=%s line=%s: %s",
+                    scene_id,
+                    idx,
+                    measurement_error,
+                )
+            return clip_path
 
-                talk_plan = self._build_scene_talk_plan(
-                    context=context,
-                    static_character_keys=static_char_keys,
-                    static_insert_in_base=static_insert_in_base,
-                    scene_level_insert_video=scene_level_insert_video,
-                )
-                render_outcome = await self._render_talk_line(
-                    context=context,
-                    plan=talk_plan,
-                    static_character_keys=static_char_keys,
-                    static_insert_in_base=static_insert_in_base,
-                )
-                clip_path = render_outcome.path
-                total_ms = (
-                    render_outcome.finished_at - line_total_started
-                ) * 1000.0
-                cache_status = render_outcome.cache_status
-                cache_lookup_ms = render_outcome.cache_lookup_ms
-                cache_store_ms = render_outcome.cache_store_ms
-                render_ms = render_outcome.render_ms
-                prepare_ms = max(
-                    0.0,
-                    (
-                        render_outcome.cache_started_at - line_total_started
-                    )
-                    * 1000.0,
-                )
-                has_subtitle = talk_plan.has_subtitle
-                any_chars = talk_plan.has_visible_characters
-                insert_is_image = talk_plan.insert_is_image
-                has_move = talk_plan.has_move
-                has_effect = talk_plan.has_effect
-                face_anim_list = list(talk_plan.face_animations)
-                # Collect lightweight samples for auto-tune
-                if (
-                    self.phase.auto_tune_enabled
-                    and not getattr(self.phase, "parallel_scene_rendering", False)
-                    and len(self.phase._profile_samples) < self.phase.profile_limit
-                ):
-                    self.phase._profile_samples.append(
-                        {
-                            "cpu_overlay": has_subtitle or any_chars or insert_is_image,
-                            "elapsed": total_ms / 1000.0,
-                        }
-                    )
-                try:
-                    task = asyncio.current_task()
-                    worker_id = task.get_name() if task is not None else "async-main"
-                    perf_stats.record_line_clip(
-                        {
-                            "scene_id": scene_id,
-                            "line_index": idx,
-                            "clip_id": line_id,
-                            "duration_ms": total_ms,
-                            "cache_status": cache_status,
-                            "worker_id": worker_id,
-                            "render_path": str(clip_path),
-                            "has_subtitle": has_subtitle,
-                            "has_face_overlay": bool(face_anim_list),
-                            "has_move": has_move,
-                            "has_effect": has_effect,
-                            "cache_lookup_ms": cache_lookup_ms,
-                            "render_ms": render_ms,
-                            "prepare_ms": prepare_ms,
-                            "cache_store_ms": cache_store_ms,
-                        }
-                    )
-                    self.phase._clip_samples_all.append(
-                        {
-                            "scene": scene_id,
-                            "line": idx,
-                            "elapsed": total_ms / 1000.0,
-                            "subtitle": has_subtitle,
-                            "chars": any_chars,
-                            "insert_img": insert_is_image,
-                            "is_bg_video": line_is_bg_video,
-                            "cache": cache_status,
-                        }
-                    )
-                except Exception as measurement_error:
-                    logger.warning(
-                        "Failed to record line clip performance scene=%s line=%s: %s",
-                        scene_id,
-                        idx,
-                        measurement_error,
-                    )
-                results[idx - 1] = clip_path
-
-        tasks = [process_one(idx, line) for idx, line in lines]
-        # 並列実行
-        await asyncio.gather(*tasks)
+        results = await self._execute_scene_lines(
+            lines,
+            process_one,
+            max_workers=self.phase.clip_workers,
+            scene_id=scene_id,
+        )
 
         # After first scene (or once enough samples), auto-tune for subsequent scenes
         if (
