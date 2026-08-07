@@ -232,7 +232,16 @@ class SceneRenderer(
                 f"Scene Rendering (Scene {self.scene_idx + 1}/{self.total_scenes}: '{scene_id}')"
             )
 
-        return await self._render_scene_internal(scene, scene_cp, bg_default, scene_hash_data)
+        effective_scene_cp = self._effective_scene_copy_for_run_base_safety(
+            scene,
+            scene_cp,
+        )
+        return await self._render_scene_internal(
+            scene,
+            effective_scene_cp,
+            bg_default,
+            scene_hash_data,
+        )
 
     def _record_skipped_line_clips(self, scene_id: str) -> None:
         count = 0
