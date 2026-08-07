@@ -22,6 +22,15 @@ class FakeCacheManager:
         return "delegated"
 
 
+class LegacyCacheManager:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def get_or_create_media_duration(self, file_path):
+        self.calls.append(Path(file_path))
+        return 7.25
+
+
 def _write_wav(path: Path, *, seconds: float, sample_rate: int = 8000) -> None:
     frames = int(seconds * sample_rate)
     with wave.open(str(path), "wb") as writer:
@@ -69,6 +78,20 @@ def test_non_wav_delegates_unchanged(tmp_path) -> None:
 
     assert duration == 9.5
     assert underlying.calls == [(media_path, None)]
+
+
+def test_legacy_delegate_without_caller_keyword_is_supported(tmp_path) -> None:
+    media_path = tmp_path / "legacy.mp3"
+    media_path.write_bytes(b"mp3")
+    underlying = LegacyCacheManager()
+    proxy = AudioDurationCacheProxy(underlying)
+
+    duration = asyncio.run(
+        proxy.get_or_create_media_duration(media_path, caller="compatibility-test")
+    )
+
+    assert duration == 7.25
+    assert underlying.calls == [media_path]
 
 
 def test_other_cache_manager_attributes_are_delegated() -> None:
