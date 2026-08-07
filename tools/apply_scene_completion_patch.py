@@ -24,10 +24,13 @@ def patch_standard_renderer() -> None:
         "            scene_base_path\n"
     )
     return_line = text.index("        return scene_results\n", start)
+    removed = text[start:return_line]
+    if "scene_base_path.unlink()" not in removed or "pbar_scenes.update(1)" not in removed:
+        raise RuntimeError("legacy scene completion block changed unexpectedly")
     replacement = "        self._complete_scene_render(scene_base_path)\n"
     text = text[:start] + replacement + text[return_line:]
-    if "scene_base_path.unlink()" in text or "pbar_scenes.update(1)" in text:
-        raise RuntimeError("legacy inline scene completion remains")
+    if "scene_base_path.unlink()" in text:
+        raise RuntimeError("legacy inline scene-base cleanup remains")
     if len(text.splitlines()) >= 400:
         raise RuntimeError("scene_standard_renderer.py did not shrink below 400 lines")
     path.write_text(text, encoding="utf-8")
