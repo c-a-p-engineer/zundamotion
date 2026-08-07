@@ -28,6 +28,9 @@ from .scene_line_metrics import SceneLineMetricsMixin
 from .scene_preparation import ScenePreparationMixin
 from .scene_run_base_plan import SceneRunBasePlanMixin
 from .scene_run_base_renderer import SceneRunBaseRendererMixin
+from .scene_standard_context import SceneStandardContextMixin
+from .scene_precache import ScenePrecacheMixin
+from .scene_line_pipeline import SceneLinePipelineMixin
 from .scene_standard_renderer import SceneStandardRendererMixin
 from .scene_timing import SceneTimingMixin
 from .scene_talk_plan import SceneTalkPlanMixin
@@ -54,6 +57,9 @@ class SceneRenderer(
     SceneTalkPlanMixin,
     SceneTalkRendererMixin,
     SceneWaitRendererMixin,
+    SceneStandardContextMixin,
+    ScenePrecacheMixin,
+    SceneLinePipelineMixin,
     SceneStandardRendererMixin,
 ):
     """Initialize scene context and coordinate the selected render path."""
