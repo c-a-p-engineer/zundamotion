@@ -37,11 +37,3 @@ scenes:
             scale: 0.20
             anchor: bottom_center
             position: {x: -70, y: 0}
-      - wait: 0.6
-        characters:
-          - name: copetan
-            expression: default
-            visible: true
-            scale: 0.20
-            anchor: bottom_center
-            position: {x: -70, y: 0}
