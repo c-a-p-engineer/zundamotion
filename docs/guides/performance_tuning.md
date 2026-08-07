@@ -49,7 +49,34 @@ system:
 - シーン並列描画:
   - `video.scene_workers` を `auto` または整数で指定
 - 単純シーン fast path:
-  - 背景静止画、単一キャラ、通常発話だけのシーンは GPU エンコード時のみ適用
+  - 背景静止画、単一キャラ、通常発話だけのシーンは GPU エンコード時に適用
+  - CPU版は実験機能で、既定では無効
+
+## CPU simple scene fast path（実験機能）
+
+CPUエンコード時のsimple scene fast pathは、性能評価のための内部実験です。通常実行では
+従来どおりstandard pathを使用します。有効化する場合だけ次の環境変数を指定します。
+
+```bash
+ZUNDAMOTION_CPU_SCENE_FAST_PATH=1 zundamotion render script.yaml --out out.mp4
+```
+
+適用対象は意図的に狭くしています。
+
+- 背景はシーン全体で同一の静止画
+- `background.fit=stretch`
+- 可視characterは1体だけで、全lineで同一の画像・位置・scale
+- characterの`enter` / `leave` / `move`なし
+- lineは通常`talk`または`wait`
+- `insert` / `image_layers` / `voice_layers` / screen/background effect / `video_filter`なし
+- PNG必須の字幕スタイルなし
+
+1条件でも外れた場合、fast pathは使用せずstandard pathへフォールバックします。FFmpeg実行に
+失敗した場合も同様です。`--no-cache`指定時はfast pathのscene動画も永続cacheへ保存しません。
+
+この実験を既定有効へ昇格する条件は、同一YAML・runtime lock・CPU条件で出力とタイミングの
+同等性を確認した上で、wall timeと`VideoPhase`中央値がともにstandard比90%以下になることです。
+改善が小さい、出力差がある、または複雑性が見合わない場合はstandard pathを維持します。
 
 ## スレッドと計測
 
@@ -75,6 +102,22 @@ python scripts/benchmark_cpu_gpu.py
 CPU 使用率のサンプル、FFmpeg プロセス数を残します。比較対象の条件を変えないため、
 このスクリプトは `--no-cache`、`--jobs 1`、`FFMPEG_PROFILE_MODE=1` を固定します。
 
+## CPU standard / simple fast path固定ベンチマーク
+
+Issue #42 のCPU実験は専用YAMLをstandard/fastで交互に3回ずつ描画し、中央値と出力を比較します。
+
+```bash
+python tools/cpu_scene_fast_path_benchmark.py \
+  --script scripts/benchmark_cpu_scene_fast_path.yaml \
+  --output-dir output/benchmarks/cpu-scene-fast-path \
+  --runs 3
+```
+
+ベンチマークはCPU、`--quality speed`、`--jobs 1`、`--no-cache`、`--no-voice`を固定します。
+結果JSONにはwall time、`VideoPhase`、FFmpeg/ffprobe回数、A/V警告、standard/fastの経路選択、
+`ffprobe`セマンティクス、decoded video `framemd5`、decoded PCM SHA-256を記録します。
+性能差が基準未満でも測定自体は成功とし、JSONの`decision=keep_standard`で不採用を明示します。
+
 ## cold / warm 固定ベンチマーク
 
 同一YAML・同一runtime lock・同一エンコーダー条件で、cache refreshによるcold 1回と
@@ -97,8 +140,9 @@ HIT/MISS/WRITE、A/V警告数、入力YAMLとruntime lockのSHA-256を保存し�
 各実行の生PerfSummary、ログ、動画も同じディレクトリへ保存されます。
 
 GitHub Actionsの`Performance Smoke`は`smoke_minimal.yaml`をCPU・音声なしで実行し、
-比較JSONと生PerfSummaryをartifactとして保存します。長尺台本の性能判定では、この
-短尺CIだけで結論を出さず、同一runtime lockのローカルまたは専用runnerで再計測します。
+cold/warm比較に加えてCPU simple scene fast path実験も実行します。比較JSONと生PerfSummaryは
+artifactとして保存します。長尺台本の性能判定では、この短尺CIだけで結論を出さず、同一
+runtime lockのローカルまたは専用runnerで再計測します。
 
 ## 自動チューニング
 
