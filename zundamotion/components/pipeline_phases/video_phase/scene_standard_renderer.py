@@ -294,103 +294,14 @@ class SceneStandardRendererMixin:
         scene_base_path = base_result.scene_base_path
         normalized_bg_path = base_result.normalized_background_path
 
-        # 連続行で静的レイヤが不変な“ラン”のベース（行ブロック前処理）を検討
-        run_bases: List[Dict[str, Any]] = []
-        if scene_base_path is None and not scene_cp and not has_line_bg_override:
-            try:
-                talk_lines2 = [
-                    l
-                    for l in scene.get("lines", [])
-                    if not ("wait" in l or l.get("type") == "wait")
-                ]
-                if talk_lines2:
-                    def _insert_image_overlay(line: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-                        ins = line.get("insert") or {}
-                        p = ins.get("path")
-                        if not p:
-                            return None
-                        sp = Path(p)
-                        if sp.exists() and sp.suffix.lower() not in {".mp4", ".mov", ".webm", ".mkv", ".avi"}:
-                            return {
-                                "path": str(sp.resolve()),
-                                "scale": float(ins.get("scale", 1.0) or 1.0),
-                                "anchor": str(ins.get("anchor", "middle_center")),
-                                "position": (ins.get("position") or {"x": "0", "y": "0"}),
-                            }
-                        return None
-
-                    maps = [self._norm_char_entries(l) for l in talk_lines2]
-                    run_start: Optional[int] = None
-                    run_sig = None
-                    for i, m in enumerate(maps):
-                        sig_keys = tuple(sorted(m.keys()))
-                        ov_ins = _insert_image_overlay(talk_lines2[i])
-                        sig = (sig_keys, ov_ins and (ov_ins.get("path"), ov_ins.get("scale"), ov_ins.get("anchor"), (ov_ins.get("position") or {}).get("x"), (ov_ins.get("position") or {}).get("y")))
-                        if run_start is None:
-                            run_start = i
-                            run_sig = sig
-                            continue
-                        if sig != run_sig:
-                            if run_start is not None and (i - run_start) >= 2 and sig_keys:
-                                run_end = i - 1
-                                overlays: List[Dict[str, Any]] = [maps[run_start][k] for k in tuple(sorted(maps[run_start].keys()))]
-                                if ov_ins:
-                                    overlays.append(ov_ins)
-                                # ランの長さ
-                                dur = 0.0
-                                for li in range(run_start, run_end + 1):
-                                    lid = f"{scene_id}_{li + 1}"
-                                    dur += float(line_data_map[lid]["duration"])  # type: ignore
-                                try:
-                                    base_path = await self.video_renderer.render_scene_base_composited(
-                                        {"type": "video" if is_bg_video else "image", "path": str(bg_image)},
-                                        dur,
-                                        f"scene_base_{scene_id}_run_{run_start+1}_{run_end+1}",
-                                        overlays,
-                                    )
-                                    run_bases.append({
-                                        "start": run_start + 1,
-                                        "end": run_end + 1,
-                                        "path": base_path,
-                                        "char_keys": set(tuple(sorted(maps[run_start].keys()))),
-                                        "has_insert_image": bool(ov_ins),
-                                        "offsets": None,
-                                    })
-                                except Exception as e:
-                                    logger.debug("Run-base generation failed: %s", e)
-                            run_start = i
-                            run_sig = sig
-                    # 末尾ラン
-                    i = len(maps)
-                    if run_start is not None and (i - run_start) >= 2 and tuple(sorted(maps[run_start].keys())):
-                        run_end = i - 1
-                        ov_ins0 = _insert_image_overlay(talk_lines2[run_start])
-                        overlays = [maps[run_start][k] for k in tuple(sorted(maps[run_start].keys()))]
-                        if ov_ins0:
-                            overlays.append(ov_ins0)
-                        dur = 0.0
-                        for li in range(run_start, run_end + 1):
-                            lid = f"{scene_id}_{li + 1}"
-                            dur += float(line_data_map[lid]["duration"])  # type: ignore
-                        try:
-                            base_path = await self.video_renderer.render_scene_base_composited(
-                                {"type": "video" if is_bg_video else "image", "path": str(bg_image)},
-                                dur,
-                                f"scene_base_{scene_id}_run_{run_start+1}_{run_end+1}",
-                                overlays,
-                            )
-                            run_bases.append({
-                                "start": run_start + 1,
-                                "end": run_end + 1,
-                                "path": base_path,
-                                "char_keys": set(tuple(sorted(maps[run_start].keys()))),
-                                "has_insert_image": bool(ov_ins0),
-                                "offsets": None,
-                            })
-                        except Exception as e:
-                            logger.debug("Run-base generation failed (tail): %s", e)
-            except Exception as e:
-                logger.debug("Run-base detection skipped: scene=%s err=%s", scene_id, e)
+        run_bases = await self._prepare_run_bases(
+            scene_id=scene_id,
+            background=str(bg_image),
+            is_background_video=is_bg_video,
+            scene_base_path=scene_base_path,
+            scene_copy=scene_cp,
+            has_line_background_override=has_line_bg_override,
+        )
 
         # 先に各行の開始時刻を決定
         image_layers_by_line = self._collect_image_layers_by_line(
@@ -430,11 +341,7 @@ class SceneStandardRendererMixin:
                 uses_scene_background = line_bg_image == bg_image
 
                 # シーンベース or 連続ランのベースがあればそれを使用
-                run_base = None
-                for rb in run_bases or []:
-                    if rb["start"] <= idx <= rb["end"]:
-                        run_base = rb
-                        break
+                run_base = self._find_run_base(run_bases, idx)
                 if (
                     uses_scene_background
                     and scene_base_path is not None
@@ -454,21 +361,12 @@ class SceneStandardRendererMixin:
                 elif (
                     uses_scene_background
                     and run_base is not None
-                    and Path(run_base["path"]).exists()
+                    and run_base.path.exists()
                 ):
-                    # ラン内でのオフセットを算出（キャッシュ）
-                    if run_base.get("offsets") is None:
-                        offs = {}
-                        acc = 0.0
-                        for li in range(run_base["start"], run_base["end"] + 1):
-                            offs[li] = acc
-                            lid2 = f"{scene_id}_{li}"
-                            acc += float(line_data_map[lid2]["duration"])  # type: ignore
-                        run_base["offsets"] = offs
                     background_config = {
                         "type": "video",
-                        "path": str(run_base["path"]),
-                        "start_time": float(run_base["offsets"][idx]),
+                        "path": str(run_base.path),
+                        "start_time": float(run_base.offsets[idx]),
                         "normalized": True,
                         "pre_scaled": True,
                         "fit": bg_layout["fit"],
@@ -596,7 +494,7 @@ class SceneStandardRendererMixin:
                 }
                 # 静的レイヤをベースに取り込んでいる場合、行側から該当項目のみ除去
                 original_characters = line.get("characters", []) or []
-                if static_char_keys or (run_base and run_base.get("char_keys")):
+                if static_char_keys or (run_base and run_base.character_keys):
                     eff_chars: List[Dict[str, Any]] = []
                     for ch in original_characters:
                         if not ch.get("visible", False):
@@ -607,7 +505,7 @@ class SceneStandardRendererMixin:
                         )
                         if entry_keys & static_char_keys or (
                             run_base
-                            and entry_keys & run_base.get("char_keys", set())
+                            and entry_keys & run_base.character_keys
                         ):
                             continue
                         eff_chars.append(ch)
@@ -616,7 +514,7 @@ class SceneStandardRendererMixin:
                     effective_characters = original_characters
 
                 # ベースに取り込まれていない共通挿入“動画”があれば、事前正規化済みのパスを各行へ伝搬
-                if static_insert_in_base or (run_base and run_base.get("has_insert_image")):
+                if static_insert_in_base or (run_base and run_base.has_insert_image):
                     effective_insert = None
                 else:
                     raw_insert = line_config.get("insert")

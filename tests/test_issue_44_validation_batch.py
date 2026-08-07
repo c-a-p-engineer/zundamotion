@@ -1,6 +1,6 @@
 """Integration-seam checks for the 2026-08-07 performance/diagnostic batch.
 
-These tests intentionally stay lightweight.  Their main purpose is to make the
+These tests intentionally stay lightweight. Their main purpose is to make the
 pull-request workflows import the newly composed facades and verify the MRO and
 compatibility boundaries that are otherwise easy to break during refactoring.
 """
@@ -22,8 +22,8 @@ from zundamotion.components.pipeline_phases.video_phase.scene_renderer import (
 from zundamotion.components.pipeline_phases.video_phase.scene_run_base_plan import (
     SceneRunBasePlanMixin,
 )
-from zundamotion.components.pipeline_phases.video_phase.scene_run_base_safety import (
-    SceneRunBaseSafetyMixin,
+from zundamotion.components.pipeline_phases.video_phase.scene_run_base_renderer import (
+    SceneRunBaseRendererMixin,
 )
 from zundamotion.components.subtitles import SubtitleGenerator
 from zundamotion.components.subtitles.generator import (
@@ -37,11 +37,11 @@ def test_instrumented_subtitle_generator_preserves_base_contract() -> None:
     assert callable(SubtitleGenerator.resolve_render_mode_for_subtitles)
 
 
-def test_scene_renderer_composes_planner_before_safety_guard() -> None:
+def test_scene_renderer_composes_planner_before_run_base_renderer() -> None:
     mro = SceneRenderer.__mro__
     assert SceneRunBasePlanMixin in mro
-    assert SceneRunBaseSafetyMixin in mro
-    assert mro.index(SceneRunBasePlanMixin) < mro.index(SceneRunBaseSafetyMixin)
+    assert SceneRunBaseRendererMixin in mro
+    assert mro.index(SceneRunBasePlanMixin) < mro.index(SceneRunBaseRendererMixin)
 
 
 def test_new_proxies_and_policies_remain_importable() -> None:
