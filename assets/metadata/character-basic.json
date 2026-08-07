@@ -1,7 +1,7 @@
 {
   "path": "character-basic.mp4",
   "duration": 5.0,
-  "size_bytes": 175176,
+  "size_bytes": 175667,
   "streams": [
     {
       "index": 0,
@@ -85,7 +85,7 @@
       "start_time": "0.000000",
       "duration_ts": 237568,
       "duration": "4.949333",
-      "bit_rate": "190936",
+      "bit_rate": "191730",
       "nb_frames": "232",
       "extradata_size": 5,
       "disposition": {
