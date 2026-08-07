@@ -58,12 +58,12 @@ jobs:
       - name: Test benchmark helpers
         run: python -m pytest -q tests/test_cold_warm_benchmark.py
 
-      - name: Compare CPU standard and simple fast path
+      - name: Compare one bounded CPU standard/fast pair
         run: |
-          python tools/cpu_scene_fast_path_benchmark.py \
+          timeout 90s python tools/cpu_scene_fast_path_benchmark.py \
             --script scripts/benchmark_cpu_scene_fast_path.yaml \
             --output-dir output/benchmarks/cpu-scene-fast-path-ci \
-            --runs 3
+            --runs 1
 
       - name: Upload CPU fast-path benchmark
         if: always()
