@@ -128,3 +128,36 @@ def test_fast_path_executor_preserves_ffmpeg_failure_fallback(tmp_path: Path, mo
         )
     )
     assert result is None
+
+
+def test_fast_path_executor_does_not_persist_when_no_cache(tmp_path: Path, monkeypatch) -> None:
+    class _ExecutorHarness(SceneFastPathExecutorMixin):
+        scene = {"lines": [{}]}
+        temp_dir = tmp_path
+        cache_manager = SimpleNamespace(
+            no_cache=True,
+            cache_file=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("--no-cache must not persist fast-path output")
+            ),
+        )
+
+        def _build_simple_scene_fast_plan(self, **_kwargs):
+            return {"plan": True}
+
+        def _build_simple_scene_fast_command(self, **_kwargs):
+            return ["ffmpeg", "-version"]
+
+    async def _succeed(_cmd):
+        return None
+
+    monkeypatch.setattr(executor_module, "_run_ffmpeg_async", _succeed)
+    result = asyncio.run(
+        _ExecutorHarness()._render_simple_scene_fast(
+            scene_id="demo",
+            bg_default="bg.png",
+            scene_duration=1.0,
+            start_time_by_idx={1: 0.0},
+            scene_hash_data={"scene": "demo"},
+        )
+    )
+    assert result == tmp_path / "scene_output_demo.mp4"
