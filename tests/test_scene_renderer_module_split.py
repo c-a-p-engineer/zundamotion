@@ -12,6 +12,7 @@ def test_scene_renderer_public_facade_keeps_internal_responsibilities() -> None:
         "_precache_face_overlays": "scene_face_precache",
         "_collect_image_layers_by_line": "scene_image_layer_preparation",
         "_build_image_layer_overlays": "scene_image_layer_preparation",
+        "_can_use_simple_scene_fast_path": "scene_fast_path_eligibility",
         "_render_simple_scene_fast": "scene_fast_path",
         "_scene_base_cache_data": "scene_cache",
         "_assemble_scene_media": "scene_assembly",
