@@ -207,7 +207,7 @@ class SubtitleVideoSegmentMixin:
         duration: Optional[float] = None,
         scene_id: Optional[str] = None,
     ) -> Path:
-        """Copy the original audio once onto the completed video-only stream."""
+        """Copy source audio once without shifting the zero-based video timeline."""
         cmd: List[str] = [
             self.ffmpeg_path,
             "-y",
@@ -228,8 +228,6 @@ class SubtitleVideoSegmentMixin:
                 "copy",
                 "-c:a",
                 "copy",
-                "-avoid_negative_ts",
-                "make_zero",
                 "-movflags",
                 "+faststart",
             ]
