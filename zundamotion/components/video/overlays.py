@@ -784,7 +784,7 @@ class OverlayMixin:
                 timing_stats["gap_duration"],
                 timing_stats["longest_zone"],
             )
-            if segment_plan.use_segment_mode:
+            if segment_plan.use_segment_mode and len(segment_plan.ranges) > 1:
                 perf_stats.incr("subtitle_chunks", len(segment_plan.ranges))
                 worker_count = self._subtitle_segment_worker_count()
                 self.subtitle_overlay_stats["segment_workers"] = worker_count
@@ -817,6 +817,14 @@ class OverlayMixin:
                         "Falling back to full subtitle burn.",
                         err,
                     )
+
+            elif segment_plan.use_segment_mode:
+                logger.info(
+                    "[SubtitleOverlay] Single-chunk segment plan uses full burn "
+                    "to preserve CFR/timestamp stability (base=%.2fs, subtitles=%d)",
+                    float(base_dur),
+                    len(subtitles),
+                )
 
         self.subtitle_overlay_stats["chunks"] = 1
         perf_stats.incr("subtitle_chunks", 1)
