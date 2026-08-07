@@ -1,7 +1,7 @@
 {
   "path": "voicevox.mp4",
   "duration": 3.866667,
-  "size_bytes": 142887,
+  "size_bytes": 142728,
   "streams": [
     {
       "index": 0,
@@ -31,7 +31,7 @@
       "start_time": "0.000000",
       "duration_ts": 59392,
       "duration": "3.866667",
-      "bit_rate": "99101",
+      "bit_rate": "99115",
       "bits_per_raw_sample": "8",
       "nb_frames": "58",
       "extradata_size": 44,
@@ -83,10 +83,10 @@
       "time_base": "1/48000",
       "start_pts": 0,
       "start_time": "0.000000",
-      "duration_ts": 183424,
-      "duration": "3.821333",
-      "bit_rate": "191627",
-      "nb_frames": "180",
+      "duration_ts": 183296,
+      "duration": "3.818667",
+      "bit_rate": "191438",
+      "nb_frames": "179",
       "extradata_size": 5,
       "disposition": {
         "default": 1,

@@ -1,7 +1,7 @@
 {
   "path": "character-move.mp4",
   "duration": 2.466667,
-  "size_bytes": 170578,
+  "size_bytes": 170454,
   "streams": [
     {
       "index": 0,
@@ -83,9 +83,9 @@
       "time_base": "1/48000",
       "start_pts": 0,
       "start_time": "0.000000",
-      "duration_ts": 117184,
-      "duration": "2.441333",
-      "bit_rate": "192340",
+      "duration_ts": 117248,
+      "duration": "2.442667",
+      "bit_rate": "191829",
       "nb_frames": "115",
       "extradata_size": 5,
       "disposition": {

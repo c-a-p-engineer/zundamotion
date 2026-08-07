@@ -1,7 +1,7 @@
 {
   "path": "minimal.mp4",
   "duration": 3.0,
-  "size_bytes": 104216,
+  "size_bytes": 104408,
   "streams": [
     {
       "index": 0,
@@ -83,9 +83,9 @@
       "time_base": "1/48000",
       "start_pts": 0,
       "start_time": "0.000000",
-      "duration_ts": 142624,
-      "duration": "2.971333",
-      "bit_rate": "191728",
+      "duration_ts": 142848,
+      "duration": "2.976000",
+      "bit_rate": "191943",
       "nb_frames": "140",
       "extradata_size": 5,
       "disposition": {

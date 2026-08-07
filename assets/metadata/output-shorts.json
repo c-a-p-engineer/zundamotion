@@ -1,7 +1,7 @@
 {
   "path": "output-shorts.mp4",
   "duration": 2.4,
-  "size_bytes": 101949,
+  "size_bytes": 101888,
   "streams": [
     {
       "index": 0,
@@ -83,9 +83,9 @@
       "time_base": "1/48000",
       "start_pts": 0,
       "start_time": "0.000000",
-      "duration_ts": 114304,
-      "duration": "2.381333",
-      "bit_rate": "192530",
+      "duration_ts": 114176,
+      "duration": "2.378667",
+      "bit_rate": "192541",
       "nb_frames": "112",
       "extradata_size": 5,
       "disposition": {

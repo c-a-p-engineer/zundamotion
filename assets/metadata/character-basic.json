@@ -1,7 +1,7 @@
 {
   "path": "character-basic.mp4",
   "duration": 5.0,
-  "size_bytes": 178614,
+  "size_bytes": 175176,
   "streams": [
     {
       "index": 0,
@@ -31,7 +31,7 @@
       "start_time": "0.000000",
       "duration_ts": 76800,
       "duration": "5.000000",
-      "bit_rate": "89268",
+      "bit_rate": "84800",
       "bits_per_raw_sample": "8",
       "nb_frames": "75",
       "extradata_size": 44,
@@ -85,7 +85,7 @@
       "start_time": "0.000000",
       "duration_ts": 237568,
       "duration": "4.949333",
-      "bit_rate": "191978",
+      "bit_rate": "190936",
       "nb_frames": "232",
       "extradata_size": 5,
       "disposition": {
