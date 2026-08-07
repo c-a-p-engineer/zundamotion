@@ -7,10 +7,8 @@ on:
       - ".github/workflows/performance-smoke.yml"
       - ".devcontainer/runtime.lock.json"
       - "tools/zundamotion_cold_warm_benchmark.py"
-      - "tools/cpu_scene_fast_path_benchmark.py"
       - "tests/test_cold_warm_benchmark.py"
       - "scripts/smoke_minimal.yaml"
-      - "scripts/benchmark_cpu_scene_fast_path.yaml"
       - "zundamotion/**"
 
 jobs:
@@ -22,7 +20,6 @@ jobs:
       DISABLE_HWENC: "1"
       HW_FILTER_MODE: cpu
       USE_RAMDISK: "0"
-      FFMPEG_STALL_TIMEOUT_SEC: "30"
 
     steps:
       - name: Checkout
@@ -58,24 +55,6 @@ jobs:
       - name: Test benchmark helpers
         run: python -m pytest -q tests/test_cold_warm_benchmark.py
 
-      - name: Compare one bounded CPU standard/fast pair
-        run: |
-          timeout 90s python tools/cpu_scene_fast_path_benchmark.py \
-            --script scripts/benchmark_cpu_scene_fast_path.yaml \
-            --output-dir output/benchmarks/cpu-scene-fast-path-ci \
-            --runs 1
-
-      - name: Upload CPU fast-path benchmark
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: cpu-scene-fast-path-python-${{ env.PYTHON_VERSION }}
-          if-no-files-found: error
-          retention-days: 14
-          path: |
-            output/benchmarks/cpu-scene-fast-path-ci/**
-            output/perf/perf_summary*.json
-
       - name: Run fixed cold and warm renders
         run: |
           python tools/zundamotion_cold_warm_benchmark.py \
@@ -86,14 +65,13 @@ jobs:
             --jobs 1 \
             --no-voice
 
-      - name: Upload performance benchmarks
+      - name: Upload cold-warm benchmark
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: performance-python-${{ env.PYTHON_VERSION }}
+          name: cold-warm-python-${{ env.PYTHON_VERSION }}
           if-no-files-found: error
           retention-days: 14
           path: |
             output/benchmarks/cold-warm-ci/**
-            output/benchmarks/cpu-scene-fast-path-ci/**
             output/perf/perf_summary*.json
