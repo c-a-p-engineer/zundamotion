@@ -1,7 +1,7 @@
 {
   "path": "overlay-compositing.mp4",
   "duration": 2.8,
-  "size_bytes": 120554,
+  "size_bytes": 120544,
   "streams": [
     {
       "index": 0,
@@ -85,7 +85,7 @@
       "start_time": "0.000000",
       "duration_ts": 132096,
       "duration": "2.752000",
-      "bit_rate": "190619",
+      "bit_rate": "190590",
       "nb_frames": "129",
       "extradata_size": 5,
       "disposition": {
