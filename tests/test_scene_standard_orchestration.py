@@ -1,8 +1,7 @@
+import asyncio
 import inspect
 from pathlib import Path
 from types import SimpleNamespace
-
-import pytest
 
 from zundamotion.components.pipeline_phases.video_phase.scene_standard_renderer import (
     SceneStandardRendererMixin,
@@ -69,16 +68,21 @@ class _Harness(SceneStandardRendererMixin):
         self.calls.append(("complete", scene_base_path))
 
 
-@pytest.mark.asyncio
-async def test_standard_orchestration_runs_named_stages_in_order() -> None:
+def _render(harness: _Harness):
+    return asyncio.run(
+        harness._render_scene_internal(
+            {"id": "scene-a"},
+            False,
+            "background.png",
+            {"key": "scene"},
+        )
+    )
+
+
+def test_standard_orchestration_runs_named_stages_in_order() -> None:
     harness = _Harness()
 
-    result = await harness._render_scene_internal(
-        {"id": "scene-a"},
-        False,
-        "background.png",
-        {"key": "scene"},
-    )
+    result = _render(harness)
 
     assert result == [Path("scene-final.mp4")]
     assert harness.calls == [
@@ -95,49 +99,31 @@ async def test_standard_orchestration_runs_named_stages_in_order() -> None:
     ]
 
 
-@pytest.mark.asyncio
-async def test_scene_cache_hit_short_circuits_later_stages() -> None:
+def test_scene_cache_hit_short_circuits_later_stages() -> None:
     harness = _Harness()
     harness.cached_result = [Path("cached.mp4")]
 
-    result = await harness._render_scene_internal(
-        {"id": "scene-a"},
-        False,
-        "background.png",
-        {"key": "scene"},
-    )
+    result = _render(harness)
 
     assert result == [Path("cached.mp4")]
     assert harness.calls == ["prepare", "cache"]
 
 
-@pytest.mark.asyncio
-async def test_fast_path_short_circuits_render_pipeline() -> None:
+def test_fast_path_short_circuits_render_pipeline() -> None:
     harness = _Harness()
     harness.fast_result = [Path("fast.mp4")]
 
-    result = await harness._render_scene_internal(
-        {"id": "scene-a"},
-        False,
-        "background.png",
-        {"key": "scene"},
-    )
+    result = _render(harness)
 
     assert result == [Path("fast.mp4")]
     assert harness.calls == ["prepare", "cache", "fast"]
 
 
-@pytest.mark.asyncio
-async def test_empty_assembly_still_completes_scene() -> None:
+def test_empty_assembly_still_completes_scene() -> None:
     harness = _Harness()
     harness.assembly = None
 
-    result = await harness._render_scene_internal(
-        {"id": "scene-a"},
-        False,
-        "background.png",
-        {"key": "scene"},
-    )
+    result = _render(harness)
 
     assert result == []
     assert "store" not in harness.calls
