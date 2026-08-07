@@ -348,59 +348,7 @@ class SceneStandardRendererMixin:
                     return
 
                 if context.line_type == "wait":
-                    logger.debug(
-                        f"Rendering wait clip for {duration}s (Scene '{scene_id}', Line {idx})"
-                    )
-                    wait_cache_data = {
-                        "type": "wait",
-                        "duration": duration,
-                        "bg_image_path": line_bg_image,
-                        "is_bg_video": line_is_bg_video,
-                        "start_time": start_time_by_idx[idx],
-                        "video_config": self.config.get("video", {}),
-                        "line_config": line_config,
-                        "image_layer_overlays": line_image_layers,
-                        "extra_audio_overlays": extra_audio_overlays,
-                        "hw_kind": self.hw_kind,
-                        "video_params": self.video_params.__dict__,
-                        "audio_params": self.audio_params.__dict__,
-                        "screen_effects": line_config.get("screen_effects"),
-                        "background_effects": line_config.get("background_effects"),
-                        "background_layout": bg_layout,
-                        "video_filter": background_config.get("video_filter"),
-                    }
-
-                    async def wait_creator_func(output_path: Path) -> Path:
-                        clip_path = await self.video_renderer.render_wait_clip(
-                            duration,
-                            background_config,
-                            output_path.stem,
-                            line_config,
-                            characters_config=line_config.get("characters", []) or [],
-                            image_layer_overlays=line_image_layers,
-                            extra_audio_overlays=extra_audio_overlays,
-                        )
-                        if clip_path is None:
-                            raise PipelineError(
-                                f"Wait clip rendering failed for line: {line_id}"
-                            )
-                        return clip_path
-
-                    clip_path = await self.cache_manager.get_or_create(
-                        key_data=wait_cache_data,
-                        file_name=line_id,
-                        extension="mp4",
-                        creator_func=wait_creator_func,
-                    )
-                    fg_overlays = await self._resolve_visual_overlays(
-                        line,
-                        scope_id=line_id,
-                    )
-                    if fg_overlays:
-                        clip_path = await self.video_renderer.apply_foreground_overlays(
-                            clip_path, fg_overlays
-                        )
-                    results[idx - 1] = clip_path
+                    results[idx - 1] = await self._render_wait_line(context)
                     return
 
                 # Talk step
