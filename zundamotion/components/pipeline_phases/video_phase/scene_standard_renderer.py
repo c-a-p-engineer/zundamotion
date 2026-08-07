@@ -15,7 +15,6 @@ from typing import Any, Dict, List, Optional
 from ....exceptions import PipelineError
 from ....utils.logger import logger
 from ....utils import perf_stats
-from ....utils.subtitle_text import is_effective_subtitle_text
 
 
 class SceneStandardRendererMixin:
@@ -339,7 +338,6 @@ class SceneStandardRendererMixin:
                 bg_layout = context.background_layout
                 line_bg_image = context.background_source
                 line_is_bg_video = context.background_is_video
-                run_base = context.run_base
                 background_config = context.background_config
                 line_image_layers = list(context.image_layer_overlays)
 
@@ -363,56 +361,22 @@ class SceneStandardRendererMixin:
                     "line_config": line_config,
                     "voice_config": self.config.get("voice", {}),
                 }
-                # 静的レイヤをベースに取り込んでいる場合、行側から該当項目のみ除去
-                original_characters = line.get("characters", []) or []
-                if static_char_keys or (run_base and run_base.character_keys):
-                    eff_chars: List[Dict[str, Any]] = []
-                    for ch in original_characters:
-                        if not ch.get("visible", False):
-                            eff_chars.append(ch)
-                            continue
-                        entry_keys = set(
-                            self._norm_char_entries({"characters": [ch]}).keys()
-                        )
-                        if entry_keys & static_char_keys or (
-                            run_base
-                            and entry_keys & run_base.character_keys
-                        ):
-                            continue
-                        eff_chars.append(ch)
-                    effective_characters = eff_chars
-                else:
-                    effective_characters = original_characters
+                talk_plan = self._build_scene_talk_plan(
+                    context=context,
+                    static_character_keys=static_char_keys,
+                    static_insert_in_base=static_insert_in_base,
+                    scene_level_insert_video=scene_level_insert_video,
+                )
+                effective_characters = list(talk_plan.effective_characters)
+                effective_insert = talk_plan.effective_insert
+                face_anim_list = list(talk_plan.face_animations)
+                anim_meta = talk_plan.animation_meta
+                has_subtitle = talk_plan.has_subtitle
+                any_chars = talk_plan.has_visible_characters
+                insert_is_image = talk_plan.insert_is_image
+                has_move = talk_plan.has_move
+                has_effect = talk_plan.has_effect
 
-                # ベースに取り込まれていない共通挿入“動画”があれば、事前正規化済みのパスを各行へ伝搬
-                if static_insert_in_base or (run_base and run_base.has_insert_image):
-                    effective_insert = None
-                else:
-                    raw_insert = line_config.get("insert")
-                    if (
-                        scene_level_insert_video is not None
-                        and raw_insert
-                        and Path(raw_insert.get("path", "")).exists()
-                    ):
-                        effective_insert = {
-                            **raw_insert,
-                            "path": str(scene_level_insert_video),
-                            "normalized": True,
-                            "pre_scaled": True,
-                        }
-                    else:
-                        effective_insert = raw_insert
-
-                # Face animation config versioning for cache stability
-                face_anim_raw = line_data.get("face_anim")
-                if isinstance(face_anim_raw, list):
-                    face_anim_list = face_anim_raw
-                elif face_anim_raw:
-                    face_anim_list = [face_anim_raw]
-                else:
-                    face_anim_list = []
-                first_anim_meta = face_anim_list[0] if face_anim_list else {}
-                anim_meta = (first_anim_meta or {}).get("meta") or {}
                 video_cache_data = {
                     "type": "talk",
                     "clip_render_version": "20260330_face_overlay_args_v2",
@@ -450,24 +414,6 @@ class SceneStandardRendererMixin:
                     "video_filter": background_config.get("video_filter"),
                 }
 
-                has_subtitle = is_effective_subtitle_text(line_data.get("text"))
-                any_chars = any(
-                    (character or {}).get("visible", False)
-                    for character in (line.get("characters", []) or [])
-                )
-                insert_config = line_config.get("insert") or {}
-                insert_path = str(insert_config.get("path", ""))
-                insert_is_image = insert_path.lower().endswith(
-                    (".png", ".jpg", ".jpeg", ".bmp", ".webp")
-                )
-                has_move = bool(line_config.get("move")) or any(
-                    bool((character or {}).get("move"))
-                    for character in (line.get("characters", []) or [])
-                )
-                has_effect = bool(
-                    line_config.get("background_effects")
-                    or line_config.get("screen_effects")
-                )
                 creator_started: Optional[float] = None
                 creator_finished: Optional[float] = None
                 render_ms = 0.0

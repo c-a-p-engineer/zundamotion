@@ -25,6 +25,7 @@ from .scene_run_base_plan import SceneRunBasePlanMixin
 from .scene_run_base_renderer import SceneRunBaseRendererMixin
 from .scene_standard_renderer import SceneStandardRendererMixin
 from .scene_timing import SceneTimingMixin
+from .scene_talk_plan import SceneTalkPlanMixin
 from .scene_wait_renderer import SceneWaitRendererMixin
 from .character_render_state import SCENE_STATE_RESOLUTION_VERSION
 
@@ -39,6 +40,7 @@ class SceneRenderer(
     SceneRunBasePlanMixin,
     SceneRunBaseRendererMixin,
     SceneTimingMixin,
+    SceneTalkPlanMixin,
     SceneWaitRendererMixin,
     SceneStandardRendererMixin,
 ):
