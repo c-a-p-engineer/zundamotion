@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare bounded subtitle segment worker counts on a synthetic long scene."""
+"""Compare legacy A/V subtitle chunks with bounded video-only execution."""
 
 from __future__ import annotations
 
@@ -15,13 +15,15 @@ from typing import Any
 
 from zundamotion.cache import CacheManager
 from zundamotion.components.video import VideoRenderer
+from zundamotion.components.video.subtitle_segment_plan import build_subtitle_segment_plan
 from zundamotion.utils import perf_stats
 from zundamotion.utils.ffmpeg_hw import set_hw_filter_mode
+from zundamotion.utils.ffmpeg_ops import concat_videos_safe
 from zundamotion.utils.ffmpeg_params import resolve_media_params
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _config() -> dict[str, Any]:
@@ -107,7 +109,13 @@ def _create_base_video(path: Path, duration: float) -> None:
         "-shortest",
         str(path),
     ]
-    subprocess.run(command, cwd=ROOT, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(
+        command,
+        cwd=ROOT,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 def _probe_av(path: Path) -> dict[str, Any]:
@@ -160,11 +168,7 @@ def _probe_av(path: Path) -> dict[str, Any]:
     }
 
 
-async def _run_trial(base_video: Path, output_dir: Path, workers: int) -> dict[str, Any]:
-    trial_dir = output_dir / f"workers-{workers}"
-    if trial_dir.exists():
-        shutil.rmtree(trial_dir)
-    trial_dir.mkdir(parents=True)
+def _renderer(trial_dir: Path) -> VideoRenderer:
     temp_dir = trial_dir / "temp"
     cache_dir = trial_dir / "cache"
     temp_dir.mkdir()
@@ -172,7 +176,7 @@ async def _run_trial(base_video: Path, output_dir: Path, workers: int) -> dict[s
     cache.set_ephemeral_dir(temp_dir)
     config = _config()
     video_params, audio_params = resolve_media_params(config)
-    renderer = VideoRenderer(
+    return VideoRenderer(
         config,
         temp_dir,
         cache,
@@ -183,22 +187,19 @@ async def _run_trial(base_video: Path, output_dir: Path, workers: int) -> dict[s
         has_cuda_filters=False,
         clip_workers=1,
     )
-    output_path = trial_dir / "subtitle-output.mp4"
-    os.environ["ZUNDAMOTION_SUBTITLE_SEGMENT_WORKERS"] = str(workers)
-    stats = perf_stats.start_perf_stats()
-    started = time.perf_counter()
-    await renderer.apply_subtitle_overlays(
-        base_video,
-        _subtitles(),
-        scene_id=f"subtitle-benchmark-w{workers}",
-    )
-    generated = temp_dir / f"{base_video.stem}_sub.mp4"
-    if not generated.is_file():
-        raise FileNotFoundError(generated)
-    shutil.copy2(generated, output_path)
-    elapsed = time.perf_counter() - started
+
+
+def _trial_summary(
+    *,
+    mode: str,
+    output_path: Path,
+    elapsed: float,
+    stats: Any,
+    workers: int | None,
+) -> dict[str, Any]:
     summary = stats.to_dict()
     return {
+        "mode": mode,
         "workers": workers,
         "elapsed_seconds": round(elapsed, 3),
         "subtitle_burn_ms": float(summary.get("subtitle_burn_ms", 0.0) or 0.0),
@@ -211,6 +212,107 @@ async def _run_trial(base_video: Path, output_dir: Path, workers: int) -> dict[s
     }
 
 
+async def _run_legacy_trial(base_video: Path, output_dir: Path) -> dict[str, Any]:
+    trial_dir = output_dir / "legacy-av-segments"
+    if trial_dir.exists():
+        shutil.rmtree(trial_dir)
+    trial_dir.mkdir(parents=True)
+    renderer = _renderer(trial_dir)
+    subtitles = _subtitles()
+    plan = build_subtitle_segment_plan(
+        subtitles,
+        base_duration=float(len(subtitles)),
+        gap_threshold=0.20,
+        max_subtitles=8,
+        min_exact_segment_duration=renderer._min_exact_segment_duration(),
+    )
+    stats = perf_stats.start_perf_stats()
+    perf_stats.incr("subtitle_chunks", len(plan.ranges))
+    started = time.perf_counter()
+    segment_paths: list[Path] = []
+    for index, item in enumerate(plan.ranges):
+        segment_base = renderer.temp_dir / f"legacy_base_{index:03d}.mp4"
+        cut = await renderer._cut_video_segment_exact(
+            base_video,
+            segment_base,
+            float(item.start),
+            float(item.duration),
+        )
+        if cut is None:
+            raise RuntimeError("legacy benchmark failed to cut a planned range")
+        adjusted: list[dict[str, Any]] = []
+        for subtitle in item.subtitles:
+            copied = dict(subtitle)
+            copied["start"] = max(0.0, float(subtitle["start"]) - float(item.start))
+            adjusted.append(copied)
+        burn_path = renderer.temp_dir / f"legacy_burn_{index:03d}.mp4"
+        burn_started = time.perf_counter()
+        burned = await renderer._apply_subtitle_overlays_full(
+            cut,
+            adjusted,
+            burn_path,
+            scene_id="subtitle-benchmark-legacy",
+            chunk_index=index,
+        )
+        perf_stats.add_ms(
+            "subtitle_burn_ms",
+            (time.perf_counter() - burn_started) * 1000.0,
+        )
+        segment_paths.append(burned)
+
+    output_path = trial_dir / "subtitle-output.mp4"
+    await concat_videos_safe(
+        [str(path.resolve()) for path in segment_paths],
+        str(output_path),
+        renderer.audio_params,
+        renderer.ffmpeg_path,
+        context={
+            "phase": "VideoPhase",
+            "operation": "subtitle_scene_concat_legacy_benchmark",
+            "scene_id": "subtitle-benchmark-legacy",
+            "output_path": str(output_path),
+        },
+    )
+    return _trial_summary(
+        mode="legacy_av_segments",
+        output_path=output_path,
+        elapsed=time.perf_counter() - started,
+        stats=stats,
+        workers=None,
+    )
+
+
+async def _run_video_only_trial(
+    base_video: Path,
+    output_dir: Path,
+    workers: int,
+) -> dict[str, Any]:
+    trial_dir = output_dir / f"video-only-workers-{workers}"
+    if trial_dir.exists():
+        shutil.rmtree(trial_dir)
+    trial_dir.mkdir(parents=True)
+    renderer = _renderer(trial_dir)
+    output_path = trial_dir / "subtitle-output.mp4"
+    os.environ["ZUNDAMOTION_SUBTITLE_SEGMENT_WORKERS"] = str(workers)
+    stats = perf_stats.start_perf_stats()
+    started = time.perf_counter()
+    generated = await renderer.apply_subtitle_overlays(
+        base_video,
+        _subtitles(),
+        scene_id=f"subtitle-benchmark-w{workers}",
+    )
+    if not Path(generated).is_file():
+        raise FileNotFoundError(generated)
+    shutil.copy2(generated, output_path)
+    return _trial_summary(
+        mode="video_only",
+        output_path=output_path,
+        elapsed=time.perf_counter() - started,
+        stats=stats,
+        workers=workers,
+    )
+
+
 async def _main_async(output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     base_video = output_dir / "base.mp4"
@@ -219,27 +321,33 @@ async def _main_async(output_dir: Path) -> dict[str, Any]:
     set_hw_filter_mode("cpu")
     os.environ["DISABLE_HWENC"] = "1"
     os.environ["HW_FILTER_MODE"] = "cpu"
-    trials = [
-        await _run_trial(base_video, output_dir, workers)
-        for workers in (1, 2)
-    ]
-    one, two = trials
+
+    legacy = await _run_legacy_trial(base_video, output_dir)
+    one = await _run_video_only_trial(base_video, output_dir, 1)
+    two = await _run_video_only_trial(base_video, output_dir, 2)
     comparison = {
-        "elapsed_ratio_w2_vs_w1": round(two["elapsed_seconds"] / one["elapsed_seconds"], 6),
-        "subtitle_burn_ratio_w2_vs_w1": (
-            round(two["subtitle_burn_ms"] / one["subtitle_burn_ms"], 6)
-            if one["subtitle_burn_ms"] > 0
-            else None
+        "w1_vs_legacy_elapsed_ratio": round(
+            one["elapsed_seconds"] / legacy["elapsed_seconds"], 6
         ),
-        "ffmpeg_calls_equal": one["ffmpeg_calls"] == two["ffmpeg_calls"],
-        "worker2_faster": two["elapsed_seconds"] < one["elapsed_seconds"],
+        "w2_vs_legacy_elapsed_ratio": round(
+            two["elapsed_seconds"] / legacy["elapsed_seconds"], 6
+        ),
+        "w2_vs_w1_elapsed_ratio": round(
+            two["elapsed_seconds"] / one["elapsed_seconds"], 6
+        ),
+        "legacy_ffmpeg_calls": legacy["ffmpeg_calls"],
+        "worker1_ffmpeg_calls": one["ffmpeg_calls"],
+        "worker2_ffmpeg_calls": two["ffmpeg_calls"],
+        "worker2_faster_than_worker1": two["elapsed_seconds"] < one["elapsed_seconds"],
+        "worker2_faster_than_legacy": two["elapsed_seconds"] < legacy["elapsed_seconds"],
     }
     return {
         "schema_version": SCHEMA_VERSION,
         "duration_seconds": duration,
         "subtitle_count": len(_subtitles()),
         "chunk_size": 8,
-        "trials": trials,
+        "base_av": _probe_av(base_video),
+        "trials": [legacy, one, two],
         "comparison": comparison,
     }
 
