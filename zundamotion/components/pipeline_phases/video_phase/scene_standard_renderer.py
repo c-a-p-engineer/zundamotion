@@ -392,17 +392,5 @@ class SceneStandardRendererMixin:
                 )
             )
 
-        if (
-            scene_base_path
-            and scene_base_path.exists()
-            and self.cache_manager.cache_dir.resolve() not in scene_base_path.resolve().parents
-        ):
-            try:
-                scene_base_path.unlink()
-                logger.debug(
-                    f"Cleaned up temporary scene base video -> {scene_base_path.name}"
-                )
-            except Exception:
-                pass
-        pbar_scenes.update(1)
+        self._complete_scene_render(scene_base_path)
         return scene_results

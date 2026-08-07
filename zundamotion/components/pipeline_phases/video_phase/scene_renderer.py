@@ -17,6 +17,7 @@ from .badge_tracker import BadgeTracker
 from .scene_cache import SceneCacheMixin
 from .scene_assembly import SceneAssemblyMixin
 from .scene_result_cache import SceneResultCacheMixin
+from .scene_completion import SceneCompletionMixin
 from .scene_cache_latency import SceneCacheLatencyProxy
 from .scene_base_plan import SceneBasePlanMixin
 from .scene_base_renderer import SceneBaseRendererMixin
@@ -41,6 +42,7 @@ class SceneRenderer(
     SceneCacheMixin,
     SceneAssemblyMixin,
     SceneResultCacheMixin,
+    SceneCompletionMixin,
     SceneBasePlanMixin,
     SceneBaseRendererMixin,
     SceneLineContextMixin,
