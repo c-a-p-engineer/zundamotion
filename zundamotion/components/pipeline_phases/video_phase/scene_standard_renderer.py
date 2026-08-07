@@ -319,115 +319,38 @@ class SceneStandardRendererMixin:
             async with sem:
                 import time as _time
                 line_total_started = _time.perf_counter()
-                line_id = f"{scene_id}_{idx}"
-                line_data = line_data_map[line_id]
-                duration = line_data["duration"]
-                pre_dur = float(line_data.get("pre_duration", 0.0))
-                line_config = line_data["line_config"]
-                extra_audio_overlays = [
-                    item
-                    for item in (line_data.get("extra_audio_overlays") or [])
-                    if isinstance(item, dict)
-                ]
-                bg_layout = self._resolve_background_layout(line_config)
-                line_bg_image = self._resolve_background_source(line_config, bg_image)
-                if not line_bg_image:
-                    raise PipelineError(
-                        f"Background is not defined for scene '{scene_id}', line {idx}."
-                    )
-                line_is_bg_video = (
-                    Path(line_bg_image).suffix.lower() in self.video_extensions
+                context = self._build_scene_line_context(
+                    scene_id=scene_id,
+                    line_index=idx,
+                    line=line,
+                    scene_background=str(bg_image),
+                    scene_base_path=scene_base_path,
+                    normalized_background_path=normalized_bg_path,
+                    start_time_by_index=start_time_by_idx,
+                    run_bases=run_bases,
+                    image_layers_by_line=image_layers_by_line,
                 )
-                uses_scene_background = line_bg_image == bg_image
+                line_id = context.line_id
+                line_data = context.line_data
+                duration = context.duration
+                pre_dur = context.pre_duration
+                line_config = context.line_config
+                extra_audio_overlays = list(context.extra_audio_overlays)
+                bg_layout = context.background_layout
+                line_bg_image = context.background_source
+                line_is_bg_video = context.background_is_video
+                run_base = context.run_base
+                background_config = context.background_config
+                line_image_layers = list(context.image_layer_overlays)
 
-                # シーンベース or 連続ランのベースがあればそれを使用
-                run_base = self._find_run_base(run_bases, idx)
-                if (
-                    uses_scene_background
-                    and scene_base_path is not None
-                    and scene_base_path.exists()
-                ):
-                    background_config = {
-                        "type": "video",
-                        "path": str(scene_base_path),
-                        "start_time": start_time_by_idx[idx],
-                        "normalized": True,  # 正規化済み（ベース作成時）
-                        "pre_scaled": True,  # width/height/fps 済み
-                        "fit": bg_layout["fit"],
-                        "fill_color": bg_layout["fill_color"],
-                        "anchor": bg_layout["anchor"],
-                        "position": dict(bg_layout["position"]),
-                    }
-                elif (
-                    uses_scene_background
-                    and run_base is not None
-                    and run_base.path.exists()
-                ):
-                    background_config = {
-                        "type": "video",
-                        "path": str(run_base.path),
-                        "start_time": float(run_base.offsets[idx]),
-                        "normalized": True,
-                        "pre_scaled": True,
-                        "fit": bg_layout["fit"],
-                        "fill_color": bg_layout["fill_color"],
-                        "anchor": bg_layout["anchor"],
-                        "position": dict(bg_layout["position"]),
-                    }
-                else:
-                    # フォールバック（従来動作）: ベースなしで個別処理
-                    if line_is_bg_video:
-                        # シーン単位で正規化済みなら二重スケールを回避
-                        if uses_scene_background and normalized_bg_path is not None and Path(
-                            normalized_bg_path
-                        ).exists():
-                            background_config = {
-                                "type": "video",
-                                "path": str(normalized_bg_path),
-                                "start_time": start_time_by_idx[idx],
-                                "normalized": True,
-                                "pre_scaled": True,
-                                "fit": bg_layout["fit"],
-                                "fill_color": bg_layout["fill_color"],
-                                "anchor": bg_layout["anchor"],
-                                "position": dict(bg_layout["position"]),
-                            }
-                        else:
-                            background_config = {
-                                "type": "video",
-                                "path": str(line_bg_image),
-                                "start_time": start_time_by_idx[idx],
-                                "fit": bg_layout["fit"],
-                                "fill_color": bg_layout["fill_color"],
-                                "anchor": bg_layout["anchor"],
-                                "position": dict(bg_layout["position"]),
-                            }
-                    else:
-                        background_config = {
-                            "type": "image",
-                            "path": str(line_bg_image),
-                            "start_time": start_time_by_idx[idx],
-                            "fit": bg_layout["fit"],
-                            "fill_color": bg_layout["fill_color"],
-                            "anchor": bg_layout["anchor"],
-                            "position": dict(bg_layout["position"]),
-                        }
-
-                video_filter = line_config.get("video_filter") or self.scene.get(
-                    "video_filter"
-                )
-                if video_filter:
-                    background_config["video_filter"] = video_filter
-
-                if line_data["type"] == "image_layer":
+                if context.line_type == "image_layer":
                     results[idx - 1] = None
                     return
 
-                if line_data["type"] == "wait":
+                if context.line_type == "wait":
                     logger.debug(
                         f"Rendering wait clip for {duration}s (Scene '{scene_id}', Line {idx})"
                     )
-                    line_image_layers = image_layers_by_line.get(idx, [])
                     wait_cache_data = {
                         "type": "wait",
                         "duration": duration,
@@ -481,8 +404,8 @@ class SceneStandardRendererMixin:
                     return
 
                 # Talk step
-                text = line_data["text"]
-                audio_path = line_data["audio_path"]
+                text = context.text
+                audio_path = context.audio_path
                 logger.debug(
                     f"Rendering clip for line '{text[:30]}...' (Scene '{scene_id}', Line {idx})"
                 )
@@ -542,7 +465,6 @@ class SceneStandardRendererMixin:
                     face_anim_list = []
                 first_anim_meta = face_anim_list[0] if face_anim_list else {}
                 anim_meta = (first_anim_meta or {}).get("meta") or {}
-                line_image_layers = image_layers_by_line.get(idx, [])
                 video_cache_data = {
                     "type": "talk",
                     "clip_render_version": "20260330_face_overlay_args_v2",
