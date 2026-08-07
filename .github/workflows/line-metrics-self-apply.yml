@@ -1,5 +1,6 @@
 name: Line metrics self apply
 
+# retry: corrected validation after preserving unrelated perf_stats usage
 on:
   push:
     branches:
