@@ -20,16 +20,8 @@ def patch_standard_renderer() -> None:
     path = VIDEO_PHASE / "scene_standard_renderer.py"
     text = path.read_text(encoding="utf-8")
     text = replace_once(text, "import asyncio\n", "", label="asyncio import")
-    text = replace_once(
-        text,
-        "from ....utils import perf_stats\n",
-        "",
-        label="perf_stats import",
-    )
 
-    process_start = text.index(
-        "        async def process_one(\n"
-    )
+    process_start = text.index("        async def process_one(\n")
     metrics_start = text.index(
         "            total_ms = (\n",
         process_start,
@@ -61,8 +53,10 @@ def patch_standard_renderer() -> None:
         + text[aggregation_start:]
     )
 
-    if "perf_stats.record_line_clip" in text or "[AutoTune]" in text:
+    if "perf_stats.record_line_clip(\n" in text or "[AutoTune]" in text:
         raise RuntimeError("legacy inline line metrics or auto-tune remains")
+    if "perf_stats.record_line_clips_skipped_by_scene_cache" not in text:
+        raise RuntimeError("unrelated scene cache metric was removed")
     if len(text.splitlines()) >= 500:
         raise RuntimeError("scene_standard_renderer.py did not shrink below 500 lines")
     path.write_text(text, encoding="utf-8")
