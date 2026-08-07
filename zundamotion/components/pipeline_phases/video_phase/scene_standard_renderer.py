@@ -5,7 +5,6 @@ This module is an internal SceneRenderer mixin; use scene_renderer.SceneRenderer
 
 from __future__ import annotations
 
-import asyncio
 import json
 import subprocess
 import time as _time
@@ -353,79 +352,13 @@ class SceneStandardRendererMixin:
                 static_insert_in_base=static_insert_in_base,
             )
             clip_path = render_outcome.path
-            total_ms = (
-                render_outcome.finished_at - line_total_started
-            ) * 1000.0
-            cache_status = render_outcome.cache_status
-            cache_lookup_ms = render_outcome.cache_lookup_ms
-            cache_store_ms = render_outcome.cache_store_ms
-            render_ms = render_outcome.render_ms
-            prepare_ms = max(
-                0.0,
-                (
-                    render_outcome.cache_started_at - line_total_started
-                )
-                * 1000.0,
+            self._record_talk_line_metrics(
+                scene_id=scene_id,
+                context=context,
+                plan=talk_plan,
+                outcome=render_outcome,
+                line_total_started=line_total_started,
             )
-            has_subtitle = talk_plan.has_subtitle
-            any_chars = talk_plan.has_visible_characters
-            insert_is_image = talk_plan.insert_is_image
-            has_move = talk_plan.has_move
-            has_effect = talk_plan.has_effect
-            face_anim_list = list(talk_plan.face_animations)
-            # Collect lightweight samples for auto-tune
-            if (
-                self.phase.auto_tune_enabled
-                and not getattr(self.phase, "parallel_scene_rendering", False)
-                and len(self.phase._profile_samples) < self.phase.profile_limit
-            ):
-                self.phase._profile_samples.append(
-                    {
-                        "cpu_overlay": has_subtitle or any_chars or insert_is_image,
-                        "elapsed": total_ms / 1000.0,
-                    }
-                )
-            try:
-                task = asyncio.current_task()
-                worker_id = task.get_name() if task is not None else "async-main"
-                perf_stats.record_line_clip(
-                    {
-                        "scene_id": scene_id,
-                        "line_index": idx,
-                        "clip_id": line_id,
-                        "duration_ms": total_ms,
-                        "cache_status": cache_status,
-                        "worker_id": worker_id,
-                        "render_path": str(clip_path),
-                        "has_subtitle": has_subtitle,
-                        "has_face_overlay": bool(face_anim_list),
-                        "has_move": has_move,
-                        "has_effect": has_effect,
-                        "cache_lookup_ms": cache_lookup_ms,
-                        "render_ms": render_ms,
-                        "prepare_ms": prepare_ms,
-                        "cache_store_ms": cache_store_ms,
-                    }
-                )
-                self.phase._clip_samples_all.append(
-                    {
-                        "scene": scene_id,
-                        "line": idx,
-                        "elapsed": total_ms / 1000.0,
-                        "subtitle": has_subtitle,
-                        "chars": any_chars,
-                        "insert_img": insert_is_image,
-                        "is_bg_video": line_is_bg_video,
-                        "cache": cache_status,
-                    }
-                )
-            except Exception as measurement_error:
-                logger.warning(
-                    "Failed to record line clip performance scene=%s line=%s: %s",
-                    scene_id,
-                    idx,
-                    measurement_error,
-                )
             return clip_path
 
         results = await self._execute_scene_lines(
@@ -435,103 +368,7 @@ class SceneStandardRendererMixin:
             scene_id=scene_id,
         )
 
-        # After first scene (or once enough samples), auto-tune for subsequent scenes
-        if (
-            self.phase.auto_tune_enabled
-            and not getattr(self.phase, "parallel_scene_rendering", False)
-            and not self.phase._retuned
-            and len(self.phase._profile_samples) >= self.phase.profile_limit
-        ):
-            try:
-                cpu_ratio = (
-                    sum(1 for s in self.phase._profile_samples if s.get("cpu_overlay"))
-                    / float(len(self.phase._profile_samples) or 1)
-                )
-                import os as _os
-                # Basic throughput stats on the profiled clips
-                try:
-                    elapsed_vals = [
-                        float(s.get("elapsed", 0.0))
-                        for s in self.phase._profile_samples
-                    ]
-                    elapsed_vals = [v for v in elapsed_vals if v > 0]
-                    elapsed_vals.sort()
-                    avg_elapsed = sum(elapsed_vals) / float(len(elapsed_vals) or 1)
-                    p90_elapsed = elapsed_vals[int(0.9 * (len(elapsed_vals) - 1))] if elapsed_vals else 0.0
-                except Exception:
-                    avg_elapsed = 0.0
-                    p90_elapsed = 0.0
-                # Be conservative on CPU overlays
-                if cpu_ratio >= 0.5:
-                    # Tighten filter caps and lower concurrency
-                    _os.environ.setdefault("FFMPEG_FILTER_THREADS_CAP", "2")
-                    _os.environ.setdefault(
-                        "FFMPEG_FILTER_COMPLEX_THREADS_CAP", "2"
-                    )
-                    # CPU overlay 優勢時はGPUフィルタを全体でオフにしてスレッド最適化を適用
-                    try:
-                        set_hw_filter_mode("cpu")
-                        logger.info(
-                            "[AutoTune] Set HW filter mode to 'cpu' due to CPU overlay dominance."
-                        )
-                    except Exception:
-                        pass
-                    # Explore a slightly higher worker count on larger CPUs
-                    prev_workers = self.phase.clip_workers
-                    cpu_cnt = _os.cpu_count() or 8
-                    target_workers = 2
-                    if cpu_cnt >= 16 and cpu_ratio >= 0.8:
-                        target_workers = 4
-                    elif cpu_cnt >= 12 and cpu_ratio >= 0.6:
-                        target_workers = 3
-                    # Keep within CPU count
-                    target_workers = max(1, min(target_workers, cpu_cnt))
-                    # Apply the decided target
-                    self.phase.clip_workers = target_workers
-                    # Propagate new concurrency to the renderer for consistent thread logging
-                    try:
-                        self.video_renderer.clip_workers = self.phase.clip_workers
-                    except Exception:
-                        pass
-                    logger.info(
-                        "[AutoTune] cpu_ratio=%.2f avg=%.2fs p90=%.2fs -> caps(ft,fct)=2, clip_workers %s -> %s",
-                        cpu_ratio,
-                        avg_elapsed,
-                        p90_elapsed,
-                        prev_workers,
-                        self.phase.clip_workers,
-                    )
-                else:
-                    logger.info(
-                        "[AutoTune] cpu_ratio=%.2f avg=%.2fs p90=%.2fs -> keeping current concurrency",
-                        cpu_ratio,
-                        avg_elapsed,
-                        p90_elapsed,
-                    )
-                # Disable profiling overhead after retune
-                _os.environ["FFMPEG_PROFILE_MODE"] = "0"
-                self.phase._retuned = True
-                # Persist hint for next runs
-                try:
-                    import json as _json
-                    from zundamotion.utils.ffmpeg_capabilities import get_ffmpeg_version
-                    hint = {
-                        "cpu_ratio": cpu_ratio,
-                        "decided_mode": "cpu" if cpu_ratio >= 0.5 else "auto",
-                        "clip_workers": self.phase.clip_workers,
-                        "avg_elapsed": avg_elapsed,
-                        "p90_elapsed": p90_elapsed,
-                        "ffmpeg": await get_ffmpeg_version(),
-                        "hw_kind": self.hw_kind,
-                    }
-                    hint_path = self.cache_manager.cache_dir / "autotune_hint.json"
-                    with open(hint_path, "w", encoding="utf-8") as f:
-                        _json.dump(hint, f, ensure_ascii=False)
-                    logger.info("[AutoTune] Saved hint to %s", hint_path)
-                except Exception:
-                    pass
-            except Exception:
-                pass
+        await self._maybe_retune_line_workers()
 
         # 順序維持で集約
         scene_line_clips: List[Path] = [p for p in results if p is not None]

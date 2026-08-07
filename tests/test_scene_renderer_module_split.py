@@ -12,6 +12,8 @@ def test_scene_renderer_public_facade_keeps_internal_responsibilities() -> None:
         "_prepare_scene_base": "scene_base_renderer",
         "_build_scene_line_context": "scene_line_context",
         "_execute_scene_lines": "scene_line_executor",
+        "_record_talk_line_metrics": "scene_line_metrics",
+        "_maybe_retune_line_workers": "scene_line_metrics",
         "_render_wait_line": "scene_wait_renderer",
         "_build_scene_talk_plan": "scene_talk_plan",
         "_render_talk_line": "scene_talk_renderer",
