@@ -1,0 +1,47 @@
+meta:
+  title: "CPU scene fast path benchmark"
+  version: 1
+
+video:
+  width: 320
+  height: 180
+  fps: 10
+
+subtitle:
+  render_mode: ass
+
+background:
+  default: assets/bg/default.png
+
+defaults:
+  characters_persist: false
+  background_persist: false
+  characters:
+    copetan:
+      speaker_id: 3
+      scale: 0.20
+      anchor: bottom_center
+      position: {x: -70, y: 0}
+
+scenes:
+  - id: cpu_fast_path_benchmark
+    bg: assets/bg/default.png
+    lines:
+      - text: "cpu fast path benchmark"
+        speaker_name: copetan
+        duration: 1.2
+        characters:
+          - name: copetan
+            expression: default
+            visible: true
+            scale: 0.20
+            anchor: bottom_center
+            position: {x: -70, y: 0}
+      - wait: 0.6
+        characters:
+          - name: copetan
+            expression: default
+            visible: true
+            scale: 0.20
+            anchor: bottom_center
+            position: {x: -70, y: 0}
