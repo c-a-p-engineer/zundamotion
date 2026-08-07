@@ -21,6 +21,7 @@ from .scene_completion import SceneCompletionMixin
 from .scene_cache_latency import SceneCacheLatencyProxy
 from .scene_base_plan import SceneBasePlanMixin
 from .scene_base_renderer import SceneBaseRendererMixin
+from .scene_fast_path_character import SceneFastPathCharacterMixin
 from .scene_fast_path_eligibility import SceneFastPathEligibilityMixin
 from .scene_fast_path import SceneFastPathMixin
 from .scene_line_context import SceneLineContextMixin
@@ -42,6 +43,7 @@ from .character_render_state import SCENE_STATE_RESOLUTION_VERSION
 
 class SceneRenderer(
     ScenePreparationMixin,
+    SceneFastPathCharacterMixin,
     SceneFastPathEligibilityMixin,
     SceneFastPathMixin,
     SceneCacheMixin,
