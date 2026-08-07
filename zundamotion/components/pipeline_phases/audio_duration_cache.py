@@ -52,9 +52,19 @@ class AudioDurationCacheProxy:
                     caller or "unknown",
                     exc,
                 )
-        return float(
-            await self._cache_manager.get_or_create_media_duration(
-                path,
-                caller=caller,
+
+        delegate = self._cache_manager.get_or_create_media_duration
+        if caller is None:
+            return float(await delegate(path))
+
+        try:
+            return float(await delegate(path, caller=caller))
+        except TypeError as exc:
+            message = str(exc)
+            if "unexpected keyword argument" not in message or "caller" not in message:
+                raise
+            logger.debug(
+                "[AudioDuration] Delegate does not accept caller; retrying without it file=%s",
+                path.name,
             )
-        )
+            return float(await delegate(path))
