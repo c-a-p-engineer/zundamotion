@@ -22,6 +22,7 @@ class SceneLineContext:
     duration: float
     pre_duration: float
     post_duration: float
+    scene_start_time: float
     line_config: Dict[str, Any]
     text: str
     audio_path: Any
@@ -56,6 +57,7 @@ class SceneLineContextMixin:
         duration = line_data["duration"]
         pre_duration = float(line_data.get("pre_duration", 0.0))
         post_duration = float(line_data.get("post_duration", 0.0))
+        scene_start_time = float(start_time_by_index[line_index])
         line_config = line_data["line_config"]
         background_layout = self._resolve_background_layout(line_config)
         background_source = self._resolve_background_source(
@@ -105,6 +107,7 @@ class SceneLineContextMixin:
             duration=duration,
             pre_duration=pre_duration,
             post_duration=post_duration,
+            scene_start_time=scene_start_time,
             line_config=line_config,
             text=str(line_data.get("text") or ""),
             audio_path=line_data.get("audio_path"),
