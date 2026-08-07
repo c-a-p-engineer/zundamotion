@@ -104,17 +104,16 @@ class SceneFastPathPlanMixin:
                 current_char_state = char_state
                 current_char_start = line_start
 
+            audio_path = Path(str(line_data["audio_path"]))
             pre_dur = float(line_data.get("pre_duration", 0.0))
-            if str(line_data.get("type") or "") == "talk":
-                audio_path = Path(str(line_data["audio_path"]))
-                adelay_ms = max(0, int(round((line_start + pre_dur) * 1000)))
-                audio_specs.append(
-                    {
-                        "path": audio_path,
-                        "delay_ms": adelay_ms,
-                        "line_idx": idx,
-                    }
-                )
+            adelay_ms = max(0, int(round((line_start + pre_dur) * 1000)))
+            audio_specs.append(
+                {
+                    "path": audio_path,
+                    "delay_ms": adelay_ms,
+                    "line_idx": idx,
+                }
+            )
 
             face_anim_raw = line_data.get("face_anim")
             face_anims = (
