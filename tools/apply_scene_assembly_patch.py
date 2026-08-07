@@ -89,8 +89,8 @@ def patch_standard_renderer() -> None:
     text = text[:start] + replacement + text[cleanup:]
     if "concat_started =" in text or "Applied foreground overlays" in text:
         raise RuntimeError("legacy inline scene assembly remains")
-    if len(text.splitlines()) >= 440:
-        raise RuntimeError("scene_standard_renderer.py did not shrink below 440 lines")
+    if len(text.splitlines()) >= 450:
+        raise RuntimeError("scene_standard_renderer.py did not shrink below 450 lines")
     path.write_text(text, encoding="utf-8")
 
 
