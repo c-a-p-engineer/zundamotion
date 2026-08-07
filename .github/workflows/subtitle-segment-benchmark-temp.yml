@@ -1,11 +1,11 @@
 name: Subtitle segment worker benchmark temp
 
 on:
-  push:
-    branches:
-      - refactor/issue-40-subtitle-executor
+  pull_request:
     paths:
       - .github/workflows/subtitle-segment-benchmark-temp.yml
+      - tools/subtitle_segment_worker_benchmark.py
+      - zundamotion/components/video/**
 
 jobs:
   benchmark:
@@ -18,8 +18,6 @@ jobs:
       USE_RAMDISK: "0"
     steps:
       - uses: actions/checkout@v5
-        with:
-          ref: refactor/issue-40-subtitle-executor
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
