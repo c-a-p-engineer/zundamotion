@@ -58,6 +58,7 @@ def test_final_mux_maps_video_and_original_audio_once(monkeypatch) -> None:
     assert cmd[cmd.index("-c:v") + 1] == "copy"
     assert cmd[cmd.index("-t") + 1] == "12.500000"
     assert "-shortest" not in cmd
+    assert "-avoid_negative_ts" not in cmd
     assert captured["context"] == {
         "phase": "VideoPhase",
         "operation": "subtitle_final_audio_mux",
@@ -107,5 +108,5 @@ def test_final_mux_uses_optional_audio_map_for_silent_sources(monkeypatch) -> No
     cmd = captured["cmd"]
     assert "1:a?" in cmd
     assert "-an" not in cmd
-    assert cmd[cmd.index("-avoid_negative_ts") + 1] == "make_zero"
+    assert "-avoid_negative_ts" not in cmd
     assert cmd[cmd.index("-movflags") + 1] == "+faststart"
