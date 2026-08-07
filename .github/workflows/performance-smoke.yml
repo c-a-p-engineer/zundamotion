@@ -7,8 +7,10 @@ on:
       - ".github/workflows/performance-smoke.yml"
       - ".devcontainer/runtime.lock.json"
       - "tools/zundamotion_cold_warm_benchmark.py"
+      - "tools/cpu_scene_fast_path_benchmark.py"
       - "tests/test_cold_warm_benchmark.py"
       - "scripts/smoke_minimal.yaml"
+      - "scripts/benchmark_cpu_scene_fast_path.yaml"
       - "zundamotion/**"
 
 jobs:
@@ -65,13 +67,21 @@ jobs:
             --jobs 1 \
             --no-voice
 
-      - name: Upload cold-warm benchmark
+      - name: Compare CPU standard and simple fast path
+        run: |
+          python tools/cpu_scene_fast_path_benchmark.py \
+            --script scripts/benchmark_cpu_scene_fast_path.yaml \
+            --output-dir output/benchmarks/cpu-scene-fast-path-ci \
+            --runs 3
+
+      - name: Upload performance benchmarks
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: cold-warm-python-${{ env.PYTHON_VERSION }}
+          name: performance-python-${{ env.PYTHON_VERSION }}
           if-no-files-found: error
           retention-days: 14
           path: |
             output/benchmarks/cold-warm-ci/**
+            output/benchmarks/cpu-scene-fast-path-ci/**
             output/perf/perf_summary*.json
