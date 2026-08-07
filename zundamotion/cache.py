@@ -7,6 +7,9 @@ are composed as explicit responsibilities here.
 
 from __future__ import annotations
 
+import inspect
+from pathlib import Path
+
 from .cache_base import (
     _CACHE_KEY_PATH_FIELDS,
     _IMAGE_CACHE_KEY_SUFFIXES,
@@ -32,6 +35,39 @@ class CacheManager(
     _RuntimeCacheManager,
 ):
     """Compatibility facade for the modular cache implementation."""
+
+    @staticmethod
+    def _infer_probe_caller() -> str:
+        internal_suffixes = (
+            ".cache",
+            ".cache_base",
+            ".cache_runtime",
+            ".cache_media",
+            ".ffmpeg_probe",
+        )
+        for frame in inspect.stack()[2:]:
+            module = inspect.getmodule(frame.frame)
+            module_name = getattr(module, "__name__", "")
+            if module_name.endswith(internal_suffixes):
+                continue
+            return str(frame.function)
+        return "unknown"
+
+    def _record_probe_cache_hit(
+        self,
+        *,
+        file_path: Path,
+        path: Path,
+        caller: str,
+        kind: str,
+    ) -> None:
+        metric_kind = "stream" if kind == "media_info" else kind
+        super()._record_probe_cache_hit(
+            file_path=file_path,
+            path=path,
+            caller=caller,
+            kind=metric_kind,
+        )
 
 
 __all__ = [
