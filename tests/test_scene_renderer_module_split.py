@@ -22,6 +22,12 @@ def test_scene_renderer_public_facade_keeps_internal_responsibilities() -> None:
         "_render_talk_line": "scene_talk_renderer",
         "_prepare_run_bases": "scene_run_base_renderer",
         "_build_scene_timing_plan": "scene_timing",
+        "_prepare_standard_scene_context": "scene_standard_context",
+        "_resolve_standard_scene_cache": "scene_standard_context",
+        "_try_standard_scene_fast_path": "scene_standard_context",
+        "_precache_standard_scene_assets": "scene_precache",
+        "_prepare_standard_scene_layers": "scene_line_pipeline",
+        "_render_standard_scene_lines": "scene_line_pipeline",
         "_render_scene_internal": "scene_standard_renderer",
     }
 
