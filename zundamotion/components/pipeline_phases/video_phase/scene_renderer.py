@@ -21,7 +21,7 @@ from .scene_base_renderer import SceneBaseRendererMixin
 from .scene_fast_path import SceneFastPathMixin
 from .scene_preparation import ScenePreparationMixin
 from .scene_run_base_plan import SceneRunBasePlanMixin
-from .scene_run_base_safety import SceneRunBaseSafetyMixin
+from .scene_run_base_renderer import SceneRunBaseRendererMixin
 from .scene_standard_renderer import SceneStandardRendererMixin
 from .scene_timing import SceneTimingMixin
 from .character_render_state import SCENE_STATE_RESOLUTION_VERSION
@@ -34,8 +34,8 @@ class SceneRenderer(
     SceneBasePlanMixin,
     SceneBaseRendererMixin,
     SceneRunBasePlanMixin,
+    SceneRunBaseRendererMixin,
     SceneTimingMixin,
-    SceneRunBaseSafetyMixin,
     SceneStandardRendererMixin,
 ):
     """Initialize scene context and coordinate the selected render path."""
@@ -232,13 +232,9 @@ class SceneRenderer(
                 f"Scene Rendering (Scene {self.scene_idx + 1}/{self.total_scenes}: '{scene_id}')"
             )
 
-        effective_scene_cp = self._effective_scene_copy_for_run_base_safety(
-            scene,
-            scene_cp,
-        )
         return await self._render_scene_internal(
             scene,
-            effective_scene_cp,
+            scene_cp,
             bg_default,
             scene_hash_data,
         )
