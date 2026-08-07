@@ -19,6 +19,13 @@ from ...utils.logger import logger
 from ...utils import perf_stats
 from .overlay_effects import resolve_overlay_effects
 from .threading import build_ffmpeg_thread_flags
+from .subtitle_segment_plan import (
+    SubtitleRangePlan,
+    build_subtitle_segment_plan,
+    merge_subtitle_ranges as plan_merge_subtitle_ranges,
+    should_use_subtitle_segment_mode as plan_should_use_segment_mode,
+    split_subtitle_ranges_for_png as plan_split_subtitle_ranges_for_png,
+)
 
 
 async def _run_ffmpeg(cmd: List[str], context: Optional[Dict[str, Any]] = None) -> None:
@@ -47,15 +54,21 @@ class OverlayMixin:
         base_duration: float,
         gap_threshold: float,
     ) -> bool:
-        """十分なcopy対象gapか複数chunkがある場合だけsegment経路を使う。"""
-        if not ranges:
-            return False
-        if len(ranges) > 1:
-            return True
-        edge_threshold = max(float(gap_threshold), self._min_exact_segment_duration())
-        leading_gap = max(0.0, float(ranges[0]["start"]))
-        trailing_gap = max(0.0, float(base_duration) - float(ranges[-1]["end"]))
-        return leading_gap >= edge_threshold or trailing_gap >= edge_threshold
+        """Compatibility wrapper around the pure segment-mode decision."""
+        planned_ranges = tuple(
+            SubtitleRangePlan(
+                start=float(item["start"]),
+                end=float(item["end"]),
+                subtitles=tuple(dict(sub) for sub in item.get("subtitles", [])),
+            )
+            for item in ranges
+        )
+        return plan_should_use_segment_mode(
+            planned_ranges,
+            base_duration=base_duration,
+            gap_threshold=gap_threshold,
+            min_exact_segment_duration=self._min_exact_segment_duration(),
+        )
 
     def _max_cuda_subtitle_overlays(self) -> int:
         video_cfg = getattr(self, "video_config", {}) or {}
@@ -263,24 +276,15 @@ class OverlayMixin:
         base_duration: Optional[float],
         gap_threshold: float = 0.20,
     ) -> List[Dict[str, Any]]:
-        ranges: List[Dict[str, Any]] = []
-        for sub in subtitles:
-            try:
-                start = max(0.0, float(sub.get("start", 0.0)))
-                duration = max(0.0, float(sub.get("duration", 0.0)))
-            except Exception:
-                continue
-            end = start + duration
-            if base_duration is not None:
-                end = min(float(base_duration), end)
-            if end <= start:
-                continue
-            if ranges and start <= ranges[-1]["end"] + gap_threshold:
-                ranges[-1]["end"] = max(ranges[-1]["end"], end)
-                ranges[-1]["subtitles"].append(sub)
-            else:
-                ranges.append({"start": start, "end": end, "subtitles": [sub]})
-        return ranges
+        """Compatibility wrapper around pure range merging."""
+        return [
+            item.to_legacy_dict()
+            for item in plan_merge_subtitle_ranges(
+                subtitles,
+                base_duration=base_duration,
+                gap_threshold=gap_threshold,
+            )
+        ]
 
     @classmethod
     def _split_subtitle_ranges_for_png(
@@ -291,64 +295,16 @@ class OverlayMixin:
         gap_threshold: float = 0.20,
         max_subtitles: int = 12,
     ) -> List[Dict[str, Any]]:
-        ranges = cls._merge_subtitle_ranges(
-            subtitles,
-            base_duration=base_duration,
-            gap_threshold=gap_threshold,
-        )
-        if max_subtitles <= 0:
-            max_subtitles = 12
-
-        chunks: List[Dict[str, Any]] = []
-        for item in ranges:
-            current_subs: List[Dict[str, Any]] = []
-            current_start: Optional[float] = None
-            current_end = 0.0
-            for sub in item["subtitles"]:
-                try:
-                    start = max(0.0, float(sub.get("start", 0.0)))
-                    duration = max(0.0, float(sub.get("duration", 0.0)))
-                except Exception:
-                    continue
-                end = start + duration
-                if base_duration is not None:
-                    end = min(float(base_duration), end)
-                if end <= start:
-                    continue
-
-                can_split = (
-                    current_subs
-                    and len(current_subs) >= max_subtitles
-                    and start >= current_end - 0.001
-                )
-                if can_split:
-                    chunks.append(
-                        {
-                            "start": float(current_start or 0.0),
-                            "end": current_end,
-                            "subtitles": current_subs,
-                        }
-                    )
-                    current_subs = []
-                    current_start = None
-                    current_end = 0.0
-
-                if not current_subs:
-                    current_start = start
-                    current_end = end
-                else:
-                    current_end = max(current_end, end)
-                current_subs.append(sub)
-
-            if current_subs:
-                chunks.append(
-                    {
-                        "start": float(current_start or 0.0),
-                        "end": current_end,
-                        "subtitles": current_subs,
-                    }
-                )
-        return chunks
+        """Compatibility wrapper around pure PNG chunk planning."""
+        return [
+            item.to_legacy_dict()
+            for item in plan_split_subtitle_ranges_for_png(
+                subtitles,
+                base_duration=base_duration,
+                gap_threshold=gap_threshold,
+                max_subtitles=max_subtitles,
+            )
+        ]
 
     async def _cut_video_segment_exact(
         self,
@@ -798,12 +754,26 @@ class OverlayMixin:
                 base_duration=float(base_dur),
             )
             self.subtitle_overlay_stats["png_chunk_size"] = png_chunk_size
-            ranges = self._split_subtitle_ranges_for_png(
+            segment_plan = build_subtitle_segment_plan(
                 subtitles,
                 base_duration=float(base_dur),
                 gap_threshold=gap_threshold,
                 max_subtitles=png_chunk_size,
+                min_exact_segment_duration=self._min_exact_segment_duration(),
             )
+            if segment_plan.absorbed_leading_gap > 0.0:
+                logger.info(
+                    "[SubtitleGap] absorbed leading edge duration=%.3f threshold=%.3f",
+                    segment_plan.absorbed_leading_gap,
+                    self._min_exact_segment_duration(),
+                )
+            if segment_plan.absorbed_trailing_gap > 0.0:
+                logger.info(
+                    "[SubtitleGap] absorbed tail edge duration=%.3f threshold=%.3f",
+                    segment_plan.absorbed_trailing_gap,
+                    self._min_exact_segment_duration(),
+                )
+            ranges = segment_plan.to_legacy_ranges()
             self.subtitle_overlay_stats["chunks"] = len(ranges or [])
             timing_stats = self._subtitle_timing_stats(subtitles, float(base_dur))
             logger.info(
@@ -815,11 +785,7 @@ class OverlayMixin:
                 timing_stats["gap_duration"],
                 timing_stats["longest_zone"],
             )
-            if self._should_use_subtitle_segment_mode(
-                ranges,
-                base_duration=float(base_dur),
-                gap_threshold=gap_threshold,
-            ):
+            if segment_plan.use_segment_mode:
                 perf_stats.incr("subtitle_chunks", len(ranges))
                 logger.info(
                     "[SubtitleOverlay] Segment mode: re-encoding %d subtitle chunk(s), copying gaps (base=%.2fs, subtitles=%d, png_chunk_size=%d)",

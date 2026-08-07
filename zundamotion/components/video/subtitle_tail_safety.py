@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ...utils.logger import logger
+from .subtitle_segment_plan import (
+    SubtitleRangePlan,
+    absorb_unrenderable_edge_gaps,
+)
 
 
 MIN_SAFE_EXACT_SEGMENT_FRAMES = 4.0
@@ -38,24 +42,39 @@ class SubtitleTailSafetyMixin:
         *,
         base_duration: float,
     ) -> List[Dict[str, Any]]:
-        """Mutate range edges so short edge gaps are never exact-cut."""
+        """Apply the pure edge plan back to the legacy mutable range list."""
         if not ranges:
             return ranges
 
+        planned = tuple(
+            SubtitleRangePlan(
+                start=float(item.get("start", 0.0) or 0.0),
+                end=float(item.get("end", 0.0) or 0.0),
+                subtitles=tuple(
+                    dict(subtitle)
+                    for subtitle in item.get("subtitles", [])
+                    if isinstance(subtitle, dict)
+                ),
+            )
+            for item in ranges
+        )
+        adjusted, leading_gap, trailing_gap = absorb_unrenderable_edge_gaps(
+            planned,
+            base_duration=base_duration,
+            min_exact_segment_duration=self._min_exact_segment_duration(),
+        )
+        for target, item in zip(ranges, adjusted):
+            target["start"] = item.start
+            target["end"] = item.end
+
         threshold = self._min_exact_segment_duration()
-        first_start = max(0.0, float(ranges[0].get("start", 0.0) or 0.0))
-        if 0.0 < first_start <= threshold:
-            ranges[0]["start"] = 0.0
+        if leading_gap > 0.0:
             logger.info(
                 "[SubtitleGap] absorbed leading edge duration=%.3f threshold=%.3f",
-                first_start,
+                leading_gap,
                 threshold,
             )
-
-        last_end = max(0.0, float(ranges[-1].get("end", 0.0) or 0.0))
-        trailing_gap = max(0.0, float(base_duration) - last_end)
-        if 0.0 < trailing_gap <= threshold:
-            ranges[-1]["end"] = float(base_duration)
+        if trailing_gap > 0.0:
             logger.info(
                 "[SubtitleGap] absorbed tail edge duration=%.3f threshold=%.3f",
                 trailing_gap,
