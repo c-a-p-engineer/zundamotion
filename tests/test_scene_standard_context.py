@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -6,7 +7,6 @@ import pytest
 from zundamotion.exceptions import PipelineError
 from zundamotion.components.pipeline_phases.video_phase.scene_standard_context import (
     SceneStandardContextMixin,
-    StandardSceneContext,
 )
 
 
@@ -89,8 +89,7 @@ def test_prepare_standard_context_rejects_missing_background() -> None:
         )
 
 
-@pytest.mark.asyncio
-async def test_disabled_base_cache_records_event_without_lookup() -> None:
+def test_disabled_base_cache_records_event_without_lookup() -> None:
     harness = _Harness()
     context = harness._prepare_standard_scene_context(
         scene={"id": "scene-a", "bg": "background.png", "lines": []},
@@ -99,15 +98,14 @@ async def test_disabled_base_cache_records_event_without_lookup() -> None:
         scene_hash_data={},
     )
 
-    result = await harness._resolve_standard_scene_cache(context)
+    result = asyncio.run(harness._resolve_standard_scene_cache(context))
 
     assert result is None
     assert harness.calls[0][0] == "cache_event"
     assert harness.calls[0][1]["status"] == "DISABLED"
 
 
-@pytest.mark.asyncio
-async def test_fast_path_success_completes_and_returns_single_result() -> None:
+def test_fast_path_success_completes_and_returns_single_result() -> None:
     harness = _Harness()
     context = harness._prepare_standard_scene_context(
         scene={"id": "scene-a", "bg": "background.png", "lines": []},
@@ -116,7 +114,7 @@ async def test_fast_path_success_completes_and_returns_single_result() -> None:
         scene_hash_data={},
     )
 
-    result = await harness._try_standard_scene_fast_path(context)
+    result = asyncio.run(harness._try_standard_scene_fast_path(context))
 
     assert result == [Path("fast.mp4")]
     assert harness.calls[-1] == ("complete", None)
