@@ -378,57 +378,19 @@ class SceneStandardRendererMixin:
             subtitle_entries=subtitle_entries,
         )
         if assembly is not None:
-            scene_output_no_sub_path = assembly.no_sub_path
-            scene_output_path = assembly.final_path
-            if cache_scene_base_video:
-                self.cache_manager.cache_file(
-                    source_path=scene_output_no_sub_path,
-                    key_data=scene_base_hash_data,
-                    file_name=f"scene_{scene_id}_base",
-                    extension="mp4",
+            scene_results.append(
+                self._store_scene_result_cache(
+                    scene_id=scene_id,
+                    assembly=assembly,
+                    cache_scene_base_video=cache_scene_base_video,
+                    subtitle_entries=subtitle_entries,
+                    generate_no_sub_video=generate_no_sub_video,
+                    scene_hash_data=scene_hash_data,
+                    scene_base_hash_data=scene_base_hash_data,
+                    scene_sub_hash_data=scene_sub_hash_data,
+                    subtitle_timing_key=subtitle_timing_key,
                 )
-                logger.info(
-                    "[SceneCache] scene=%s layer=base STORE key=%s subtitle_timing_key=%s file_name=scene_%s_base.mp4",
-                    scene_id,
-                    self._cache_key_short(scene_base_hash_data),
-                    subtitle_timing_key,
-                    scene_id,
-                )
-            if subtitle_entries:
-                self.cache_manager.cache_file(
-                    source_path=scene_output_path,
-                    key_data=scene_sub_hash_data,
-                    file_name=f"scene_{scene_id}_sub",
-                    extension="mp4",
-                )
-                logger.info(
-                    "[SceneCache] scene=%s layer=sub STORE key=%s subtitle_timing_key=%s subtitles=%d",
-                    scene_id,
-                    self._cache_key_short(scene_sub_hash_data),
-                    subtitle_timing_key,
-                    len(subtitle_entries),
-                )
-                if generate_no_sub_video:
-                    self.cache_manager.cache_file(
-                        source_path=scene_output_no_sub_path,
-                        key_data=scene_hash_data,
-                        file_name=f"scene_{scene_id}",
-                        extension="mp4",
-                    )
-                    self.cache_manager.cache_file(
-                        source_path=scene_output_path,
-                        key_data=scene_hash_data,
-                        file_name=f"scene_{scene_id}_sub",
-                        extension="mp4",
-                    )
-            else:
-                self.cache_manager.cache_file(
-                    source_path=scene_output_path,
-                    key_data=scene_hash_data,
-                    file_name=f"scene_{scene_id}",
-                    extension="mp4",
-                )
-            scene_results.append(scene_output_path)
+            )
 
         if (
             scene_base_path
