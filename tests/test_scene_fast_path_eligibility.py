@@ -4,6 +4,7 @@ from zundamotion.components.pipeline_phases.video_phase.scene_fast_path_eligibil
     FastPathEligibility,
     FastPathLineEligibility,
     SceneFastPathEligibilityMixin,
+    evaluate_cpu_fast_path_eligibility,
     evaluate_fast_path_eligibility,
 )
 
@@ -21,6 +22,9 @@ def _line(**overrides) -> FastPathLineEligibility:
         "background_is_video": False,
         "has_start_time": True,
         "character_error": None,
+        "background_matches_scene": True,
+        "character_signature": ("copetan", "default", "asset", 1.0),
+        "has_character_motion": False,
     }
     values.update(overrides)
     return FastPathLineEligibility(**values)
@@ -64,7 +68,61 @@ def test_fast_path_eligibility_keeps_first_line_failure_reason() -> None:
     assert evaluate_fast_path_eligibility(facts) == (False, "effects:2")
 
 
-def test_cpu_short_circuit_does_not_resolve_character_assets() -> None:
+def test_cpu_fast_path_accepts_static_talk_and_wait_with_same_character() -> None:
+    signature = ("copetan", "default", "asset", 1.0)
+    facts = _facts(
+        has_hw_encoder=False,
+        lines=(
+            _line(index=1, line_type="talk", character_signature=signature),
+            _line(index=2, line_type="wait", character_signature=signature),
+        ),
+    )
+
+    assert evaluate_cpu_fast_path_eligibility(facts) == (
+        True,
+        "ok_cpu_experimental",
+    )
+
+
+def test_cpu_fast_path_rejects_character_motion() -> None:
+    facts = _facts(
+        has_hw_encoder=False,
+        lines=(_line(has_character_motion=True),),
+    )
+    assert evaluate_cpu_fast_path_eligibility(facts) == (
+        False,
+        "character_motion:1",
+    )
+
+
+def test_cpu_fast_path_rejects_background_change() -> None:
+    facts = _facts(
+        has_hw_encoder=False,
+        lines=(_line(background_matches_scene=False),),
+    )
+    assert evaluate_cpu_fast_path_eligibility(facts) == (
+        False,
+        "line_background_changed:1",
+    )
+
+
+def test_cpu_fast_path_rejects_character_change() -> None:
+    facts = _facts(
+        has_hw_encoder=False,
+        lines=(
+            _line(index=1, character_signature=("copetan", "default")),
+            _line(index=2, character_signature=("copetan", "smile")),
+        ),
+    )
+    assert evaluate_cpu_fast_path_eligibility(facts) == (
+        False,
+        "character_changed:2",
+    )
+
+
+def test_cpu_short_circuit_does_not_resolve_character_assets(monkeypatch) -> None:
+    monkeypatch.delenv("ZUNDAMOTION_CPU_SCENE_FAST_PATH", raising=False)
+
     class _Renderer(SceneFastPathEligibilityMixin):
         hw_kind = None
         scene = {"id": "demo", "lines": [{"characters": [{"name": "missing"}]}]}
@@ -91,3 +149,21 @@ def test_cpu_short_circuit_does_not_resolve_character_assets() -> None:
         start_time_by_idx={1: 0.0},
     )
     assert result == (False, "cpu_encoder")
+
+
+def test_cpu_experimental_flag_routes_to_cpu_evaluator(monkeypatch) -> None:
+    monkeypatch.setenv("ZUNDAMOTION_CPU_SCENE_FAST_PATH", "1")
+
+    class _Renderer(SceneFastPathEligibilityMixin):
+        hw_kind = None
+
+        def _build_cpu_fast_path_eligibility(self, **_kwargs):
+            return _facts(has_hw_encoder=False)
+
+    result = _Renderer()._can_use_simple_scene_fast_path(
+        scene_duration=1.0,
+        bg_image="assets/bg/default.png",
+        generate_no_sub_video=False,
+        start_time_by_idx={1: 0.0},
+    )
+    assert result == (True, "ok_cpu_experimental")
