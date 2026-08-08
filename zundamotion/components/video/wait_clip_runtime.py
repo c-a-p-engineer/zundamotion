@@ -1,24 +1,21 @@
 """Finite wait-clip rendering through the common clip pipeline.
 
-Historically wait clips used a dedicated FFmpeg graph with an infinite lavfi
-``anullsrc`` input.  Short CPU renders intermittently stalled near completion in
-CI.  Wait clips now use a finite PCM WAV and the same clip pipeline as talk
-clips, so every input has a bounded EOF and filter/encoder behaviour stays in
-one implementation.
+Historically image-backed wait clips and image scene bases used a dedicated
+FFmpeg graph with an infinite lavfi ``anullsrc`` input. Short CPU renders
+intermittently stalled near completion in CI. They now use a finite PCM WAV and
+the same clip pipeline as talk clips, so every input has a bounded EOF and
+filter/encoder behaviour stays in one implementation.
 """
 
 from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional
 import wave
 
 from ...exceptions import PipelineError
 from ...utils.logger import logger
-
-if TYPE_CHECKING:
-    from .renderer import VideoRenderer
 
 
 _PCM_SAMPLE_WIDTH = 2
@@ -59,7 +56,7 @@ def _write_finite_silence_wav(
 
 
 class WaitClipRuntimeMixin:
-    """Render wait lines using finite audio and the shared clip graph."""
+    """Render image-backed wait media using finite audio and the shared graph."""
 
     async def _finite_wait_silence(self, duration: float) -> Path:
         sample_rate = int(self.audio_params.sample_rate)
@@ -128,3 +125,27 @@ class WaitClipRuntimeMixin:
         if clip_path is None:
             raise PipelineError(f"Wait clip rendering failed: {output_filename}")
         return Path(clip_path)
+
+    async def render_scene_base(
+        self,
+        background_config: Dict[str, Any],
+        duration: float,
+        output_filename: str,
+    ) -> Path:
+        """Route image scene bases away from the legacy infinite-audio graph."""
+        if background_config.get("type") == "video":
+            return await super().render_scene_base(
+                background_config,
+                duration,
+                output_filename,
+            )
+        base_path = await self.render_wait_clip(
+            duration=duration,
+            background_config=background_config,
+            output_filename=output_filename,
+            line_config={},
+            characters_config=[],
+        )
+        if base_path is None:
+            raise PipelineError("Failed to render image-backed scene base.")
+        return Path(base_path)
