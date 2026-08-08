@@ -142,7 +142,6 @@ jobs:
           FFMPEG_RUN_TIMEOUT_SEC: "90"
           FFMPEG_STALL_TIMEOUT_SEC: "45"
           FFMPEG_PROGRESS_LOG_INTERVAL_SEC: "5"
-          FFMPEG_FILTER_COMPLEX_THREADS: "1"
         run: |
           python scripts/verify_reproducibility.py scripts/smoke_minimal.yaml \
             --no-voice --hw-encoder cpu --jobs auto \
