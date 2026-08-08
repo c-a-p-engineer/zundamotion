@@ -9,7 +9,6 @@ from typing import Any, Dict, List
 
 from zundamotion.exceptions import PipelineError
 from zundamotion.utils.ffmpeg_capabilities import _threading_flags, get_encoder_options
-from zundamotion.utils.ffmpeg_ops import compare_media_params, concat_videos_safe
 from zundamotion.utils.ffmpeg_probe import get_media_info
 from zundamotion.utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from zundamotion.utils.logger import logger
@@ -51,10 +50,15 @@ class FinalizeConcatMixin:
         self, processed_paths: List[Path], output_video_path: Path,
         input_video_str_paths: List[str],
     ) -> Path:
-        if await compare_media_params(input_video_str_paths):
-            logger.info("FinalizePhase: All video clips have identical parameters. Attempting -c copy concat.")
+        # Resolve through finalize_phase to preserve historical monkeypatch targets.
+        from . import finalize_phase as compat
+
+        if await compat.compare_media_params(input_video_str_paths):
+            logger.info(
+                "FinalizePhase: All video clips have identical parameters. Attempting -c copy concat."
+            )
             try:
-                mode = await concat_videos_safe(
+                mode = await compat.concat_videos_safe(
                     input_video_str_paths, str(output_video_path), self.audio_params,
                     movflags_faststart=True,
                     context={
@@ -90,15 +94,23 @@ class FinalizeConcatMixin:
         if not paths:
             return
         base = await get_media_info(paths[0], caller="finalize_compare_media_params")
-        logger.warning("  Base video parameters (%s): %s", paths[0], json.dumps(base, indent=2))
+        logger.warning(
+            "  Base video parameters (%s): %s", paths[0], json.dumps(base, indent=2)
+        )
         for path in paths[1:]:
-            current = await get_media_info(path, caller="finalize_compare_media_params")
-            logger.warning("  Mismatch detected with %s: %s", path, json.dumps(current, indent=2))
+            current = await get_media_info(
+                path, caller="finalize_compare_media_params"
+            )
+            logger.warning(
+                "  Mismatch detected with %s: %s", path, json.dumps(current, indent=2)
+            )
 
     async def _reencode_concat(
         self, scene_video_paths: List[Path], output_video_path: Path,
     ) -> Path:
-        logger.info("FinalizePhase: Performing re-encode concat using -filter_complex concat.")
+        logger.info(
+            "FinalizePhase: Performing re-encode concat using -filter_complex concat."
+        )
         encoder, video_opts = await get_encoder_options(self.hw_encoder, self.quality)
         cmd = ["ffmpeg", "-y", *_threading_flags()]
         for path in scene_video_paths:
@@ -114,7 +126,9 @@ class FinalizeConcatMixin:
             *video_opts, *self.audio_params.to_ffmpeg_opts(),
             "-movflags", "+faststart", "-shortest", str(output_video_path),
         ])
-        logger.info("FinalizePhase: FFmpeg re-encode concat command: %s", " ".join(cmd))
+        logger.info(
+            "FinalizePhase: FFmpeg re-encode concat command: %s", " ".join(cmd)
+        )
         try:
             proc = await _run_ffmpeg_async(
                 cmd,
@@ -125,10 +139,15 @@ class FinalizeConcatMixin:
             )
             logger.debug("FFmpeg stdout:\n%s", proc.stdout)
             logger.debug("FFmpeg stderr:\n%s", proc.stderr)
-            logger.info("Successfully concatenated all scene videos with re-encoding to %s", output_video_path)
+            logger.info(
+                "Successfully concatenated all scene videos with re-encoding to %s",
+                output_video_path,
+            )
             return output_video_path
         except subprocess.CalledProcessError as exc:
             logger.error("Error concatenating final video with re-encoding: %s", exc)
             logger.error("FFmpeg stdout:\n%s", exc.stdout)
             logger.error("FFmpeg stderr:\n%s", exc.stderr)
-            raise PipelineError(f"Failed to finalize video with re-encoding: {exc}")
+            raise PipelineError(
+                f"Failed to finalize video with re-encoding: {exc}"
+            )
