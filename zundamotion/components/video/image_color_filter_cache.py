@@ -107,7 +107,7 @@ class ImageColorFilterCache:
 
     @staticmethod
     def _apply_color_filter(rgba: Image.Image, color_filter: Dict[str, Any]) -> Image.Image:
-        pixels = list(rgba.getdata())
+        pixels = list(rgba.get_flattened_data())
         alpha_mask = [pixel[3] > 0 for pixel in pixels]
         working = list(pixels)
 
@@ -160,9 +160,9 @@ class ImageColorFilterCache:
         hsv_image = Image.new("RGB", (len(pixels), 1))
         hsv_image.putdata([pixel[:3] for pixel in pixels])
         hue_band, saturation_band, value_band = hsv_image.convert("HSV").split()
-        hue_values = list(hue_band.getdata())
-        saturation_values = list(saturation_band.getdata())
-        value_values = list(value_band.getdata())
+        hue_values = list(hue_band.get_flattened_data())
+        saturation_values = list(saturation_band.get_flattened_data())
+        value_values = list(value_band.get_flattened_data())
 
         hue_offset = int(round(adjust["hue"] * 255.0 / 360.0)) % 256
         saturation_scale = adjust["saturation"]
@@ -187,7 +187,7 @@ class ImageColorFilterCache:
 
         hsv_result = Image.new("HSV", (len(hue_values), 1))
         hsv_result.putdata(list(zip(hue_values, saturation_values, value_values)))
-        rgb_values = list(hsv_result.convert("RGB").getdata())
+        rgb_values = list(hsv_result.convert("RGB").get_flattened_data())
         return [
             (rgb[0], rgb[1], rgb[2], pixel[3])
             for rgb, pixel in zip(rgb_values, pixels)
