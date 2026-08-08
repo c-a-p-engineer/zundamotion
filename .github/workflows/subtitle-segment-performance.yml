@@ -1,0 +1,92 @@
+name: Subtitle Segment Performance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/subtitle-segment-performance.yml"
+      - ".devcontainer/runtime.lock.json"
+      - "tools/subtitle_segment_worker_benchmark.py"
+      - "tools/verify_subtitle_segment_benchmark.py"
+      - "tests/test_subtitle_segment_executor.py"
+      - "tests/test_subtitle_video_segments.py"
+      - "tests/test_subtitle_final_audio_mux.py"
+      - "zundamotion/components/video/subtitle_segment_executor.py"
+      - "zundamotion/components/video/subtitle_video_segments.py"
+      - "zundamotion/components/video/subtitle_overlay_runtime.py"
+      - "zundamotion/components/video/threading.py"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHON_VERSION: "3.14.6"
+      DISABLE_HWENC: "1"
+      HW_FILTER_MODE: cpu
+      USE_RAMDISK: "0"
+      FFMPEG_RUN_TIMEOUT_SEC: "120"
+      FFMPEG_STALL_TIMEOUT_SEC: "60"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate runtime lock
+        run: python3 scripts/check_runtime_lock.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates fontconfig fonts-ipafont-gothic
+          test -f /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf
+          fc-match IPAGothic
+
+      - name: Install checksum-locked BtbN FFmpeg
+        run: |
+          sudo python scripts/install_locked_ffmpeg.py \
+            --lock .devcontainer/runtime.lock.json \
+            --prefix /opt/ffmpeg
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+
+      - name: Install Python dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Verify subtitle segment contracts
+        run: |
+          python -m pytest -q \
+            tests/test_subtitle_segment_executor.py \
+            tests/test_subtitle_video_segments.py \
+            tests/test_subtitle_final_audio_mux.py
+
+      - name: Run subtitle segment benchmark
+        run: |
+          mkdir -p output/benchmarks
+          python tools/subtitle_segment_worker_benchmark.py \
+            --output-dir output/benchmarks/subtitle-segment-ci \
+            > output/benchmarks/subtitle-segment-ci.log
+
+      - name: Verify benchmark acceptance criteria
+        run: |
+          python tools/verify_subtitle_segment_benchmark.py \
+            output/benchmarks/subtitle-segment-ci
+
+      - name: Upload subtitle segment benchmark
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: subtitle-segment-python-${{ env.PYTHON_VERSION }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            output/benchmarks/subtitle-segment-ci/**
+            output/benchmarks/subtitle-segment-ci.log
+            output/perf/perf_summary*.json
