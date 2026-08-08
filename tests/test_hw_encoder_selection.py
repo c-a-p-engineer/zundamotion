@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from zundamotion.utils import ffmpeg_capabilities as caps
+from zundamotion.utils import ffmpeg_encoder_capabilities as encoder_caps
 from zundamotion.components.pipeline_phases.video_phase.main import VideoPhase
 
 
@@ -18,7 +19,7 @@ def test_get_encoder_options_cpu_does_not_probe_nvenc(monkeypatch):
     def fail_if_called(ffmpeg_path="ffmpeg"):
         raise AssertionError("NVENC should not be probed when hw_encoder=cpu")
 
-    monkeypatch.setattr(caps, "is_nvenc_available", fail_if_called)
+    monkeypatch.setattr(encoder_caps, "is_nvenc_available", fail_if_called)
 
     encoder, opts = asyncio.run(caps.get_encoder_options("cpu", "speed"))
 
@@ -28,7 +29,7 @@ def test_get_encoder_options_cpu_does_not_probe_nvenc(monkeypatch):
 
 def test_get_encoder_options_speed_uses_fastest_nvenc_preset(monkeypatch):
     monkeypatch.setattr(
-        caps,
+        encoder_caps,
         "is_nvenc_available",
         lambda ffmpeg_path="ffmpeg": asyncio.sleep(0, result=True),
     )
@@ -41,7 +42,11 @@ def test_get_encoder_options_speed_uses_fastest_nvenc_preset(monkeypatch):
 
 def test_get_hw_encoder_kind_for_video_params_gpu_prefers_nvenc(monkeypatch):
     monkeypatch.delenv("DISABLE_HWENC", raising=False)
-    monkeypatch.setattr(caps, "is_nvenc_available", lambda ffmpeg_path="ffmpeg": asyncio.sleep(0, result=True))
+    monkeypatch.setattr(
+        encoder_caps,
+        "is_nvenc_available",
+        lambda ffmpeg_path="ffmpeg": asyncio.sleep(0, result=True),
+    )
 
     result = asyncio.run(
         caps.get_hw_encoder_kind_for_video_params(hw_encoder="gpu")
@@ -52,7 +57,11 @@ def test_get_hw_encoder_kind_for_video_params_gpu_prefers_nvenc(monkeypatch):
 
 def test_get_hw_encoder_kind_for_video_params_gpu_falls_back_to_cpu(monkeypatch):
     monkeypatch.delenv("DISABLE_HWENC", raising=False)
-    monkeypatch.setattr(caps, "is_nvenc_available", lambda ffmpeg_path="ffmpeg": asyncio.sleep(0, result=False))
+    monkeypatch.setattr(
+        encoder_caps,
+        "is_nvenc_available",
+        lambda ffmpeg_path="ffmpeg": asyncio.sleep(0, result=False),
+    )
 
     result = asyncio.run(
         caps.get_hw_encoder_kind_for_video_params(hw_encoder="gpu")
