@@ -1,0 +1,168 @@
+name: Subtitle Segment Performance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/subtitle-segment-performance.yml"
+      - ".devcontainer/runtime.lock.json"
+      - "tools/subtitle_segment_worker_benchmark.py"
+      - "tests/test_subtitle_segment_executor.py"
+      - "tests/test_subtitle_video_segments.py"
+      - "tests/test_subtitle_final_audio_mux.py"
+      - "zundamotion/components/video/subtitle_segment_executor.py"
+      - "zundamotion/components/video/subtitle_video_segments.py"
+      - "zundamotion/components/video/subtitle_overlay_runtime.py"
+      - "zundamotion/components/video/threading.py"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHON_VERSION: "3.14.6"
+      DISABLE_HWENC: "1"
+      HW_FILTER_MODE: cpu
+      USE_RAMDISK: "0"
+      FFMPEG_RUN_TIMEOUT_SEC: "120"
+      FFMPEG_STALL_TIMEOUT_SEC: "60"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate runtime lock
+        run: python3 scripts/check_runtime_lock.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates fontconfig fonts-ipafont-gothic
+          test -f /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf
+          fc-match IPAGothic
+
+      - name: Install checksum-locked BtbN FFmpeg
+        run: |
+          sudo python scripts/install_locked_ffmpeg.py \
+            --lock .devcontainer/runtime.lock.json \
+            --prefix /opt/ffmpeg
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+
+      - name: Install Python dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Verify subtitle segment contracts
+        run: |
+          python -m pytest -q \
+            tests/test_subtitle_segment_executor.py \
+            tests/test_subtitle_video_segments.py \
+            tests/test_subtitle_final_audio_mux.py
+
+      - name: Run subtitle segment benchmark
+        run: |
+          python tools/subtitle_segment_worker_benchmark.py \
+            --output-dir output/benchmarks/subtitle-segment-ci \
+            > output/benchmarks/subtitle-segment-ci.log
+
+      - name: Verify benchmark acceptance criteria
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import subprocess
+          from pathlib import Path
+
+          root = Path("output/benchmarks/subtitle-segment-ci")
+          report_path = root / "subtitle-segment-worker-benchmark.json"
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          trials = {trial["mode"] + (f"-w{trial['workers']}" if trial.get("workers") else ""): trial for trial in report["trials"]}
+          legacy = trials["legacy_av_segments"]
+          worker1 = trials["video_only-w1"]
+          worker2 = trials["video_only-w2"]
+
+          def decoded_video_sha(path: str) -> str:
+              proc = subprocess.run(
+                  ["ffmpeg", "-v", "error", "-i", path, "-map", "0:v:0", "-f", "framemd5", "-"],
+                  check=True,
+                  stdout=subprocess.PIPE,
+              )
+              return hashlib.sha256(proc.stdout).hexdigest()
+
+          def encoded_audio_md5(path: str) -> str:
+              proc = subprocess.run(
+                  ["ffmpeg", "-v", "error", "-i", path, "-map", "0:a:0", "-c:a", "copy", "-f", "md5", "-"],
+                  check=True,
+                  text=True,
+                  stdout=subprocess.PIPE,
+              )
+              return proc.stdout.strip()
+
+          for trial in (legacy, worker1, worker2):
+              assert trial["av_warnings_total"] == 0, trial
+              assert trial["av"]["start_delta"] is not None
+              assert trial["av"]["duration_delta"] is not None
+              assert trial["av"]["start_delta"] <= 0.05, trial["av"]
+              assert trial["av"]["duration_delta"] <= 0.05, trial["av"]
+
+          comparison = report["comparison"]
+          assert comparison["worker2_faster_than_legacy"], comparison
+          assert comparison["worker2_faster_than_worker1"], comparison
+          assert worker1["elapsed_seconds"] < legacy["elapsed_seconds"], comparison
+
+          video_hashes = {
+              "legacy": decoded_video_sha(legacy["output"]),
+              "worker1": decoded_video_sha(worker1["output"]),
+              "worker2": decoded_video_sha(worker2["output"]),
+          }
+          assert len(set(video_hashes.values())) == 1, video_hashes
+
+          source_audio = encoded_audio_md5(str(root / "base.mp4"))
+          worker_audio = {
+              "source": source_audio,
+              "worker1": encoded_audio_md5(worker1["output"]),
+              "worker2": encoded_audio_md5(worker2["output"]),
+          }
+          assert worker_audio["worker1"] == source_audio, worker_audio
+          assert worker_audio["worker2"] == source_audio, worker_audio
+
+          verification = {
+              "elapsed_seconds": {
+                  "legacy": legacy["elapsed_seconds"],
+                  "worker1": worker1["elapsed_seconds"],
+                  "worker2": worker2["elapsed_seconds"],
+              },
+              "ratios": comparison,
+              "video_framemd5_sha256": video_hashes,
+              "aac_stream_md5": worker_audio,
+              "av": {
+                  "legacy": legacy["av"],
+                  "worker1": worker1["av"],
+                  "worker2": worker2["av"],
+              },
+          }
+          (root / "verification.json").write_text(
+              json.dumps(verification, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(verification, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload subtitle segment benchmark
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: subtitle-segment-python-${{ env.PYTHON_VERSION }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            output/benchmarks/subtitle-segment-ci/**
+            output/benchmarks/subtitle-segment-ci.log
+            output/perf/perf_summary*.json
