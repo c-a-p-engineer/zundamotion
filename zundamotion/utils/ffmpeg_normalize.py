@@ -162,27 +162,34 @@ async def _build_normalize_command(
     disable_hwenc: bool,
 ) -> List[str]:
     cmd: List[str] = [ffmpeg_path, "-y", *_threading_flags(ffmpeg_path), "-i", str(input_path)]
+    audio_filter = f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"
     if can_copy_video and can_copy_audio:
         cmd.extend(["-c", "copy"])
+        logger.info("Using -c copy for both video and audio for %s", input_path)
     elif can_copy_video:
         cmd.extend(["-c:v", "copy"])
         if has_audio:
-            cmd.extend(["-af", f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"])
+            cmd.extend(["-af", audio_filter])
             cmd.extend(audio_params.to_ffmpeg_opts())
         else:
             cmd.append("-an")
+        logger.info("Using -c:v copy for video for %s", input_path)
+    elif can_copy_audio:
+        cmd.extend(["-c:a", "copy", "-af", audio_filter, "-vf", _video_filter(video_params, ctx)])
+        hw_kind = None if disable_hwenc else await get_hw_encoder_kind_for_video_params(ffmpeg_path)
+        cmd.extend(video_params.to_ffmpeg_opts(hw_kind))
+        logger.info("Using -c:a copy for audio for %s", input_path)
     else:
-        if can_copy_audio:
-            cmd.extend(["-c:a", "copy"])
         cmd.extend(["-vf", _video_filter(video_params, ctx)])
-        if has_audio and not can_copy_audio:
-            cmd.extend(["-af", f"aresample={audio_params.sample_rate},asetpts=PTS-STARTPTS"])
-        elif not has_audio:
+        if has_audio:
+            cmd.extend(["-af", audio_filter])
+        else:
             cmd.append("-an")
         hw_kind = None if disable_hwenc else await get_hw_encoder_kind_for_video_params(ffmpeg_path)
         cmd.extend(video_params.to_ffmpeg_opts(hw_kind))
-        if has_audio and not can_copy_audio:
+        if has_audio:
             cmd.extend(audio_params.to_ffmpeg_opts())
+        logger.info("Re-encoding video and/or audio for %s", input_path)
     cmd.append(str(output_path))
     return cmd
 
@@ -225,6 +232,9 @@ async def _execute_normalize(
         await _run_ffmpeg_async(cmd)
     except subprocess.CalledProcessError as exc:
         if not _hardware_failure(exc):
+            logger.error("Error normalizing media %s: %s", input_path, exc)
+            logger.error("FFmpeg stdout:\n%s", exc.stdout)
+            logger.error("FFmpeg stderr:\n%s", exc.stderr)
             raise
         logger.warning("Hardware encoder failed during normalization. Falling back to libx264 and retrying once.")
         previous = os.environ.get("DISABLE_HWENC")
