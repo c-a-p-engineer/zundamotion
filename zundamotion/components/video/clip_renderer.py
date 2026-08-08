@@ -12,11 +12,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ...utils.logger import logger
-from .clip_audio_graph import append_clip_audio_graph
+from .clip_audio_graph import append_clip_audio_graph, _atempo_chain
 from .clip_command import build_clip_command
 from .clip_executor import execute_clip_command
 from .clip_filter_policy import resolve_clip_filter_policy
-from .clip_input_collection import collect_clip_inputs
+from .clip_input_collection import collect_clip_inputs, _media_speed
 from .clip_video_graph import build_clip_video_graph
 
 if TYPE_CHECKING:
