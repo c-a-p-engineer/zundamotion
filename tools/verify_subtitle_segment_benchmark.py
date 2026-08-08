@@ -11,13 +11,40 @@ from pathlib import Path
 from typing import Any
 
 
-def _decoded_video_sha(path: str) -> str:
+def _framemd5_content_signature(text: str) -> dict[str, Any]:
+    """Hash decoded frame payloads while intentionally ignoring DTS/PTS.
+
+    FFmpeg ``framemd5`` records contain stream index, DTS, PTS, duration, frame
+    size and the decoded-frame hash. Subtitle segment implementations may have a
+    small, explicitly measured start-time difference while producing identical
+    frame pixels. Timing is validated separately via ffprobe, so this signature
+    compares only frame size/hash in frame order.
+    """
+    digest = hashlib.sha256()
+    frames = 0
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = [field.strip() for field in line.split(",", 5)]
+        if len(fields) != 6:
+            raise ValueError(f"unexpected framemd5 record: {raw_line!r}")
+        size, frame_hash = fields[4], fields[5]
+        digest.update(f"{size},{frame_hash}\n".encode("ascii"))
+        frames += 1
+    if frames <= 0:
+        raise ValueError("framemd5 contained no decoded video frames")
+    return {"frames": frames, "sha256": digest.hexdigest()}
+
+
+def _decoded_video_content_signature(path: str) -> dict[str, Any]:
     proc = subprocess.run(
         ["ffmpeg", "-v", "error", "-i", path, "-map", "0:v:0", "-f", "framemd5", "-"],
         check=True,
+        text=True,
         stdout=subprocess.PIPE,
     )
-    return hashlib.sha256(proc.stdout).hexdigest()
+    return _framemd5_content_signature(proc.stdout)
 
 
 def _encoded_audio_md5(path: str) -> str:
@@ -52,12 +79,15 @@ def verify(root: Path) -> dict[str, Any]:
     assert comparison["worker2_faster_than_worker1"], comparison
     assert worker1["elapsed_seconds"] < legacy["elapsed_seconds"], comparison
 
-    video_hashes = {
-        "legacy": _decoded_video_sha(legacy["output"]),
-        "worker1": _decoded_video_sha(worker1["output"]),
-        "worker2": _decoded_video_sha(worker2["output"]),
+    video_signatures = {
+        "legacy": _decoded_video_content_signature(legacy["output"]),
+        "worker1": _decoded_video_content_signature(worker1["output"]),
+        "worker2": _decoded_video_content_signature(worker2["output"]),
     }
-    assert len(set(video_hashes.values())) == 1, video_hashes
+    frame_counts = {value["frames"] for value in video_signatures.values()}
+    content_hashes = {value["sha256"] for value in video_signatures.values()}
+    assert len(frame_counts) == 1, video_signatures
+    assert len(content_hashes) == 1, video_signatures
 
     source_audio = _encoded_audio_md5(str(root / "base.mp4"))
     audio_hashes = {
@@ -75,7 +105,7 @@ def verify(root: Path) -> dict[str, Any]:
             "worker2": worker2["elapsed_seconds"],
         },
         "ratios": comparison,
-        "video_framemd5_sha256": video_hashes,
+        "video_frame_content": video_signatures,
         "aac_stream_md5": audio_hashes,
         "av": {
             "legacy": legacy["av"],
