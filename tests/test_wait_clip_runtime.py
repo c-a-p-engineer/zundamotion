@@ -4,12 +4,17 @@ import asyncio
 from pathlib import Path
 import wave
 
+from zundamotion.components.video import VideoRenderer
 from zundamotion.components.video.wait_clip_runtime import (
     WaitClipRuntimeMixin,
     _silent_frame_count,
     _write_finite_silence_wav,
 )
 from zundamotion.utils.ffmpeg_params import AudioParams
+
+
+def test_public_video_renderer_routes_waits_through_finite_runtime() -> None:
+    assert VideoRenderer.render_wait_clip is WaitClipRuntimeMixin.render_wait_clip
 
 
 def test_finite_silence_wav_has_bounded_exact_frame_count(tmp_path: Path) -> None:
