@@ -1,5 +1,12 @@
 """Compatibility facade for modular subtitle PNG rendering."""
 
+from concurrent.futures import ProcessPoolExecutor
+
+# Historical module-level state is retained because lifecycle management and
+# tests intentionally mutate these slots. Executor policy lives in png_executor.
+_SUBTITLE_EXECUTOR: ProcessPoolExecutor | None = None
+_SUBTITLE_EXECUTOR_WORKERS: int | None = None
+
 from .png_draw import _render_subtitle_png
 from .png_executor import (
     _get_shared_subtitle_executor,
@@ -38,6 +45,8 @@ from .png_text import (
 __all__ = [
     "SubtitlePNGRenderer",
     "RESAMPLE_LANCZOS",
+    "_SUBTITLE_EXECUTOR",
+    "_SUBTITLE_EXECUTOR_WORKERS",
     "_render_subtitle_png",
     "_get_shared_subtitle_executor",
     "_resolve_subtitle_png_workers",
