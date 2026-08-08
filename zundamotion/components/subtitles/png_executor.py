@@ -6,9 +6,6 @@ import atexit
 import os
 from concurrent.futures import ProcessPoolExecutor
 
-_SUBTITLE_EXECUTOR: ProcessPoolExecutor | None = None
-_SUBTITLE_EXECUTOR_WORKERS: int | None = None
-
 
 def _resolve_subtitle_png_workers() -> int:
     try:
@@ -20,25 +17,37 @@ def _resolve_subtitle_png_workers() -> int:
         return 1
 
 
+def _subtitle_png_module():
+    # Import lazily so the public facade can own the historical shared-state slots
+    # without creating an import cycle during module initialization.
+    from . import png as subtitle_png
+
+    return subtitle_png
+
+
 def _shutdown_subtitle_executor() -> None:
-    global _SUBTITLE_EXECUTOR, _SUBTITLE_EXECUTOR_WORKERS
-    if _SUBTITLE_EXECUTOR is None:
+    subtitle_png = _subtitle_png_module()
+    executor = subtitle_png._SUBTITLE_EXECUTOR
+    if executor is None:
         return
     try:
-        _SUBTITLE_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+        executor.shutdown(wait=False, cancel_futures=True)
     except Exception:
         pass
-    _SUBTITLE_EXECUTOR = None
-    _SUBTITLE_EXECUTOR_WORKERS = None
+    subtitle_png._SUBTITLE_EXECUTOR = None
+    subtitle_png._SUBTITLE_EXECUTOR_WORKERS = None
 
 
 def _get_shared_subtitle_executor() -> tuple[ProcessPoolExecutor, int]:
-    global _SUBTITLE_EXECUTOR, _SUBTITLE_EXECUTOR_WORKERS
+    subtitle_png = _subtitle_png_module()
     workers = _resolve_subtitle_png_workers()
-    if _SUBTITLE_EXECUTOR is None or _SUBTITLE_EXECUTOR_WORKERS != workers:
-        if _SUBTITLE_EXECUTOR is not None:
+    if (
+        subtitle_png._SUBTITLE_EXECUTOR is None
+        or subtitle_png._SUBTITLE_EXECUTOR_WORKERS != workers
+    ):
+        if subtitle_png._SUBTITLE_EXECUTOR is not None:
             _shutdown_subtitle_executor()
-        _SUBTITLE_EXECUTOR = ProcessPoolExecutor(max_workers=workers)
-        _SUBTITLE_EXECUTOR_WORKERS = workers
+        subtitle_png._SUBTITLE_EXECUTOR = ProcessPoolExecutor(max_workers=workers)
+        subtitle_png._SUBTITLE_EXECUTOR_WORKERS = workers
         atexit.register(_shutdown_subtitle_executor)
-    return _SUBTITLE_EXECUTOR, workers
+    return subtitle_png._SUBTITLE_EXECUTOR, workers
