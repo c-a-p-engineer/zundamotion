@@ -11,16 +11,22 @@ from PIL import Image, ImageDraw, ImageFont
 import yaml
 
 from ...exceptions import ValidationError
-from ..subtitles.png import (
-    _build_background_layer,
-    _load_font_with_fallback,
-    _normalize_padding,
+from ..subtitles.png import _build_background_layer, _load_font_with_fallback
+from .render_config import (
+    resolve_markdown_background,
+    resolve_markdown_characters,
+    resolve_markdown_render_config,
 )
 
 
 FRONTMATTER_BOUNDARY = re.compile(r"^---\s*$", re.MULTILINE)
 SPEAKER_LINE_RE = re.compile(r"^\s*([^:：]+?)\s*[:：]\s*(.+)\s*$")
 MARKDOWN_LAYER_ID = "markdown_panel"
+
+# Preserve historical private imports while keeping resolution in one module.
+_resolve_bg = resolve_markdown_background
+_character_defaults = resolve_markdown_characters
+_markdown_render_config = resolve_markdown_render_config
 
 
 @dataclass
@@ -44,9 +50,9 @@ def load_markdown_script(path: Path) -> Dict[str, Any]:
             "Markdown frontmatter does not support 'scenes'. Define script in markdown body only."
         )
 
-    bg_path = _resolve_bg(frontmatter_data)
-    character_defaults = _character_defaults(frontmatter_data)
-    markdown_config = _markdown_render_config(frontmatter_data)
+    bg_path = resolve_markdown_background(frontmatter_data)
+    character_defaults = resolve_markdown_characters(frontmatter_data)
+    markdown_config = resolve_markdown_render_config(frontmatter_data)
 
     intermediate_root = Path("output") / "intermediate" / path.stem
     image_dir = intermediate_root / "images"
@@ -69,66 +75,29 @@ def _split_frontmatter(path: Path) -> Tuple[str, str]:
         raise ValidationError(
             f"Markdown script must start with YAML frontmatter ('---'): {path}"
         )
-
     matches = list(FRONTMATTER_BOUNDARY.finditer(text))
     if len(matches) < 2:
         raise ValidationError(
             f"Markdown frontmatter closing boundary ('---') is missing: {path}"
         )
-
-    first = matches[0]
-    second = matches[1]
-    frontmatter = text[first.end() : second.start()].strip()
-    body = text[second.end() :].strip()
+    frontmatter = text[matches[0].end() : matches[1].start()].strip()
+    body = text[matches[1].end() :].strip()
     return frontmatter, body
 
 
 def _load_frontmatter(frontmatter: str, path: Path) -> Dict[str, Any]:
     try:
         data = yaml.safe_load(frontmatter) or {}
-    except yaml.YAMLError as e:
-        mark = getattr(e, "mark", None)
-        line = mark.line + 1 if mark else None
-        column = mark.column + 1 if mark else None
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "mark", None)
         raise ValidationError(
-            f"Invalid Markdown frontmatter YAML in {path}: {e}",
-            line_number=line,
-            column_number=column,
+            f"Invalid Markdown frontmatter YAML in {path}: {exc}",
+            line_number=mark.line + 1 if mark else None,
+            column_number=mark.column + 1 if mark else None,
         )
-
     if not isinstance(data, dict):
         raise ValidationError("Markdown frontmatter must be a mapping.")
     return data
-
-
-def _resolve_bg(frontmatter: Dict[str, Any]) -> str:
-    bg = frontmatter.get("bg")
-    if isinstance(bg, str) and bg.strip():
-        return bg
-
-    background = frontmatter.get("background")
-    if isinstance(background, dict):
-        default_bg = background.get("default")
-        if isinstance(default_bg, str) and default_bg.strip():
-            return default_bg
-
-    raise ValidationError("Markdown frontmatter requires top-level 'bg' or 'background.default'.")
-
-
-def _character_defaults(frontmatter: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    defaults = frontmatter.get("defaults")
-    if not isinstance(defaults, dict):
-        return {}
-    characters = defaults.get("characters")
-    if not isinstance(characters, dict):
-        return {}
-
-    normalized: Dict[str, Dict[str, Any]] = {}
-    for name, value in characters.items():
-        if not isinstance(value, dict):
-            continue
-        normalized[name] = value
-    return normalized
 
 
 def _build_lines_from_body(
@@ -171,7 +140,9 @@ def _build_lines_from_body(
                                     "path": str(image_path.resolve()),
                                     "scale": markdown_config["layer"]["scale"],
                                     "anchor": markdown_config["layer"]["anchor"],
-                                    "position": dict(markdown_config["layer"]["position"]),
+                                    "position": dict(
+                                        markdown_config["layer"]["position"]
+                                    ),
                                 }
                             }
                         ]
@@ -190,8 +161,9 @@ def _build_lines_from_body(
         lines.append(line_obj)
 
     if not any("text" in line for line in lines):
-        raise ValidationError("Markdown body must contain at least one dialogue line in '話者:セリフ' format.")
-
+        raise ValidationError(
+            "Markdown body must contain at least one dialogue line in '話者:セリフ' format."
+        )
     return lines
 
 
@@ -211,11 +183,12 @@ def _has_non_empty(lines: List[str]) -> bool:
 
 
 def _normalize_markdown_block(lines: List[str]) -> str:
-    text = "\n".join(lines).strip()
-    return text
+    return "\n".join(lines).strip()
 
 
-def _visible_characters(characters: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _visible_characters(
+    characters: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
     result: List[Dict[str, Any]] = []
     for name, cfg in characters.items():
         merged = dict(cfg)
@@ -236,9 +209,9 @@ def _render_markdown_panel(
     image_id: str,
     markdown_config: Dict[str, Any],
 ) -> Path:
-    out = image_dir / f"panel-{image_id}.png"
-    if out.exists():
-        return out
+    output_path = image_dir / f"panel-{image_id}.png"
+    if output_path.exists():
+        return output_path
 
     width = int(markdown_config["canvas"]["width"])
     height = int(markdown_config["canvas"]["height"])
@@ -250,7 +223,9 @@ def _render_markdown_panel(
     panel_right = width - int(margin["right"])
     panel_bottom = height - int(margin["bottom"])
     if panel_right <= panel_left or panel_bottom <= panel_top:
-        raise ValidationError("Markdown panel margin is too large for the configured video size.")
+        raise ValidationError(
+            "Markdown panel margin is too large for the configured video size."
+        )
 
     panel_width = panel_right - panel_left
     panel_height = panel_bottom - panel_top
@@ -267,162 +242,50 @@ def _render_markdown_panel(
     inner_width = panel_width - int(padding["left"]) - int(padding["right"])
     inner_height = panel_height - int(padding["top"]) - int(padding["bottom"])
     if inner_width <= 0 or inner_height <= 0:
-        raise ValidationError("Markdown panel padding is too large for the configured panel area.")
+        raise ValidationError(
+            "Markdown panel padding is too large for the configured panel area."
+        )
 
     text_cfg = markdown_config["text"]
-    font_path = str(text_cfg["font_path"])
-    preferred_font_size = int(text_cfg["font_size"])
-    min_font_size = int(text_cfg["min_font_size"])
-    spacing_override = text_cfg.get("line_spacing")
     wrapped_lines, line_metrics = _fit_markdown_text(
         markdown_text,
-        font_path=font_path,
-        preferred_font_size=preferred_font_size,
-        min_font_size=min_font_size,
+        font_path=str(text_cfg["font_path"]),
+        preferred_font_size=int(text_cfg["font_size"]),
+        min_font_size=int(text_cfg["min_font_size"]),
         max_width=inner_width,
         max_height=inner_height,
-        spacing_override=spacing_override,
+        spacing_override=text_cfg.get("line_spacing"),
         markdown_config=markdown_config,
     )
 
     draw = ImageDraw.Draw(image)
     current_y = float(inner_top)
     for line, metric in zip(wrapped_lines, line_metrics):
-        x0, y0, x1, line_height = metric["bbox"]
-        font = _load_font_with_fallback(font_path, int(metric["font_size"]))
-        baseline_x = inner_left - x0
-        baseline_y = current_y - y0
+        x0, y0, _, line_height = metric["bbox"]
+        font = _load_font_with_fallback(
+            str(text_cfg["font_path"]), int(metric["font_size"])
+        )
         if line.text:
             draw.text(
-                (baseline_x, baseline_y),
+                (inner_left - x0, current_y - y0),
                 line.text,
                 fill=text_cfg["color"],
                 font=font,
             )
         current_y += line_height + int(metric["spacing_after"])
 
-    image.save(out)
-    return out
+    image.save(output_path)
+    return output_path
 
 
-def _markdown_render_config(frontmatter: Dict[str, Any]) -> Dict[str, Any]:
-    video_cfg = frontmatter.get("video") if isinstance(frontmatter.get("video"), dict) else {}
-    subtitle_cfg = frontmatter.get("subtitle") if isinstance(frontmatter.get("subtitle"), dict) else {}
-    markdown_cfg = frontmatter.get("markdown") if isinstance(frontmatter.get("markdown"), dict) else {}
-    layer_cfg = markdown_cfg.get("layer") if isinstance(markdown_cfg.get("layer"), dict) else {}
-    panel_cfg = markdown_cfg.get("panel") if isinstance(markdown_cfg.get("panel"), dict) else {}
-    text_cfg = markdown_cfg.get("text") if isinstance(markdown_cfg.get("text"), dict) else {}
-
-    width = _coerce_positive_int(video_cfg.get("width"), 1280)
-    height = _coerce_positive_int(video_cfg.get("height"), 720)
-
-    margin_default = {
-        "x": max(40, int(round(width * 0.14))),
-        "y": max(32, int(round(height * 0.06))),
-    }
-    padding_default = {
-        "x": max(28, int(round(width * 0.045))),
-        "y": max(24, int(round(height * 0.05))),
-    }
-    margin_left, margin_top, margin_right, margin_bottom = _normalize_padding(
-        panel_cfg.get("margin"),
-        max(margin_default["x"], margin_default["y"]),
+def _markdown_panel_cache_key(
+    markdown_text: str, markdown_config: Dict[str, Any]
+) -> str:
+    raw = json.dumps(
+        {"text": markdown_text, "config": markdown_config},
+        ensure_ascii=False,
+        sort_keys=True,
     )
-    if panel_cfg.get("margin") is None:
-        margin_left = margin_right = int(margin_default["x"])
-        margin_top = margin_bottom = int(margin_default["y"])
-    padding_left, padding_top, padding_right, padding_bottom = _normalize_padding(
-        panel_cfg.get("padding"),
-        max(padding_default["x"], padding_default["y"]),
-    )
-    if panel_cfg.get("padding") is None:
-        padding_left = padding_right = int(padding_default["x"])
-        padding_top = padding_bottom = int(padding_default["y"])
-
-    preferred_font_size = _coerce_positive_int(
-        text_cfg.get("font_size"),
-        max(30, int(round(height * 0.07))),
-    )
-    min_font_size = _coerce_positive_int(
-        text_cfg.get("min_font_size"),
-        max(18, int(round(preferred_font_size * 0.58))),
-    )
-    min_font_size = min(min_font_size, preferred_font_size)
-
-    default_background = {
-        "color": "#0F172A",
-        "opacity": 0.9,
-        "radius": max(18, int(round(min(width, height) * 0.035))),
-        "border_color": "#E2E8F0",
-        "border_width": 2,
-        "border_opacity": 0.75,
-    }
-    for key in (
-        "color",
-        "opacity",
-        "radius",
-        "border_color",
-        "border_width",
-        "border_opacity",
-        "image",
-        "image_opacity",
-    ):
-        if panel_cfg.get(key) is not None:
-            default_background[key] = panel_cfg[key]
-    panel_background_cfg = panel_cfg.get("background")
-    if isinstance(panel_background_cfg, dict):
-        for key, value in panel_background_cfg.items():
-            if value is not None:
-                default_background[key] = value
-
-    return {
-        "canvas": {"width": width, "height": height},
-        "layer": {
-            "scale": _coerce_float(layer_cfg.get("scale"), 0.92, minimum=0.1),
-            "anchor": str(layer_cfg.get("anchor", "middle_center")),
-            "position": {
-                "x": _coerce_number(layer_cfg.get("position", {}).get("x") if isinstance(layer_cfg.get("position"), dict) else None, 0),
-                "y": _coerce_number(layer_cfg.get("position", {}).get("y") if isinstance(layer_cfg.get("position"), dict) else None, 0),
-            },
-        },
-        "panel": {
-            "margin": {
-                "left": margin_left,
-                "top": margin_top,
-                "right": margin_right,
-                "bottom": margin_bottom,
-            },
-            "padding": {
-                "left": padding_left,
-                "top": padding_top,
-                "right": padding_right,
-                "bottom": padding_bottom,
-            },
-            "background": default_background,
-        },
-        "text": {
-            "font_path": str(
-                text_cfg.get("font_path")
-                or subtitle_cfg.get("font_path")
-                or "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf"
-            ),
-            "font_size": preferred_font_size,
-            "min_font_size": min_font_size,
-            "line_spacing": text_cfg.get("line_spacing"),
-            "color": str(text_cfg.get("color", "#F8FAFC")),
-            "heading_scale": _coerce_float(text_cfg.get("heading_scale"), 1.28, minimum=1.0),
-            "subheading_scale": _coerce_float(text_cfg.get("subheading_scale"), 1.12, minimum=1.0),
-            "list_indent": _coerce_positive_int(text_cfg.get("list_indent"), 28),
-        },
-    }
-
-
-def _markdown_panel_cache_key(markdown_text: str, markdown_config: Dict[str, Any]) -> str:
-    payload = {
-        "text": markdown_text,
-        "config": markdown_config,
-    }
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     return sha1(raw.encode("utf-8")).hexdigest()[:12]
 
 
@@ -456,7 +319,6 @@ def _fit_markdown_text(
             return lines, metrics
         chosen_lines = lines
         chosen_metrics = metrics
-
     return chosen_lines, chosen_metrics
 
 
@@ -475,7 +337,9 @@ def _wrap_markdown_lines(
 
     for source in source_lines:
         if source.kind == "blank":
-            spacing = max(6, _resolve_line_spacing(spacing_override, base_font_size) // 2)
+            spacing = max(
+                6, _resolve_line_spacing(spacing_override, base_font_size) // 2
+            )
             wrapped_lines.append(source)
             metrics.append(
                 {
@@ -491,10 +355,15 @@ def _wrap_markdown_lines(
         font = _load_font_with_fallback(font_path, font_size)
         spacing = _resolve_line_spacing(spacing_override, font_size)
         prefix = _line_prefix(source)
-        available_width = max_width - (_coerce_positive_int(text_cfg.get("list_indent"), 28) if prefix else 0)
-        for idx, wrapped in enumerate(_wrap_text_to_width(source.text, font, max(80, available_width))):
-            display_text = f"{prefix}{wrapped}" if idx == 0 and prefix else wrapped
-            line_obj = MarkdownLine(text=display_text, kind=source.kind, level=source.level)
+        list_indent = int(text_cfg.get("list_indent", 28)) if prefix else 0
+        available_width = max_width - list_indent
+        for index, wrapped in enumerate(
+            _wrap_text_to_width(source.text, font, max(80, available_width))
+        ):
+            display_text = f"{prefix}{wrapped}" if index == 0 and prefix else wrapped
+            line_obj = MarkdownLine(
+                text=display_text, kind=source.kind, level=source.level
+            )
             bbox = _text_metric(font, display_text)
             wrapped_lines.append(line_obj)
             metrics.append(
@@ -505,15 +374,17 @@ def _wrap_markdown_lines(
                     "spacing_after": spacing,
                 }
             )
-
         if metrics:
             metrics[-1]["spacing_after"] = _spacing_after_line(source, spacing)
-
     return wrapped_lines, metrics
 
 
 def _tokenize_markdown_lines(markdown_text: str) -> List[MarkdownLine]:
-    normalized = markdown_text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")
+    normalized = (
+        markdown_text.replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\t", "    ")
+    )
     lines: List[MarkdownLine] = []
     for raw in normalized.split("\n"):
         stripped = raw.strip()
@@ -523,8 +394,13 @@ def _tokenize_markdown_lines(markdown_text: str) -> List[MarkdownLine]:
 
         heading = re.match(r"^(#{1,6})\s+(.+)$", stripped)
         if heading:
-            level = len(heading.group(1))
-            lines.append(MarkdownLine(text=heading.group(2).strip(), kind="heading", level=level))
+            lines.append(
+                MarkdownLine(
+                    text=heading.group(2).strip(),
+                    kind="heading",
+                    level=len(heading.group(1)),
+                )
+            )
             continue
 
         bullet = re.match(r"^([-*+])\s+(.+)$", stripped)
@@ -534,7 +410,12 @@ def _tokenize_markdown_lines(markdown_text: str) -> List[MarkdownLine]:
 
         numbered = re.match(r"^(\d+)\.\s+(.+)$", stripped)
         if numbered:
-            lines.append(MarkdownLine(text=f"{numbered.group(1)}. {numbered.group(2).strip()}", kind="numbered"))
+            lines.append(
+                MarkdownLine(
+                    text=f"{numbered.group(1)}. {numbered.group(2).strip()}",
+                    kind="numbered",
+                )
+            )
             continue
 
         quote = re.match(r"^>\s+(.+)$", stripped)
@@ -546,13 +427,21 @@ def _tokenize_markdown_lines(markdown_text: str) -> List[MarkdownLine]:
     return lines
 
 
-def _markdown_font_size(line: MarkdownLine, base_font_size: int, text_cfg: Dict[str, Any]) -> int:
+def _markdown_font_size(
+    line: MarkdownLine, base_font_size: int, text_cfg: Dict[str, Any]
+) -> int:
     if line.kind != "heading":
         return base_font_size
     if line.level <= 1:
-        return max(base_font_size, int(round(base_font_size * float(text_cfg["heading_scale"]))))
+        return max(
+            base_font_size,
+            int(round(base_font_size * float(text_cfg["heading_scale"]))),
+        )
     if line.level <= 3:
-        return max(base_font_size, int(round(base_font_size * float(text_cfg["subheading_scale"]))))
+        return max(
+            base_font_size,
+            int(round(base_font_size * float(text_cfg["subheading_scale"]))),
+        )
     return base_font_size
 
 
@@ -564,16 +453,18 @@ def _line_prefix(line: MarkdownLine) -> str:
     return ""
 
 
-def _wrap_text_to_width(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> List[str]:
+def _wrap_text_to_width(
+    text: str, font: ImageFont.FreeTypeFont, max_width: int
+) -> List[str]:
     if not text:
         return [""]
     lines: List[str] = []
     current = ""
-    for ch in text:
-        candidate = f"{current}{ch}"
+    for char in text:
+        candidate = f"{current}{char}"
         if current and _text_width(font, candidate) > max_width:
             lines.append(current)
-            current = ch
+            current = char
         else:
             current = candidate
     if current:
@@ -586,7 +477,9 @@ def _text_width(font: ImageFont.FreeTypeFont, text: str) -> int:
     return x1 - x0
 
 
-def _text_metric(font: ImageFont.FreeTypeFont, text: str) -> Tuple[int, int, int, int]:
+def _text_metric(
+    font: ImageFont.FreeTypeFont, text: str
+) -> Tuple[int, int, int, int]:
     probe = text or "Ag"
     if hasattr(font, "getbbox"):
         bbox = font.getbbox(probe)
@@ -598,9 +491,10 @@ def _text_metric(font: ImageFont.FreeTypeFont, text: str) -> Tuple[int, int, int
 
 
 def _metrics_total_height(metrics: List[Dict[str, Any]]) -> int:
-    if not metrics:
-        return 0
-    return sum(int(metric["bbox"][3]) + int(metric["spacing_after"]) for metric in metrics)
+    return sum(
+        int(metric["bbox"][3]) + int(metric["spacing_after"])
+        for metric in metrics
+    )
 
 
 def _resolve_line_spacing(value: Any, font_size: int) -> int:
@@ -610,40 +504,6 @@ def _resolve_line_spacing(value: Any, font_size: int) -> int:
         except (TypeError, ValueError):
             pass
     return max(8, int(round(font_size * 0.24)))
-
-
-def _coerce_positive_int(value: Any, default: int) -> int:
-    try:
-        result = int(value)
-        if result > 0:
-            return result
-    except (TypeError, ValueError):
-        pass
-    return int(default)
-
-
-def _coerce_float(value: Any, default: float, *, minimum: float | None = None) -> float:
-    try:
-        result = float(value)
-    except (TypeError, ValueError):
-        result = float(default)
-    if minimum is not None:
-        result = max(minimum, result)
-    return result
-
-
-def _coerce_number(value: Any, default: int | float) -> int | float:
-    if value is None:
-        return default
-    if isinstance(value, (int, float)):
-        return value
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return default
-    if numeric.is_integer():
-        return int(numeric)
-    return numeric
 
 
 def _spacing_after_line(line: MarkdownLine, base_spacing: int) -> int:
