@@ -135,6 +135,13 @@ jobs:
           python -m pytest tests/test_smoke_render_samples.py -m smoke
 
       - name: Verify no-voice media reproducibility
+        env:
+          DISABLE_HWENC: "1"
+          HW_FILTER_MODE: cpu
+          USE_RAMDISK: "0"
+          FFMPEG_RUN_TIMEOUT_SEC: "90"
+          FFMPEG_STALL_TIMEOUT_SEC: "45"
+          FFMPEG_PROGRESS_LOG_INTERVAL_SEC: "5"
         run: |
           python scripts/verify_reproducibility.py scripts/smoke_minimal.yaml \
             --no-voice --hw-encoder cpu --output-dir output/reproducibility
