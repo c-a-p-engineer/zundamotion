@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from zundamotion.utils import ffmpeg_ops
+from zundamotion.utils import ffmpeg_concat, ffmpeg_transition
 from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
 
 
@@ -55,12 +56,12 @@ def test_apply_transition_local_copies_consumed_next_suffix(monkeypatch, tmp_pat
         calls["concat"].append(list(input_paths))
         return "audio_reencode"
 
-    monkeypatch.setattr(ffmpeg_ops, "get_media_duration", fake_get_media_duration)
-    monkeypatch.setattr(ffmpeg_ops, "_copy_segment", fake_copy_segment)
-    monkeypatch.setattr(ffmpeg_ops, "_encode_segment", fake_encode_segment)
-    monkeypatch.setattr(ffmpeg_ops, "_create_freeze_tail", fake_create_freeze_tail)
-    monkeypatch.setattr(ffmpeg_ops, "apply_transition", fake_apply_transition)
-    monkeypatch.setattr(ffmpeg_ops, "concat_videos_safe", fake_concat_videos_safe)
+    monkeypatch.setattr(ffmpeg_transition, "get_media_duration", fake_get_media_duration)
+    monkeypatch.setattr(ffmpeg_transition, "_copy_segment", fake_copy_segment)
+    monkeypatch.setattr(ffmpeg_transition, "_encode_segment", fake_encode_segment)
+    monkeypatch.setattr(ffmpeg_transition, "_create_freeze_tail", fake_create_freeze_tail)
+    monkeypatch.setattr(ffmpeg_transition, "apply_transition", fake_apply_transition)
+    monkeypatch.setattr(ffmpeg_transition, "concat_videos_safe", fake_concat_videos_safe)
 
     asyncio.run(
         ffmpeg_ops.apply_transition_local(
@@ -96,8 +97,8 @@ def test_safe_concat_logs_structured_transition_decision(monkeypatch, tmp_path, 
     async def fake_concat_copy(*args, **kwargs):
         return None
 
-    monkeypatch.setattr(ffmpeg_ops, "get_media_info", fake_get_media_info)
-    monkeypatch.setattr(ffmpeg_ops, "concat_videos_copy", fake_concat_copy)
+    monkeypatch.setattr(ffmpeg_concat, "get_media_info", fake_get_media_info)
+    monkeypatch.setattr(ffmpeg_concat, "concat_videos_copy", fake_concat_copy)
     caplog.set_level(logging.INFO, logger="zundamotion")
 
     mode = asyncio.run(
