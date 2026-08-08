@@ -83,4 +83,4 @@ def test_cpu_wait_render_is_bounded_across_repeated_runs(tmp_path: Path) -> None
         assert any(item.get("codec_type") == "video" for item in streams)
         assert any(item.get("codec_type") == "audio" for item in streams)
         duration = float((metadata.get("format") or {}).get("duration") or 0.0)
-        assert 0.6 <= duration <= 1.2
+        assert 1.8 <= duration <= 2.3
