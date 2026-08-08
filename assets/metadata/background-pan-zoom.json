@@ -1,7 +1,7 @@
 {
   "path": "background-pan-zoom.mp4",
   "duration": 2.6,
-  "size_bytes": 173089,
+  "size_bytes": 173122,
   "streams": [
     {
       "index": 0,
@@ -85,7 +85,7 @@
       "start_time": "0.000000",
       "duration_ts": 123904,
       "duration": "2.581333",
-      "bit_rate": "191547",
+      "bit_rate": "191649",
       "nb_frames": "121",
       "extradata_size": 5,
       "disposition": {
