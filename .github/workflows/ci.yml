@@ -144,7 +144,8 @@ jobs:
           FFMPEG_PROGRESS_LOG_INTERVAL_SEC: "5"
         run: |
           python scripts/verify_reproducibility.py scripts/smoke_minimal.yaml \
-            --no-voice --hw-encoder cpu --output-dir output/reproducibility
+            --no-voice --hw-encoder cpu --jobs 1 \
+            --output-dir output/reproducibility
 
       - name: Upload render smoke diagnostics
         if: always()
