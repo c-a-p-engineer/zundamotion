@@ -23,18 +23,18 @@ scenes:
   - id: wait_stability
     bg: assets/bg/default.png
     lines:
-      - wait: 0.15
-      - wait: 0.20
+      - wait: 0.40
+      - wait: 0.50
         characters:
           - name: copetan
             expression: default
             visible: true
-      - wait: 0.25
+      - wait: 0.60
         characters:
           - name: copetan
             expression: smile
             position: {x: 20, y: 0}
-      - wait: 0.15
+      - wait: 0.50
         screen_effects:
           - type: fade
-            duration: 0.05
+            duration: 0.10
