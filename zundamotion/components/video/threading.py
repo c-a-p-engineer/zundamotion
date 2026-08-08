@@ -89,12 +89,16 @@ def build_ffmpeg_thread_flags(
         fct = fct_override
     else:
         if cpu_filter_bound:
+            # BtbN FFmpeg CPU overlay graphs can intermittently stall when two
+            # clip processes each run a multi-threaded filter_complex graph.
+            # Keep process-level clip parallelism, but serialize each graph.
+            # Advanced users can still opt in to a higher value explicitly.
             per_filter_threads = max(1, nproc // max(1, clip_workers))
             cap_token = os.environ.get("FFMPEG_FILTER_COMPLEX_THREADS_CAP")
             try:
-                cap_value = int(cap_token) if cap_token and cap_token.isdigit() else 4
+                cap_value = int(cap_token) if cap_token and cap_token.isdigit() else 1
             except Exception:
-                cap_value = 4
+                cap_value = 1
             fct = str(max(1, min(per_filter_threads, cap_value)))
         else:
             fct = "1" if hw_kind == "nvenc" else str(nproc)

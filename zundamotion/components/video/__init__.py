@@ -6,17 +6,19 @@ from .subtitle_overlay_runtime import SubtitleOverlayRuntimeMixin
 from .subtitle_tail_safety import SubtitleTailSafetyMixin
 from .subtitle_segment_executor import SubtitleSegmentExecutorMixin
 from .subtitle_video_segments import SubtitleVideoSegmentMixin
+from .wait_clip_runtime import WaitClipRuntimeMixin
 from .face_overlay_cache import FaceOverlayCache
 
 
 class VideoRenderer(
+    WaitClipRuntimeMixin,
     SubtitleOverlayRuntimeMixin,
     SubtitleTailSafetyMixin,
     SubtitleSegmentExecutorMixin,
     SubtitleVideoSegmentMixin,
     _BaseVideoRenderer,
 ):
-    """Video renderer with modular subtitle planning, execution, and safety."""
+    """Video renderer with modular subtitle and finite wait-clip runtimes."""
 
 
 __all__ = [

@@ -167,7 +167,12 @@ def compare_values(left: Any, right: Any, path: str = "$") -> list[dict[str, Any
     return [] if left == right else [{"path": path, "left": left, "right": right}]
 
 
-def render(script: Path, output: Path, args: argparse.Namespace, root: Path) -> None:
+def build_render_command(
+    script: Path,
+    output: Path,
+    args: argparse.Namespace,
+    root: Path,
+) -> list[str]:
     command = [
         sys.executable,
         "-m",
@@ -185,10 +190,17 @@ def render(script: Path, output: Path, args: argparse.Namespace, root: Path) -> 
         "--subtitle-file",
         "both",
     ]
+    jobs = getattr(args, "jobs", None)
+    if jobs is not None:
+        command.extend(["--jobs", str(jobs)])
     if args.no_voice:
         command.append("--no-voice")
+    return command
+
+
+def render(script: Path, output: Path, args: argparse.Namespace, root: Path) -> None:
     run(
-        command,
+        build_render_command(script, output, args, root),
         cwd=root,
         timeout=args.timeout,
         log_prefix=output.with_suffix(".render"),
@@ -209,6 +221,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--no-voice", action="store_true")
     parser.add_argument("--hw-encoder", choices=("cpu", "gpu"), default="cpu")
+    parser.add_argument(
+        "--jobs",
+        default=None,
+        help="Forward a deterministic clip-worker setting to zundamotion (diagnostic).",
+    )
     parser.add_argument("--timeout", type=int, default=600)
     return parser.parse_args()
 
@@ -254,6 +271,7 @@ def main() -> int:
             "script": str(script),
             "no_voice": args.no_voice,
             "hw_encoder": args.hw_encoder,
+            "jobs": args.jobs,
             "elapsed_seconds": round(time.monotonic() - started_at, 3),
             "ffprobe": probes,
             "video_framemd5_sha256": video_hashes,
@@ -267,6 +285,7 @@ def main() -> int:
             "stage": stage,
             "error": str(exc),
             "script": str(script),
+            "jobs": args.jobs,
             "elapsed_seconds": round(time.monotonic() - started_at, 3),
         }
 
