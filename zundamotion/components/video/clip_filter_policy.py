@@ -16,8 +16,6 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ClipFilterPolicy:
-    """Filter backend choice derived from clip inputs and renderer capabilities."""
-
     global_mode: str
     use_cuda_filters: bool
     use_gpu_scale_only: bool
@@ -26,112 +24,113 @@ class ClipFilterPolicy:
     background_effects: Optional[List[Any]]
 
 
-def resolve_clip_filter_policy(
-    *,
-    renderer: "VideoRenderer",
+def _alpha_overlay_required(
     inputs: ClipInputCollection,
-    background_config: Dict[str, Any],
     insert_config: Optional[Dict[str, Any]],
     subtitle_text: Optional[str],
-    background_effects: Optional[List[Any]],
-    force_cpu: bool,
-) -> ClipFilterPolicy:
-    """Choose the same filter backend as the historical inline renderer logic."""
-
-    resolved_background_effects = background_effects or background_config.get("effects")
-    uses_alpha_overlay = (
+) -> bool:
+    return (
         inputs.any_character_visible
         or bool(insert_config and inputs.insert_is_image)
         or bool(inputs.image_layer_inputs)
         or is_effective_subtitle_text(subtitle_text)
     )
 
-    global_mode = get_hw_filter_mode()
-    use_cuda_filters = (
+
+def _initial_gpu_policy(
+    renderer: "VideoRenderer", *, global_mode: str,
+    uses_alpha_overlay: bool, force_cpu: bool,
+) -> tuple[bool, bool]:
+    use_cuda = (
         renderer.has_cuda_filters
         and renderer.hw_kind == "nvenc"
         and (renderer.gpu_overlay_experimental or not uses_alpha_overlay)
         and not force_cpu
         and global_mode != "cpu"
     )
-    allow_gpu_scale_only_cfg = bool(
+    scale_available = bool(
+        renderer.scale_only_backend or renderer.has_gpu_scale or renderer.has_cuda_filters
+    )
+    allow_scale = bool(
         renderer.config.get("video", {}).get("gpu_scale_with_cpu_overlay", True)
     )
-    allow_in_cpu_mode = renderer.cuda_scale_only_ok
-    scale_only_available = bool(
-        renderer.scale_only_backend
-        or renderer.has_gpu_scale
-        or renderer.has_cuda_filters
+    use_scale_only = (
+        not use_cuda and scale_available and renderer.hw_kind == "nvenc"
+        and allow_scale and not force_cpu
+        and (global_mode != "cpu" or renderer.cuda_scale_only_ok)
     )
-    use_gpu_scale_only = (
-        (not use_cuda_filters)
-        and scale_only_available
-        and renderer.hw_kind == "nvenc"
-        and allow_gpu_scale_only_cfg
-        and (not force_cpu)
-        and ((global_mode != "cpu") or allow_in_cpu_mode)
-    )
+    return use_cuda, use_scale_only
 
-    if resolved_background_effects:
-        if use_cuda_filters or use_gpu_scale_only:
-            logger.info(
-                "[Effects] Background effects requested; falling back to CPU-compatible overlay path."
-            )
-        use_cuda_filters = False
-        use_gpu_scale_only = False
 
-    if inputs.requires_cpu_fit and (use_cuda_filters or use_gpu_scale_only):
+def _apply_cpu_constraints(
+    *, inputs: ClipInputCollection, background_effects: Optional[List[Any]],
+    use_cuda: bool, use_scale_only: bool,
+) -> tuple[bool, bool]:
+    if background_effects:
+        if use_cuda or use_scale_only:
+            logger.info("[Effects] Background effects requested; falling back to CPU-compatible overlay path.")
+        use_cuda = use_scale_only = False
+    if inputs.requires_cpu_fit and (use_cuda or use_scale_only):
         logger.info(
             "[Filters] Background fit '%s' requires CPU filters; disabling GPU background scaling.",
             inputs.background_fit,
         )
-        use_cuda_filters = False
-        use_gpu_scale_only = False
+        use_cuda = use_scale_only = False
+    return use_cuda, use_scale_only
 
-    if use_cuda_filters:
-        logger.info("[Filters] CUDA path: scaling/overlay on GPU (no RGBA overlays)")
+
+def _record_filter_path(
+    renderer: "VideoRenderer", *, global_mode: str, uses_alpha_overlay: bool,
+    use_cuda: bool, use_scale_only: bool,
+) -> None:
+    if use_cuda:
+        label, message = "cuda_overlay", "[Filters] CUDA path: scaling/overlay on GPU (no RGBA overlays)"
+    elif use_scale_only:
+        label = "gpu_scale_only"
+        message = "[Filters] Hybrid path: GPU scale + CPU overlay (background only)%s"
+        logger.info(message, " [cpu-mode-override]" if global_mode == "cpu" else "")
         try:
-            renderer.path_counters["cuda_overlay"] += 1
+            renderer.path_counters[label] += 1
         except Exception:
             pass
-    elif use_gpu_scale_only:
-        logger.info(
-            "[Filters] Hybrid path: GPU scale + CPU overlay (background only)%s",
-            " [cpu-mode-override]" if global_mode == "cpu" else "",
-        )
-        try:
-            renderer.path_counters["gpu_scale_only"] += 1
-        except Exception:
-            pass
+        return
     elif renderer.hw_kind == "nvenc" and uses_alpha_overlay:
-        logger.info(
-            "[Filters] CPU path: RGBA overlays detected; forcing CPU overlays while keeping NVENC encoding"
-        )
-        try:
-            renderer.path_counters["cpu"] += 1
-        except Exception:
-            pass
+        label, message = "cpu", "[Filters] CPU path: RGBA overlays detected; forcing CPU overlays while keeping NVENC encoding"
     else:
-        logger.info("[Filters] CPU path: using CPU filters for scaling/overlay")
-        try:
-            renderer.path_counters["cpu"] += 1
-        except Exception:
-            pass
+        label, message = "cpu", "[Filters] CPU path: using CPU filters for scaling/overlay"
+    logger.info(message)
+    try:
+        renderer.path_counters[label] += 1
+    except Exception:
+        pass
 
-    use_opencl_overlays = (
-        renderer.gpu_overlay_backend == "opencl"
-        and not force_cpu
-        and (
-            get_hw_filter_mode() != "cpu"
-            or renderer.allow_opencl_overlay_in_cpu_mode
-        )
+
+def resolve_clip_filter_policy(
+    *, renderer: "VideoRenderer", inputs: ClipInputCollection,
+    background_config: Dict[str, Any], insert_config: Optional[Dict[str, Any]],
+    subtitle_text: Optional[str], background_effects: Optional[List[Any]],
+    force_cpu: bool,
+) -> ClipFilterPolicy:
+    resolved_effects = background_effects or background_config.get("effects")
+    uses_alpha = _alpha_overlay_required(inputs, insert_config, subtitle_text)
+    global_mode = get_hw_filter_mode()
+    use_cuda, use_scale_only = _initial_gpu_policy(
+        renderer, global_mode=global_mode, uses_alpha_overlay=uses_alpha, force_cpu=force_cpu
     )
-
+    use_cuda, use_scale_only = _apply_cpu_constraints(
+        inputs=inputs, background_effects=resolved_effects,
+        use_cuda=use_cuda, use_scale_only=use_scale_only,
+    )
+    _record_filter_path(
+        renderer, global_mode=global_mode, uses_alpha_overlay=uses_alpha,
+        use_cuda=use_cuda, use_scale_only=use_scale_only,
+    )
+    use_opencl = (
+        renderer.gpu_overlay_backend == "opencl" and not force_cpu
+        and (global_mode != "cpu" or renderer.allow_opencl_overlay_in_cpu_mode)
+    )
     return ClipFilterPolicy(
-        global_mode=global_mode,
-        use_cuda_filters=use_cuda_filters,
-        use_gpu_scale_only=use_gpu_scale_only,
-        use_opencl_overlays=use_opencl_overlays,
-        uses_alpha_overlay=uses_alpha_overlay,
-        background_effects=resolved_background_effects,
+        global_mode=global_mode, use_cuda_filters=use_cuda,
+        use_gpu_scale_only=use_scale_only, use_opencl_overlays=use_opencl,
+        uses_alpha_overlay=uses_alpha, background_effects=resolved_effects,
     )
