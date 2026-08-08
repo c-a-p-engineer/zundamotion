@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict
 
 from zundamotion.exceptions import PipelineError
-from zundamotion.utils.ffmpeg_probe import clear_probe_caches, get_media_duration
+from zundamotion.utils.ffmpeg_probe import clear_probe_caches
 from zundamotion.utils.logger import logger
 
 
@@ -49,8 +49,16 @@ class FinalizeCacheMixin:
     async def _is_valid_finalize_cache(
         self, path: Path, *, expected_duration: float, cache_label: str,
     ) -> bool:
+        # Resolve through finalize_phase so historical monkeypatch/test injection
+        # remains valid after splitting the implementation into mixins.
+        from . import finalize_phase as compat
+
         try:
-            actual = float(await get_media_duration(str(path), caller="finalize_cache_validation"))
+            actual = float(
+                await compat.get_media_duration(
+                    str(path), caller="finalize_cache_validation"
+                )
+            )
         except Exception as exc:
             logger.warning(
                 "FinalizePhase: Invalid %s cache '%s': media probe failed (%s).",
@@ -58,7 +66,10 @@ class FinalizeCacheMixin:
             )
             return False
         if not math.isfinite(actual) or actual <= 0:
-            logger.warning("FinalizePhase: Invalid %s cache '%s': duration=%s.", cache_label, path.name, actual)
+            logger.warning(
+                "FinalizePhase: Invalid %s cache '%s': duration=%s.",
+                cache_label, path.name, actual,
+            )
             return False
         if not math.isfinite(expected_duration) or expected_duration <= 0:
             return True
@@ -91,7 +102,9 @@ class FinalizeCacheMixin:
             if not await self._is_valid_finalize_cache(
                 partial, expected_duration=expected_duration, cache_label=cache_label
             ):
-                raise PipelineError(f"FinalizePhase: Generated {cache_label} cache failed validation.")
+                raise PipelineError(
+                    f"FinalizePhase: Generated {cache_label} cache failed validation."
+                )
             os.replace(partial, cache_output_path)
             clear_probe_caches()
             return cache_output_path
@@ -130,4 +143,6 @@ class FinalizeCacheMixin:
         ):
             return rebuilt
         rebuilt.unlink(missing_ok=True)
-        raise PipelineError(f"FinalizePhase: Regenerated {cache_label} cache failed validation.")
+        raise PipelineError(
+            f"FinalizePhase: Regenerated {cache_label} cache failed validation."
+        )
