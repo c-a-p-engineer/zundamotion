@@ -1,0 +1,40 @@
+meta:
+  title: "Wait stability smoke"
+  version: 1
+
+video:
+  width: 320
+  height: 180
+  fps: 10
+
+background:
+  default: assets/bg/default.png
+
+defaults:
+  characters_persist: true
+  characters:
+    copetan:
+      speaker_id: 3
+      scale: 0.20
+      anchor: bottom_center
+      position: {x: -70, y: 0}
+
+scenes:
+  - id: wait_stability
+    bg: assets/bg/default.png
+    lines:
+      - wait: 0.15
+      - wait: 0.20
+        characters:
+          - name: copetan
+            expression: default
+            visible: true
+      - wait: 0.25
+        characters:
+          - name: copetan
+            expression: smile
+            position: {x: 20, y: 0}
+      - wait: 0.15
+        screen_effects:
+          - type: fade
+            duration: 0.05
