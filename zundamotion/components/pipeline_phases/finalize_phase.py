@@ -1,47 +1,23 @@
 # -*- coding: utf-8 -*-
-import asyncio
-import hashlib
-import json
-import math
-import os
-import subprocess
-import tempfile
+"""Final output orchestration after scene rendering."""
+
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from zundamotion.cache import CacheManager
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
-from zundamotion.utils.ffmpeg_probe import (
-    clear_probe_caches,
-    get_media_info,
-    get_audio_duration,
-    get_media_duration,
-)
 from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
-from zundamotion.utils.ffmpeg_capabilities import (
-    _threading_flags,
-    get_encoder_options,
-    get_nproc_value,
-)
-from zundamotion.utils.ffmpeg_ops import (
-    apply_transition_local,
-    apply_transition,
-    compare_media_params,
-    concat_videos_copy,
-    concat_videos_safe,
-)
-from zundamotion.utils.ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
+from zundamotion.utils.ffmpeg_probe import get_media_duration
 from zundamotion.utils.logger import logger, time_log
+from .finalize_cache import FinalizeCacheMixin
+from .finalize_concat import FinalizeConcatMixin
+from .finalize_transitions import FinalizeTransitionMixin
 
 
-class FinalizePhase:
-    _TRANSITION_CACHE_MIN_TOLERANCE_SECONDS = 0.5
-    _TRANSITION_CACHE_MAX_TOLERANCE_SECONDS = 2.0
-    _FINAL_CACHE_MIN_TOLERANCE_SECONDS = 1.0
-    _FINAL_CACHE_MAX_TOLERANCE_SECONDS = 5.0
-    _CACHE_DURATION_RELATIVE_TOLERANCE = 0.01
-
+class FinalizePhase(FinalizeTransitionMixin, FinalizeConcatMixin, FinalizeCacheMixin):
     def __init__(
         self,
         config: Dict[str, Any],
@@ -51,7 +27,7 @@ class FinalizePhase:
         audio_params: AudioParams,
         hw_encoder: str = "auto",
         quality: str = "balanced",
-        final_copy_only: bool = False,  # 追加
+        final_copy_only: bool = False,
     ):
         self.config = config
         self.temp_dir = temp_dir
@@ -60,185 +36,24 @@ class FinalizePhase:
         self.audio_params = audio_params
         self.hw_encoder = hw_encoder
         self.quality = quality
-        self.final_copy_only = final_copy_only  # 追加
+        self.final_copy_only = final_copy_only
         self.finalize_cache_enabled = bool(
             (config.get("system", {}) or {}).get("finalize_cache", True)
         )
-        transitions_cfg = (config.get("transitions") or {})
-        wait_value = transitions_cfg.get("wait_padding_seconds", 2.0)
+        transitions = config.get("transitions") or {}
+        raw_wait = transitions.get("wait_padding_seconds", 2.0)
         try:
-            wait_seconds = float(wait_value)
+            wait_seconds = float(raw_wait)
         except (TypeError, ValueError):
             logger.warning(
                 "FinalizePhase: Invalid transitions.wait_padding_seconds=%s. Falling back to 0.0s.",
-                wait_value,
+                raw_wait,
             )
             wait_seconds = 0.0
         self.transition_wait_padding = max(0.0, wait_seconds)
 
-    @staticmethod
-    def _file_signature(path: Path) -> Dict[str, Any]:
-        resolved = Path(path).resolve()
-        try:
-            stat = resolved.stat()
-            digest = hashlib.sha256()
-            with resolved.open("rb") as f:
-                for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                    digest.update(chunk)
-            return {
-                "size": stat.st_size,
-                "sha256": digest.hexdigest(),
-            }
-        except Exception:
-            return {"path": str(resolved), "missing": True}
-
-    async def _is_valid_finalize_cache(
-        self,
-        path: Path,
-        *,
-        expected_duration: float,
-        cache_label: str,
-    ) -> bool:
-        """Return whether a Finalize cache entry is playable and plausibly complete."""
-        try:
-            actual_duration = float(
-                await get_media_duration(
-                    str(path),
-                    caller="finalize_cache_validation",
-                )
-            )
-        except Exception as exc:
-            logger.warning(
-                "FinalizePhase: Invalid %s cache '%s': media probe failed (%s).",
-                cache_label,
-                path.name,
-                exc,
-            )
-            return False
-
-        if not math.isfinite(actual_duration) or actual_duration <= 0:
-            logger.warning(
-                "FinalizePhase: Invalid %s cache '%s': duration=%s.",
-                cache_label,
-                path.name,
-                actual_duration,
-            )
-            return False
-
-        if not math.isfinite(expected_duration) or expected_duration <= 0:
-            return True
-
-        relative_tolerance = (
-            expected_duration * self._CACHE_DURATION_RELATIVE_TOLERANCE
-        )
-        if cache_label == "transition":
-            tolerance = min(
-                max(
-                    self._TRANSITION_CACHE_MIN_TOLERANCE_SECONDS,
-                    relative_tolerance,
-                ),
-                self._TRANSITION_CACHE_MAX_TOLERANCE_SECONDS,
-            )
-        else:
-            tolerance = min(
-                max(
-                    self._FINAL_CACHE_MIN_TOLERANCE_SECONDS,
-                    relative_tolerance,
-                ),
-                self._FINAL_CACHE_MAX_TOLERANCE_SECONDS,
-            )
-        difference = abs(actual_duration - expected_duration)
-        if difference > tolerance:
-            logger.warning(
-                "FinalizePhase: Invalid %s cache '%s': actual=%.2fs expected=%.2fs "
-                "difference=%.2fs tolerance=%.2fs.",
-                cache_label,
-                path.name,
-                actual_duration,
-                expected_duration,
-                difference,
-                tolerance,
-            )
-            return False
-        return True
-
-    async def _get_or_create_finalize_cache(
-        self,
-        *,
-        key_data: Dict[str, Any],
-        file_name: str,
-        extension: str,
-        creator_func: Callable[[Path], Awaitable[Path]],
-        expected_duration: float,
-        cache_label: str,
-    ) -> Path:
-        """Reuse a valid Finalize cache or remove and rebuild one invalid entry."""
-
-        async def atomic_creator(cache_output_path: Path) -> Path:
-            cache_output_path.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.TemporaryDirectory(
-                prefix=f".{cache_output_path.stem}.partial-",
-                dir=cache_output_path.parent,
-            ) as partial_dir:
-                partial_path = Path(partial_dir) / cache_output_path.name
-                generated_path = Path(await creator_func(partial_path))
-                if generated_path != partial_path:
-                    raise PipelineError(
-                        "FinalizePhase: Cache creator returned an unexpected output path: "
-                        f"{generated_path}"
-                    )
-                if not await self._is_valid_finalize_cache(
-                    partial_path,
-                    expected_duration=expected_duration,
-                    cache_label=cache_label,
-                ):
-                    raise PipelineError(
-                        f"FinalizePhase: Generated {cache_label} cache failed validation."
-                    )
-                os.replace(partial_path, cache_output_path)
-                clear_probe_caches()
-                return cache_output_path
-
-        cached_path = await self.cache_manager.get_or_create(
-            key_data=key_data,
-            file_name=file_name,
-            extension=extension,
-            creator_func=atomic_creator,
-        )
-        if await self._is_valid_finalize_cache(
-            cached_path,
-            expected_duration=expected_duration,
-            cache_label=cache_label,
-        ):
-            return cached_path
-
-        logger.warning(
-            "FinalizePhase: Removing invalid %s cache and regenerating: %s",
-            cache_label,
-            cached_path,
-        )
-        cached_path.unlink(missing_ok=True)
-        clear_probe_caches()
-
-        rebuilt_path = await self.cache_manager.get_or_create(
-            key_data=key_data,
-            file_name=file_name,
-            extension=extension,
-            creator_func=atomic_creator,
-        )
-        if not await self._is_valid_finalize_cache(
-            rebuilt_path,
-            expected_duration=expected_duration,
-            cache_label=cache_label,
-        ):
-            rebuilt_path.unlink(missing_ok=True)
-            raise PipelineError(
-                f"FinalizePhase: Regenerated {cache_label} cache failed validation."
-            )
-        return rebuilt_path
-
     @time_log(logger)
-    async def run(  # async を追加
+    async def run(
         self,
         scenes: List[Dict[str, Any]],
         timeline: Timeline,
@@ -247,358 +62,21 @@ class FinalizePhase:
         used_voicevox_info: List[Tuple[int, str]],
         output_stem: str = "final_output",
     ) -> Path:
-        """Phase 4: Finalize the video."""
+        """Apply transitions, concatenate scene outputs, and validate final duration."""
         logger.info("FinalizePhase: Finalizing video...")
-
         if not scene_video_paths:
             raise PipelineError("No video clips to finalize.")
-
-        # 1) シーン間トランジションの適用（先行シーンの transition を次シーンとの境界に適用）
-        processed_paths: List[Path] = list(scene_video_paths)
-
-        duration_tasks = [
-            get_media_duration(str(p), caller="finalize_scene_duration")
-            for p in processed_paths
-        ]
-        scene_durations: List[float] = []
-        if duration_tasks:
-            duration_results = await asyncio.gather(*duration_tasks, return_exceptions=True)
-            for path, result in zip(processed_paths, duration_results):
-                if isinstance(result, Exception):
-                    logger.warning(
-                        "FinalizePhase: Failed to probe duration for %s (%s). Falling back to 0.0s.",
-                        path.name,
-                        result,
-                    )
-                    scene_durations.append(0.0)
-                else:
-                    try:
-                        scene_durations.append(float(result))
-                    except Exception:
-                        scene_durations.append(0.0)
-        processed_durations: List[float] = list(scene_durations)
-
-        if len(processed_paths) >= 2:
-            logger.info("FinalizePhase: Applying scene transitions where defined...")
-            merged: List[Path] = []
-            merged_durations: List[float] = []
-            current: Path = processed_paths[0]
-            current_duration = scene_durations[0] if scene_durations else 0.0
-            for i in range(len(processed_paths) - 1):
-                next_path = processed_paths[i + 1]
-                next_duration = scene_durations[i + 1] if i + 1 < len(scene_durations) else 0.0
-                scene = scenes[i] if i < len(scenes) else {}
-                next_scene = scenes[i + 1] if i + 1 < len(scenes) else {}
-                from_scene_id = str(scene.get("id", f"scene_{i}"))
-                to_scene_id = str(next_scene.get("id", f"scene_{i + 1}"))
-                transition_cfg = scene.get("transition") if isinstance(scene, dict) else None
-
-                if transition_cfg:
-                    try:
-                        t_type = str(transition_cfg.get("type", "fade"))
-                        t_dur = float(transition_cfg.get("duration", 1.0))
-                    except Exception:
-                        t_type = "fade"
-                        t_dur = 1.0
-
-                    # offset = 現在クリップの末尾から duration 秒前
-                    offset = max(0.0, current_duration - t_dur)
-                    consume_next_head = self.transition_wait_padding > 0
-
-                    out_path = self.temp_dir / f"transition_{i:03d}_{i+1:03d}.mp4"
-                    timeline_shift = self.transition_wait_padding
-                    logger.info(
-                        "FinalizePhase: Applying transition '%s' (d=%.2fs, offset=%.2fs, wait=%.2fs, timeline_shift=%.2fs) between %s -> %s",
-                        t_type,
-                        t_dur,
-                        offset,
-                        self.transition_wait_padding,
-                        timeline_shift,
-                        current.name,
-                        Path(next_path).name,
-                    )
-                    transition_key_data = {
-                        "type": "finalize_transition_boundary",
-                        "version": "20260805_wait_padding_v2",
-                        "from_scene": from_scene_id,
-                        "to_scene": to_scene_id,
-                        "current": self._file_signature(current),
-                        "next": self._file_signature(next_path),
-                        "transition": {
-                            "type": t_type,
-                            "duration": t_dur,
-                            "offset": offset,
-                            "wait_padding": self.transition_wait_padding,
-                            "consume_next_head": consume_next_head,
-                        },
-                        "video_params": self.video_params.__dict__,
-                        "audio_params": self.audio_params.__dict__,
-                        "hw_encoder": self.hw_encoder,
-                    }
-
-                    async def transition_creator(cache_output_path: Path) -> Path:
-                        await apply_transition_local(
-                            str(current),
-                            str(next_path),
-                            str(cache_output_path),
-                            t_type,
-                            t_dur,
-                            offset,
-                            self.video_params,
-                            self.audio_params,
-                            wait_padding=self.transition_wait_padding,
-                            hw_encoder=self.hw_encoder,
-                            consume_next_head=consume_next_head,
-                            context={
-                                "phase": "FinalizePhase",
-                                "operation": "transition_boundary",
-                                "scene_id": from_scene_id,
-                                "from_scene": from_scene_id,
-                                "to_scene": to_scene_id,
-                                "transition_index": i,
-                            },
-                        )
-                        return cache_output_path
-
-                    if self.finalize_cache_enabled:
-                        if self.transition_wait_padding > 0:
-                            expected_transition_duration = (
-                                current_duration
-                                + next_duration
-                                + self.transition_wait_padding
-                            )
-                        else:
-                            expected_transition_duration = (
-                                current_duration + next_duration - t_dur
-                            )
-                        expected_transition_duration = max(
-                            0.0,
-                            expected_transition_duration,
-                        )
-                        out_path = await self._get_or_create_finalize_cache(
-                            key_data=transition_key_data,
-                            file_name=f"finalize_transition_{i:03d}_{i+1:03d}",
-                            extension="mp4",
-                            creator_func=transition_creator,
-                            expected_duration=expected_transition_duration,
-                            cache_label="transition",
-                        )
-                    else:
-                        await transition_creator(out_path)
-                    if timeline_shift > 0 and timeline is not None and i + 1 < len(scenes):
-                        next_scene = scenes[i + 1]
-                        next_scene_id = str(next_scene.get("id", f"scene_{i+1}"))
-                        gap_start = timeline.get_scene_start_time(next_scene_id)
-                        if gap_start is not None:
-                            timeline.shift_from(
-                                gap_start,
-                                timeline_shift,
-                            )
-                        else:
-                            logger.debug(
-                                "FinalizePhase: Could not locate start time for scene '%s' when shifting transition wait.",
-                                next_scene_id,
-                            )
-                    current = out_path
-                    if self.transition_wait_padding > 0:
-                        merged_duration = (
-                            current_duration
-                            + next_duration
-                            + self.transition_wait_padding
-                        )
-                    else:
-                        merged_duration = current_duration + next_duration - t_dur
-                    current_duration = max(0.0, merged_duration)
-                else:
-                    # トランジション未指定なら、これまでの current を確定し次へ
-                    merged.append(current)
-                    merged_durations.append(current_duration)
-                    current = next_path
-                    current_duration = next_duration
-
-            # ループ終了後の最後の current を確定
-            merged.append(current)
-            merged_durations.append(current_duration)
-            processed_paths = merged
-            processed_durations = merged_durations
-
-        safe_output_stem = output_stem or "final_output"
-        output_video_path = self.temp_dir / f"{safe_output_stem}.mp4"
-        input_video_str_paths = [str(p.resolve()) for p in processed_paths]
-
-        final_concat_key_data = {
-            "type": "finalize_concat_intermediate",
-            "version": "20260510_v1",
-            "inputs": [self._file_signature(path) for path in processed_paths],
-            "video_params": self.video_params.__dict__,
-            "audio_params": self.audio_params.__dict__,
-            "hw_encoder": self.hw_encoder,
-            "quality": self.quality,
-            "movflags_faststart": True,
-        }
-
-        async def final_concat_creator(cache_output_path: Path) -> Path:
-            await self._concat_processed_paths(
-                processed_paths,
-                cache_output_path,
-                input_video_str_paths,
-            )
-            return cache_output_path
-
-        if self.finalize_cache_enabled:
-            output_video_path = await self._get_or_create_finalize_cache(
-                key_data=final_concat_key_data,
-                file_name="finalize_concat",
-                extension="mp4",
-                creator_func=final_concat_creator,
-                expected_duration=sum(processed_durations),
-                cache_label="final concat",
-            )
-        else:
-            await final_concat_creator(output_video_path)
-
-        final_video_duration = await get_media_duration(
-            str(output_video_path),
-            caller="finalize_output_duration",
+        processed = list(scene_video_paths)
+        durations = await self._probe_scene_durations(processed)
+        processed, durations = await self._apply_scene_transitions(
+            scenes, timeline, processed, durations
+        )
+        output = await self._finalize_concat_output(processed, durations, output_stem)
+        final_duration = await get_media_duration(
+            str(output), caller="finalize_output_duration"
         )
         logger.info(
-            f"FinalizePhase: Final video '{output_video_path.name}' actual duration: {final_video_duration:.2f}s"
+            "FinalizePhase: Final video '%s' actual duration: %.2fs",
+            output.name, final_duration,
         )
-
-        return output_video_path
-
-    async def _concat_processed_paths(
-        self,
-        processed_paths: List[Path],
-        output_video_path: Path,
-        input_video_str_paths: List[str],
-    ) -> Path:
-        """Concat transition-processed scene videos, copying when possible."""
-
-        if await compare_media_params(input_video_str_paths):
-            logger.info(
-                "FinalizePhase: All video clips have identical parameters. Attempting -c copy concat."
-            )
-            try:
-                # Final output should be faststart-enabled for better streaming
-                mode = await concat_videos_safe(
-                    input_video_str_paths,
-                    str(output_video_path),
-                    self.audio_params,
-                    movflags_faststart=True,
-                    context={
-                        "phase": "FinalizePhase",
-                        "operation": "final_concat",
-                        "output_path": str(output_video_path),
-                    },
-                )
-                logger.info(
-                    "FinalizePhase: Successfully concatenated videos using %s to %s",
-                    mode,
-                    output_video_path,
-                )
-                return output_video_path
-            except Exception as e:
-                logger.warning(
-                    f"FinalizePhase: Failed to concat with -c copy: {e}. Falling back to re-encode concat."
-                )
-                if self.final_copy_only:
-                    raise PipelineError(
-                        "FinalizePhase: --final-copy-only is enabled, but -c copy concat failed."
-                    )
-                await self._reencode_concat(processed_paths, output_video_path)
-        else:
-            # パラメータ不一致時の詳細ログ
-            logger.warning("FinalizePhase: Video parameters mismatch.")
-            base_info = None
-            if input_video_str_paths:
-                base_info = await get_media_info(
-                    input_video_str_paths[0],
-                    caller="finalize_compare_media_params",
-                )
-                logger.warning(
-                    f"  Base video parameters ({input_video_str_paths[0]}): {json.dumps(base_info, indent=2)}"
-                )
-
-            for i, path in enumerate(input_video_str_paths[1:], start=1):
-                current_info = await get_media_info(
-                    path,
-                    caller="finalize_compare_media_params",
-                )
-                logger.warning(
-                    f"  Mismatch detected with {path}: {json.dumps(current_info, indent=2)}"
-                )
-                # ここで詳細な差分を比較してログに出力することも可能だが、まずは全体をログに出す
-
-            if self.final_copy_only:
-                raise PipelineError(
-                    "FinalizePhase: --final-copy-only is enabled, but video parameters mismatch."
-                )
-            logger.warning("FinalizePhase: Falling back to re-encode concat.")
-            await self._reencode_concat(processed_paths, output_video_path)
-
-        return output_video_path
-
-    async def _reencode_concat(
-        self, scene_video_paths: List[Path], output_video_path: Path
-    ):  # async を追加
-        """
-        従来の再エンコード方式で動画を結合する。
-        """
-        logger.info(
-            "FinalizePhase: Performing re-encode concat using -filter_complex concat."
-        )
-
-        encoder, video_opts = await get_encoder_options(self.hw_encoder, self.quality)
-        audio_opts = self.audio_params.to_ffmpeg_opts()
-        threading_flags = _threading_flags()
-
-        cmd = [
-            "ffmpeg",
-            "-y",
-        ]
-        cmd.extend(threading_flags)
-
-        for p in scene_video_paths:
-            cmd.extend(["-i", str(p.resolve())])
-
-        num_clips = len(scene_video_paths)
-        video_inputs = "".join([f"[{i}:v]" for i in range(num_clips)])
-        audio_inputs = "".join([f"[{i}:a]" for i in range(num_clips)])
-
-        filter_complex = (
-            f"{video_inputs}concat=n={num_clips}:v=1:a=0[v_out];"
-            f"{audio_inputs}concat=n={num_clips}:v=0:a=1[a_out]"
-        )
-
-        cmd.extend(["-filter_complex", filter_complex])
-        cmd.extend(["-map", "[v_out]", "-map", "[a_out]"])
-
-        cmd.extend(["-c:v", encoder])
-        cmd.extend(video_opts)
-        cmd.extend(audio_opts)
-        cmd.extend(["-movflags", "+faststart"])  # final output only
-        cmd.extend(["-shortest", str(output_video_path)])
-
-        logger.info(f"FinalizePhase: FFmpeg re-encode concat command: {' '.join(cmd)}")
-
-        try:
-            proc = await _run_ffmpeg_async(
-                cmd,
-                context={
-                    "phase": "FinalizePhase",
-                    "operation": "final_concat_reencode",
-                    "output_path": str(output_video_path),
-                },
-            )
-            logger.debug(f"FFmpeg stdout:\n{proc.stdout}")
-            logger.debug(f"FFmpeg stderr:\n{proc.stderr}")
-            logger.info(
-                f"Successfully concatenated all scene videos with re-encoding to {output_video_path}"
-            )
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error concatenating final video with re-encoding: {e}")
-            logger.error(f"FFmpeg stdout:\n{e.stdout}")
-            logger.error(f"FFmpeg stderr:\n{e.stderr}")
-            raise PipelineError(f"Failed to finalize video with re-encoding: {e}")
-        return output_video_path
+        return output
