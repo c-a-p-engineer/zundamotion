@@ -1,7 +1,7 @@
 {
   "path": "insert-video-speed.mp4",
   "duration": 2.533008,
-  "size_bytes": 961979,
+  "size_bytes": 961957,
   "streams": [
     {
       "index": 0,
@@ -85,7 +85,7 @@
       "start_time": "0.000000",
       "duration_ts": 121024,
       "duration": "2.521333",
-      "bit_rate": "191647",
+      "bit_rate": "191578",
       "nb_frames": "119",
       "extradata_size": 5,
       "disposition": {

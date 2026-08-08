@@ -1,7 +1,7 @@
 {
   "path": "bgm-control.mp4",
   "duration": 3.8,
-  "size_bytes": 139544,
+  "size_bytes": 139552,
   "streams": [
     {
       "index": 0,
@@ -85,7 +85,7 @@
       "start_time": "0.000000",
       "duration_ts": 182400,
       "duration": "3.800000",
-      "bit_rate": "188616",
+      "bit_rate": "188633",
       "nb_frames": "180",
       "extradata_size": 5,
       "disposition": {
