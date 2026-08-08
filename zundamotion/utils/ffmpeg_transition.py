@@ -107,8 +107,9 @@ def _transition_paths(output_path: str) -> Dict[str, str]:
 
 async def _prepare_transition_heads(
     *, input1: str, input2: str, paths: Dict[str, str],
-    dur1: float, second_head: float, offset: float, wait_padding: float,
-    consume_next_head: bool, video_params: VideoParams, audio_params: AudioParams,
+    dur1: float, second_head: float, transition_duration: float,
+    offset: float, wait_padding: float, consume_next_head: bool,
+    video_params: VideoParams, audio_params: AudioParams,
     ffmpeg_path: str, hw_encoder: str, context: Dict[str, Any],
 ) -> tuple[List[str], float]:
     parts: List[str] = []
@@ -120,7 +121,8 @@ async def _prepare_transition_heads(
         if prefix:
             parts.append(prefix)
         await _create_freeze_tail(
-            input1, paths["tail1"], source_duration=dur1, freeze_duration=wait_padding,
+            input1, paths["tail1"], source_duration=dur1,
+            freeze_duration=transition_duration,
             video_params=video_params, audio_params=audio_params, ffmpeg_path=ffmpeg_path,
             hw_encoder=hw_encoder, context={**context, "operation": "transition_freeze_tail"},
         )
@@ -193,10 +195,10 @@ async def apply_transition_local(
     paths = _transition_paths(output_path)
     parts, suffix_start = await _prepare_transition_heads(
         input1=input_video1_path, input2=input_video2_path, paths=paths,
-        dur1=dur1, second_head=second_head, offset=offset, wait_padding=wait_padding,
-        consume_next_head=consume_next_head, video_params=video_params,
-        audio_params=audio_params, ffmpeg_path=ffmpeg_path, hw_encoder=hw_encoder,
-        context=resolved,
+        dur1=dur1, second_head=second_head, transition_duration=duration,
+        offset=offset, wait_padding=wait_padding, consume_next_head=consume_next_head,
+        video_params=video_params, audio_params=audio_params, ffmpeg_path=ffmpeg_path,
+        hw_encoder=hw_encoder, context=resolved,
     )
     await apply_transition(
         paths["tail1"], paths["head2"], paths["boundary"], transition_type,
