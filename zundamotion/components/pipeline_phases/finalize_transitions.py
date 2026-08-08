@@ -8,13 +8,17 @@ from typing import Any, Dict, List, Tuple
 
 from zundamotion.timeline import Timeline
 from zundamotion.utils.ffmpeg_ops import apply_transition_local
-from zundamotion.utils.ffmpeg_probe import get_media_duration
 from zundamotion.utils.logger import logger
 
 
 class FinalizeTransitionMixin:
     async def _probe_scene_durations(self, paths: List[Path]) -> List[float]:
-        tasks = [get_media_duration(str(path), caller="finalize_scene_duration") for path in paths]
+        from . import finalize_phase as compat
+
+        tasks = [
+            compat.get_media_duration(str(path), caller="finalize_scene_duration")
+            for path in paths
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
         durations: List[float] = []
         for path, result in zip(paths, results):
