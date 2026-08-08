@@ -21,16 +21,13 @@ from .clip.characters import collect_character_inputs
 if TYPE_CHECKING:
     from .renderer import VideoRenderer
 
-
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 
 
 def _to_offset_expr(value: Any) -> str:
     if isinstance(value, (int, float)):
         return str(value)
-    if value is None:
-        return "0"
-    return str(value)
+    return "0" if value is None else str(value)
 
 
 def _media_speed(value: Any) -> float:
@@ -41,10 +38,34 @@ def _media_speed(value: Any) -> float:
     return max(0.25, min(4.0, speed))
 
 
+@dataclass(frozen=True)
+class BackgroundInputSettings:
+    fit: str
+    fill_color: str
+    anchor: str
+    offset_x: str
+    offset_y: str
+
+    @property
+    def position(self) -> Dict[str, str]:
+        return {"x": self.offset_x, "y": self.offset_y}
+
+    @property
+    def requires_cpu_fit(self) -> bool:
+        return self.fit != BACKGROUND_FIT_STRETCH or self.offset_x != "0" or self.offset_y != "0"
+
+
+@dataclass(frozen=True)
+class InsertInput:
+    ffmpeg_index: int = -1
+    audio_index: int = -1
+    is_image: bool = False
+    speed: float = 1.0
+    path: Optional[Path] = None
+
+
 @dataclass
 class ClipInputCollection:
-    """Resolved input arguments and indices consumed by later clip stages."""
-
     cmd: List[str]
     input_layers: List[Dict[str, Any]]
     background_path: Path
@@ -69,228 +90,162 @@ class ClipInputCollection:
     char_metadata: List[Dict[str, Any]]
 
 
+def _background_settings(renderer: "VideoRenderer", config: Dict[str, Any]) -> BackgroundInputSettings:
+    video_defaults = renderer.config.get("video", {}) or {}
+    bg_defaults = renderer.config.get("background", {}) or {}
+    fit = str(config.get("fit", video_defaults.get("background_fit", BACKGROUND_FIT_STRETCH))).lower()
+    fill = str(config.get("fill_color", bg_defaults.get("fill_color", DEFAULT_BACKGROUND_FILL_COLOR)) or DEFAULT_BACKGROUND_FILL_COLOR)
+    anchor = str(config.get("anchor", bg_defaults.get("anchor", DEFAULT_BACKGROUND_ANCHOR)) or DEFAULT_BACKGROUND_ANCHOR)
+    position = config.get("position")
+    if not isinstance(position, dict):
+        position = bg_defaults.get("position")
+    if not isinstance(position, dict):
+        position = {}
+    return BackgroundInputSettings(
+        fit=fit,
+        fill_color=fill,
+        anchor=anchor,
+        offset_x=_to_offset_expr(position.get("x")),
+        offset_y=_to_offset_expr(position.get("y")),
+    )
+
+
+async def _normalize_background(
+    renderer: "VideoRenderer", path: Path, settings: BackgroundInputSettings
+) -> Path:
+    key_data = {
+        "input_path": str(path.resolve()),
+        "video_params": renderer.video_params.__dict__,
+        "audio_params": renderer.audio_params.__dict__,
+    }
+
+    async def creator(temp_output_path: Path) -> Path:
+        return await normalize_media(
+            input_path=path, video_params=renderer.video_params,
+            audio_params=renderer.audio_params, cache_manager=renderer.cache_manager,
+            ffmpeg_path=renderer.ffmpeg_path, fit_mode=settings.fit,
+            fill_color=settings.fill_color, anchor=settings.anchor,
+            position=settings.position, scale_flags=renderer.scale_flags,
+        )
+
+    result = await renderer.cache_manager.get_or_create(
+        key_data=key_data, file_name="normalized_bg", extension="mp4", creator_func=creator
+    )
+    if result is None:
+        raise PipelineError(f"Failed to normalize background video: {path}")
+    return result
+
+
+async def _append_background_input(
+    renderer: "VideoRenderer", config: Dict[str, Any], cmd: List[str]
+) -> tuple[Path, BackgroundInputSettings]:
+    path_value = config.get("path")
+    if not path_value:
+        raise ValueError("Background path is missing.")
+    path = Path(path_value)
+    settings = _background_settings(renderer, config)
+    if config.get("type") != "video":
+        cmd.extend(["-loop", "1", "-i", str(path)])
+        return path, settings
+    try:
+        normalized_hint = bool(config.get("normalized", False))
+        temp_scene_bg = path.parent.resolve() == renderer.temp_dir.resolve() and path.name.startswith("scene_bg_")
+        if not (normalized_hint or temp_scene_bg):
+            try:
+                path = await _normalize_background(renderer, path, settings)
+            except Exception as exc:
+                print(f"[Warning] Could not inspect/normalize BG video {path.name}: {exc}. Using as-is.")
+        cmd.extend(["-ss", str(config.get("start_time", 0.0)), "-i", str(path)])
+    except Exception as exc:
+        logger.warning("Failed to process background video: %s. Falling back to image loop.", exc)
+        cmd.extend(["-loop", "1", "-i", str(path)])
+    return path, settings
+
+
+def _append_speech_input(audio_path: Path, cmd: List[str], layers: List[Dict[str, Any]]) -> int:
+    cmd.extend(["-i", str(audio_path)])
+    index = len(layers)
+    layers.append({"type": "audio", "index": index})
+    return index
+
+
+async def _append_insert_input(
+    renderer: "VideoRenderer", config: Optional[Dict[str, Any]],
+    cmd: List[str], layers: List[Dict[str, Any]],
+) -> InsertInput:
+    if not config:
+        return InsertInput()
+    path = Path(config["path"])
+    speed = _media_speed(config.get("speed", 1.0))
+    is_image = path.suffix.lower() in _IMAGE_SUFFIXES
+    if is_image:
+        cmd.extend(["-loop", "1", "-i", str(path.resolve())])
+    else:
+        try:
+            if not bool(config.get("normalized", False)):
+                path = await normalize_media(
+                    input_path=path, video_params=renderer.video_params,
+                    audio_params=renderer.audio_params, cache_manager=renderer.cache_manager,
+                    ffmpeg_path=renderer.ffmpeg_path,
+                )
+        except Exception as exc:
+            logger.warning("Could not inspect/normalize insert video %s: %s. Using as-is.", path.name, exc)
+        cmd.extend(["-i", str(path)])
+    ffmpeg_index = len(layers)
+    layers.append({"type": "video", "index": ffmpeg_index})
+    audio_index = ffmpeg_index if not is_image and await has_audio_stream(str(path)) else -1
+    return InsertInput(ffmpeg_index, audio_index, is_image, speed, path)
+
+
+def _append_overlay_inputs(
+    overlays: Optional[List[Dict[str, Any]]], cmd: List[str],
+    layers: List[Dict[str, Any]], *, audio: bool,
+) -> List[Dict[str, Any]]:
+    collected: List[Dict[str, Any]] = []
+    for overlay in overlays or []:
+        if not isinstance(overlay, dict):
+            continue
+        path_value = overlay.get("path") if audio else (overlay.get("path") or overlay.get("src"))
+        if not path_value:
+            continue
+        path = Path(str(path_value))
+        cmd.extend(["-i", str(path)] if audio else ["-loop", "1", "-i", str(path.resolve())])
+        index = len(layers)
+        layers.append({"type": "audio" if audio else "video", "index": index})
+        entry = dict(overlay)
+        entry["_ff_idx"] = index
+        collected.append(entry)
+    return collected
+
+
 async def collect_clip_inputs(
-    *,
-    renderer: "VideoRenderer",
-    audio_path: Path,
-    background_config: Dict[str, Any],
-    characters_config: List[Dict[str, Any]],
+    *, renderer: "VideoRenderer", audio_path: Path,
+    background_config: Dict[str, Any], characters_config: List[Dict[str, Any]],
     insert_config: Optional[Dict[str, Any]] = None,
     image_layer_overlays: Optional[List[Dict[str, Any]]] = None,
     extra_audio_overlays: Optional[List[Dict[str, Any]]] = None,
 ) -> ClipInputCollection:
-    """Resolve and append every clip input while preserving legacy input ordering."""
-
-    cmd: List[str] = [
-        renderer.ffmpeg_path,
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "warning",
-        *get_profile_flags(),
-    ]
+    """Resolve inputs in legacy FFmpeg index order."""
+    cmd = [renderer.ffmpeg_path, "-y", "-hide_banner", "-loglevel", "warning", *get_profile_flags()]
     cmd.extend(renderer.ffmpeg_thread_flags())
-    input_layers: List[Dict[str, Any]] = []
-
-    bg_path_str = background_config.get("path")
-    if not bg_path_str:
-        raise ValueError("Background path is missing.")
-    bg_path = Path(bg_path_str)
-
-    video_defaults = renderer.config.get("video", {}) or {}
-    background_defaults = renderer.config.get("background", {}) or {}
-    background_fit = str(
-        background_config.get(
-            "fit",
-            video_defaults.get("background_fit", BACKGROUND_FIT_STRETCH),
-        )
-    ).lower()
-    fill_color = str(
-        background_config.get(
-            "fill_color",
-            background_defaults.get("fill_color", DEFAULT_BACKGROUND_FILL_COLOR),
-        )
-        or DEFAULT_BACKGROUND_FILL_COLOR
+    layers: List[Dict[str, Any]] = []
+    bg_path, bg = await _append_background_input(renderer, background_config, cmd)
+    layers.append({"type": "video", "index": len(layers)})
+    speech_index = _append_speech_input(audio_path, cmd, layers)
+    insert = await _append_insert_input(renderer, insert_config, cmd, layers)
+    images = _append_overlay_inputs(image_layer_overlays, cmd, layers, audio=False)
+    audio_overlays = _append_overlay_inputs(extra_audio_overlays, cmd, layers, audio=True)
+    chars = await collect_character_inputs(
+        renderer=renderer, characters_config=characters_config, cmd=cmd, input_layers=layers
     )
-    background_anchor = str(
-        background_config.get(
-            "anchor",
-            background_defaults.get("anchor", DEFAULT_BACKGROUND_ANCHOR),
-        )
-        or DEFAULT_BACKGROUND_ANCHOR
-    )
-    raw_position = background_config.get("position")
-    if not isinstance(raw_position, dict):
-        raw_position = background_defaults.get("position")
-        if not isinstance(raw_position, dict):
-            raw_position = {}
-    offset_x_expr = _to_offset_expr(raw_position.get("x"))
-    offset_y_expr = _to_offset_expr(raw_position.get("y"))
-    position_exprs = {"x": offset_x_expr, "y": offset_y_expr}
-    requires_cpu_fit = (
-        background_fit != BACKGROUND_FIT_STRETCH
-        or offset_x_expr != "0"
-        or offset_y_expr != "0"
-    )
-
-    if background_config.get("type") == "video":
-        try:
-            normalized_hint = bool(background_config.get("normalized", False))
-            is_temp_scene_bg = (
-                bg_path.parent.resolve() == renderer.temp_dir.resolve()
-                and bg_path.name.startswith("scene_bg_")
-            )
-            should_skip_normalize = normalized_hint or is_temp_scene_bg
-            if not should_skip_normalize:
-                try:
-                    key_data = {
-                        "input_path": str(bg_path.resolve()),
-                        "video_params": renderer.video_params.__dict__,
-                        "audio_params": renderer.audio_params.__dict__,
-                    }
-
-                    async def _normalize_bg_creator(temp_output_path: Path) -> Path:
-                        return await normalize_media(
-                            input_path=bg_path,
-                            video_params=renderer.video_params,
-                            audio_params=renderer.audio_params,
-                            cache_manager=renderer.cache_manager,
-                            ffmpeg_path=renderer.ffmpeg_path,
-                            fit_mode=background_fit,
-                            fill_color=fill_color,
-                            anchor=background_anchor,
-                            position=position_exprs,
-                            scale_flags=renderer.scale_flags,
-                        )
-
-                    bg_path_result = await renderer.cache_manager.get_or_create(
-                        key_data=key_data,
-                        file_name="normalized_bg",
-                        extension="mp4",
-                        creator_func=_normalize_bg_creator,
-                    )
-                    if bg_path_result is None:
-                        raise PipelineError(
-                            f"Failed to normalize background video: {bg_path}"
-                        )
-                    bg_path = bg_path_result
-                except Exception as exc:
-                    print(
-                        f"[Warning] Could not inspect/normalize BG video {bg_path.name}: {exc}. Using as-is."
-                    )
-            cmd.extend(
-                [
-                    "-ss",
-                    str(background_config.get("start_time", 0.0)),
-                    "-i",
-                    str(bg_path),
-                ]
-            )
-        except Exception as exc:
-            logger.warning(
-                "Failed to process background video: %s. Falling back to image loop.",
-                exc,
-            )
-            cmd.extend(["-loop", "1", "-i", str(bg_path)])
-    else:
-        cmd.extend(["-loop", "1", "-i", str(bg_path)])
-    input_layers.append({"type": "video", "index": len(input_layers)})
-
-    cmd.extend(["-i", str(audio_path)])
-    speech_audio_index = len(input_layers)
-    input_layers.append({"type": "audio", "index": speech_audio_index})
-
-    insert_ffmpeg_index = -1
-    insert_audio_index = -1
-    insert_is_image = False
-    insert_speed = 1.0
-    insert_path: Optional[Path] = None
-    if insert_config:
-        insert_path = Path(insert_config["path"])
-        insert_speed = _media_speed(insert_config.get("speed", 1.0))
-        insert_is_image = insert_path.suffix.lower() in _IMAGE_SUFFIXES
-        if not insert_is_image:
-            try:
-                if not bool(insert_config.get("normalized", False)):
-                    insert_path = await normalize_media(
-                        input_path=insert_path,
-                        video_params=renderer.video_params,
-                        audio_params=renderer.audio_params,
-                        cache_manager=renderer.cache_manager,
-                        ffmpeg_path=renderer.ffmpeg_path,
-                    )
-            except Exception as exc:
-                logger.warning(
-                    "Could not inspect/normalize insert video %s: %s. Using as-is.",
-                    insert_path.name,
-                    exc,
-                )
-            cmd.extend(["-i", str(insert_path)])
-        else:
-            cmd.extend(["-loop", "1", "-i", str(insert_path.resolve())])
-        insert_ffmpeg_index = len(input_layers)
-        input_layers.append({"type": "video", "index": insert_ffmpeg_index})
-        if not insert_is_image and await has_audio_stream(str(insert_path)):
-            insert_audio_index = insert_ffmpeg_index
-
-    image_layer_inputs: List[Dict[str, Any]] = []
-    for overlay in image_layer_overlays or []:
-        if not isinstance(overlay, dict):
-            continue
-        path_str = overlay.get("path") or overlay.get("src")
-        if not path_str:
-            continue
-        image_path = Path(path_str)
-        cmd.extend(["-loop", "1", "-i", str(image_path.resolve())])
-        ff_idx = len(input_layers)
-        input_layers.append({"type": "video", "index": ff_idx})
-        entry = dict(overlay)
-        entry["_ff_idx"] = ff_idx
-        image_layer_inputs.append(entry)
-
-    extra_audio_inputs: List[Dict[str, Any]] = []
-    for overlay in extra_audio_overlays or []:
-        if not isinstance(overlay, dict):
-            continue
-        path_str = overlay.get("path")
-        if not path_str:
-            continue
-        audio_overlay_path = Path(str(path_str))
-        cmd.extend(["-i", str(audio_overlay_path)])
-        ff_idx = len(input_layers)
-        input_layers.append({"type": "audio", "index": ff_idx})
-        entry = dict(overlay)
-        entry["_ff_idx"] = ff_idx
-        extra_audio_inputs.append(entry)
-
-    char_inputs = await collect_character_inputs(
-        renderer=renderer,
-        characters_config=characters_config,
-        cmd=cmd,
-        input_layers=input_layers,
-    )
-
     return ClipInputCollection(
-        cmd=cmd,
-        input_layers=input_layers,
-        background_path=bg_path,
-        background_fit=background_fit,
-        fill_color=fill_color,
-        background_anchor=background_anchor,
-        offset_x_expr=offset_x_expr,
-        offset_y_expr=offset_y_expr,
-        position_exprs=position_exprs,
-        requires_cpu_fit=requires_cpu_fit,
-        speech_audio_index=speech_audio_index,
-        insert_ffmpeg_index=insert_ffmpeg_index,
-        insert_audio_index=insert_audio_index,
-        insert_is_image=insert_is_image,
-        insert_speed=insert_speed,
-        insert_path=insert_path,
-        image_layer_inputs=image_layer_inputs,
-        extra_audio_inputs=extra_audio_inputs,
-        character_indices=char_inputs.indices,
-        char_effective_scale=char_inputs.effective_scales,
-        any_character_visible=char_inputs.any_visible,
-        char_metadata=char_inputs.metadata,
+        cmd=cmd, input_layers=layers, background_path=bg_path,
+        background_fit=bg.fit, fill_color=bg.fill_color, background_anchor=bg.anchor,
+        offset_x_expr=bg.offset_x, offset_y_expr=bg.offset_y, position_exprs=bg.position,
+        requires_cpu_fit=bg.requires_cpu_fit, speech_audio_index=speech_index,
+        insert_ffmpeg_index=insert.ffmpeg_index, insert_audio_index=insert.audio_index,
+        insert_is_image=insert.is_image, insert_speed=insert.speed, insert_path=insert.path,
+        image_layer_inputs=images, extra_audio_inputs=audio_overlays,
+        character_indices=chars.indices, char_effective_scale=chars.effective_scales,
+        any_character_visible=chars.any_visible, char_metadata=chars.metadata,
     )
