@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 from zundamotion.utils import ffmpeg_ops
 from zundamotion.utils.ffmpeg_background import build_background_fit_steps
@@ -19,6 +20,11 @@ def test_ffmpeg_ops_facade_reexports_modular_entrypoints() -> None:
     _assert_modular_export(ffmpeg_ops.normalize_media, ".ffmpeg_normalize")
     _assert_modular_export(ffmpeg_ops.apply_transition, ".ffmpeg_transition")
     _assert_modular_export(ffmpeg_ops.apply_transition_local, ".ffmpeg_transition")
+
+
+def test_ffmpeg_ops_facade_remains_small() -> None:
+    source_path = Path(ffmpeg_ops.__file__)
+    assert len(source_path.read_text(encoding="utf-8").splitlines()) <= 120
 
 
 def test_modular_ffmpeg_entrypoints_are_bounded() -> None:
