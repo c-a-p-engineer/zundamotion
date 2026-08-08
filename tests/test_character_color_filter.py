@@ -174,7 +174,7 @@ def test_color_filter_targets_only_recolors_top_dark_pixels(
         )
 
         with Image.open(filtered_path) as filtered:
-            pixels = list(filtered.convert("RGBA").getdata())
+            pixels = list(filtered.convert("RGBA").get_flattened_data())
 
         assert pixels[0][:3] != (25, 25, 25)
         assert len(set(pixels[0][:3])) > 1
@@ -231,7 +231,7 @@ def test_color_filter_targets_can_use_rect_and_rgb_distance(
         )
 
         with Image.open(filtered_path) as filtered:
-            pixels = list(filtered.convert("RGBA").getdata())
+            pixels = list(filtered.convert("RGBA").get_flattened_data())
 
         assert pixels[0][:3] != (26, 26, 26)
         assert pixels[1][:3] == (100, 100, 100)
