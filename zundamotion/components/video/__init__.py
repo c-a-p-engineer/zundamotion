@@ -1,4 +1,9 @@
-"""Video rendering components."""
+"""Public video rendering facade.
+
+Mixin order is a compatibility contract: finite wait/image-scene rendering and the
+modular subtitle runtime must resolve before the historical base renderer.  Legacy
+implementations remain importable for compatibility but are not the public hot path.
+"""
 
 from .renderer import VideoRenderer as _BaseVideoRenderer, _run_ffmpeg_async
 from .overlays import OverlayMixin
