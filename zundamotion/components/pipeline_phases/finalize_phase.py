@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Tuple
 from zundamotion.cache import CacheManager
 from zundamotion.exceptions import PipelineError
 from zundamotion.timeline import Timeline
+from zundamotion.utils.ffmpeg_ops import compare_media_params, concat_videos_safe
 from zundamotion.utils.ffmpeg_params import AudioParams, VideoParams
 from zundamotion.utils.ffmpeg_probe import get_media_duration
 from zundamotion.utils.logger import logger, time_log
