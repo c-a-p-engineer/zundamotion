@@ -15,6 +15,9 @@ on:
       - "zundamotion/components/video/subtitle_video_segments.py"
       - "zundamotion/components/video/subtitle_overlay_runtime.py"
       - "zundamotion/components/video/threading.py"
+      - "zundamotion/components/pipeline_phases/video_phase/main.py"
+      - "zundamotion/components/pipeline_phases/video_phase/reliability.py"
+      - "zundamotion/components/pipeline_phases/video_phase/__init__.py"
 
 jobs:
   benchmark:
