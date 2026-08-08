@@ -8,6 +8,7 @@ are composed as explicit responsibilities here.
 from __future__ import annotations
 
 import inspect
+import json
 from pathlib import Path
 
 from .cache_base import (
@@ -68,6 +69,28 @@ class CacheManager(
             caller=caller,
             kind=metric_kind,
         )
+
+    async def get_or_create_media_duration(
+        self,
+        file_path: Path,
+        caller: str | None = None,
+    ) -> float:
+        """Preserve the no-cache ephemeral duration marker while using probe bundles.
+
+        Persistent writes use only the unified ``probe_*.json`` format.  ``--no-cache``
+        historically exposed a run-local ``duration_*.json`` marker inside the ephemeral
+        directory, so keep that temporary marker for compatibility without duplicating
+        persistent cache metadata.
+        """
+        duration = await super().get_or_create_media_duration(file_path, caller=caller)
+        if self.no_cache and self.ephemeral_dir is not None:
+            _info_path, duration_path = self._legacy_probe_paths(file_path)
+            if not duration_path.exists():
+                duration_path.write_text(
+                    json.dumps({"duration": duration, "created_at": 0.0}, sort_keys=True),
+                    encoding="utf-8",
+                )
+        return duration
 
 
 __all__ = [
