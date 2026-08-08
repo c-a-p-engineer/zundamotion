@@ -10,6 +10,7 @@ from .ffmpeg_runner import run_ffmpeg_async as _run_ffmpeg_async
 from .logger import logger
 
 _FILTERS_CACHE: Dict[str, str] = {}
+_PREFERRED_SCALE_FILTER_CACHE: Dict[str, str] = {}
 
 
 def get_nproc_value() -> str:
@@ -77,15 +78,22 @@ async def has_gpu_scale_filters(ffmpeg_path: str = "ffmpeg") -> bool:
 
 
 async def get_preferred_cuda_scale_filter(ffmpeg_path: str = "ffmpeg") -> str:
+    cached = _PREFERRED_SCALE_FILTER_CACHE.get(ffmpeg_path)
+    if cached:
+        return cached
     filters = await _list_ffmpeg_filters(ffmpeg_path)
-    return "scale_cuda" if "scale_cuda" in filters else (
+    chosen = "scale_cuda" if "scale_cuda" in filters else (
         "scale_npp" if "scale_npp" in filters else "scale_cuda"
     )
+    _PREFERRED_SCALE_FILTER_CACHE[ffmpeg_path] = chosen
+    return chosen
 
 
 async def has_opencl_filters(ffmpeg_path: str = "ffmpeg") -> bool:
     try:
         filters = await _list_ffmpeg_filters(ffmpeg_path)
-        return "overlay_opencl" in filters and "scale_opencl" in filters
+        return "overlay_opencl" in filters and (
+            "scale_opencl" in filters or "hwupload" in filters
+        )
     except Exception:
         return False
