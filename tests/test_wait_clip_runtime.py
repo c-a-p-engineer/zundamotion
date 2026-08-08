@@ -13,8 +13,9 @@ from zundamotion.components.video.wait_clip_runtime import (
 from zundamotion.utils.ffmpeg_params import AudioParams
 
 
-def test_public_video_renderer_routes_waits_through_finite_runtime() -> None:
+def test_public_video_renderer_routes_waits_and_image_scene_bases_through_finite_runtime() -> None:
     assert VideoRenderer.render_wait_clip is WaitClipRuntimeMixin.render_wait_clip
+    assert VideoRenderer.render_scene_base is WaitClipRuntimeMixin.render_scene_base
 
 
 def test_finite_silence_wav_has_bounded_exact_frame_count(tmp_path: Path) -> None:
@@ -87,3 +88,21 @@ def test_wait_clip_delegates_to_common_clip_pipeline_with_finite_audio(tmp_path:
 
     with wave.open(str(audio_path), "rb") as stream:
         assert stream.getnframes() == 12_000
+
+
+def test_image_scene_base_uses_finite_common_wait_path(tmp_path: Path) -> None:
+    renderer = _DummyRenderer(tmp_path)
+    result = asyncio.run(
+        renderer.render_scene_base(
+            {"type": "image", "path": "bg.png"},
+            0.75,
+            "scene_base_shared",
+        )
+    )
+
+    assert result == Path("/tmp/wait-output.mp4")
+    assert renderer.render_kwargs is not None
+    assert renderer.render_kwargs["duration"] == 0.75
+    assert renderer.render_kwargs["output_filename"] == "scene_base_shared"
+    assert renderer.render_kwargs["characters_config"] == []
+    assert Path(renderer.render_kwargs["audio_path"]).exists()
