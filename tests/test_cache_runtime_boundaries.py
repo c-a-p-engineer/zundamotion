@@ -112,15 +112,16 @@ def test_cache_latency_stages_are_recorded(tmp_path: Path, monkeypatch) -> None:
     source.write_bytes(b"payload")
     manager = CacheManager(tmp_path / "cache")
     stages: list[str] = []
+    key_data = {"image_path": str(image)}
 
     monkeypatch.setattr(
         manager._cache_diagnostics,
         "record_latency",
         lambda stage, _elapsed: stages.append(stage),
     )
-    manager._generate_hash({"asset": str(image)})
-    manager.cache_file(source, {"asset": str(image)}, "sample", "bin")
-    manager.get_cached_path({"asset": str(image)}, "sample", "bin")
+    manager._generate_hash(key_data)
+    manager.cache_file(source, key_data, "sample", "bin")
+    manager.get_cached_path(key_data, "sample", "bin")
 
     assert "file_fingerprint" in stages
     assert "key_serialization_hash" in stages
