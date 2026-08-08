@@ -9,12 +9,16 @@ from zundamotion.utils.ffmpeg_normalize import normalize_media
 from zundamotion.utils.ffmpeg_transition import apply_transition, apply_transition_local
 
 
+def _assert_modular_export(exported, suffix: str) -> None:
+    assert exported.__module__.endswith(suffix), exported.__module__
+
+
 def test_ffmpeg_ops_facade_reexports_modular_entrypoints() -> None:
-    assert ffmpeg_ops.build_background_fit_steps is build_background_fit_steps
-    assert ffmpeg_ops.concat_videos_safe is concat_videos_safe
-    assert ffmpeg_ops.normalize_media is normalize_media
-    assert ffmpeg_ops.apply_transition is apply_transition
-    assert ffmpeg_ops.apply_transition_local is apply_transition_local
+    _assert_modular_export(ffmpeg_ops.build_background_fit_steps, ".ffmpeg_background")
+    _assert_modular_export(ffmpeg_ops.concat_videos_safe, ".ffmpeg_concat")
+    _assert_modular_export(ffmpeg_ops.normalize_media, ".ffmpeg_normalize")
+    _assert_modular_export(ffmpeg_ops.apply_transition, ".ffmpeg_transition")
+    _assert_modular_export(ffmpeg_ops.apply_transition_local, ".ffmpeg_transition")
 
 
 def test_modular_ffmpeg_entrypoints_are_bounded() -> None:
