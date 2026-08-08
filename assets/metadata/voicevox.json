@@ -1,7 +1,7 @@
 {
   "path": "voicevox.mp4",
   "duration": 3.866667,
-  "size_bytes": 142876,
+  "size_bytes": 142961,
   "streams": [
     {
       "index": 0,
@@ -85,7 +85,7 @@
       "start_time": "0.000000",
       "duration_ts": 183296,
       "duration": "3.818667",
-      "bit_rate": "191748",
+      "bit_rate": "191926",
       "nb_frames": "179",
       "extradata_size": 5,
       "disposition": {

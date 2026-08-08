@@ -1,7 +1,7 @@
 {
   "path": "transition.mp4",
   "duration": 5.821029,
-  "size_bytes": 575846,
+  "size_bytes": 575780,
   "streams": [
     {
       "index": 0,
@@ -85,7 +85,7 @@
       "start_time": "0.000000",
       "duration_ts": 275456,
       "duration": "5.738667",
-      "bit_rate": "125838",
+      "bit_rate": "125746",
       "nb_frames": "269",
       "extradata_size": 5,
       "disposition": {
