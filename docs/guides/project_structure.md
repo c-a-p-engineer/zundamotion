@@ -1,103 +1,160 @@
 # プロジェクト構造
 
-このガイドは、Zundamotion リポジトリの構成と主要コンポーネントの役割をまとめたものです。
-
-関連:
-
-- [docs 入口](../README.md)
-- [README](../../README.md)
-- [AI 向け低トークン規約](./ai_coding_rules.md)
-- [Python コード規約](./python_coding_rules.md)
-- [セットアップと実行](./setup_and_runtime.md)
-- [台本チートシート](../../scripts/script_cheatsheet.md)
+このガイドは、現在の Zundamotion の主要コンポーネントと責務境界をまとめます。
+現在の完了状況や次タスクは [`project_status.md`](./project_status.md) を参照してください。
 
 ## 技術スタック
 
-- 言語: CPython 3.14 系（最新安定版、パッチ版は固定しない）
-- 主要ライブラリ:
-  - `PyYAML`
-  - `requests`
-  - `httpx`
-  - `tenacity`
-  - `pysubs2`
-  - `Pillow`
-- 外部ツール:
-  - `FFmpeg`
-  - `VOICEVOX`
+- 言語: CPython 3.14 系
+- 主要ライブラリ: PyYAML / requests / httpx / tenacity / pysubs2 / Pillow
+- 外部ツール: FFmpeg / ffprobe / VOICEVOX Engine
 
-## 主要ディレクトリ
+## リポジトリ全体
 
 ```text
 .
 ├── assets/                 # 背景、立ち絵、BGM、SE
-├── docs/                   # ガイド、設計メモ、機能一覧
-├── output/                 # 出力動画
-├── scripts/                # サンプル台本、確認用 YAML
-├── tools/                  # 補助ツール
-├── zundamotion/            # 本体コード
-└── requirements.txt        # 依存関係
+├── docs/                   # 利用ガイド、設計、判断・性能履歴
+├── output/                 # 生成物
+├── scripts/                # サンプル台本、YAMLチートシート
+├── site/                   # GitHub Pages機能デモ
+├── tests/                  # unit / integration / characterization
+├── tools/                  # benchmark、検証、補助CLI
+└── zundamotion/            # 本体
 ```
 
-## `zundamotion/` 配下
+## `zundamotion/` の主要責務
 
 ```text
 zundamotion/
-├── cache.py
-├── exceptions.py
-├── main.py
-├── pipeline.py
+├── main.py                 # CLI entry
+├── pipeline.py             # GenerationPipeline facade / orchestration
+├── pipeline_entry.py       # 高レベル実行入口
+├── pipeline_reporting.py   # pipeline report / summary
+├── cache.py                # CacheManager public compatibility facade
+├── cache_runtime.py        # generic cache runtime
+├── cache_media.py          # media probe cache
+├── cache_lifecycle.py      # TTL / eviction / cleanup
+├── cache_observability.py  # cache diagnostics
 ├── components/
-│   ├── audio/
-│   ├── config/
-│   ├── pipeline_phases/
-│   ├── script/
-│   ├── subtitles/
-│   └── video/
-├── reporting/
-├── templates/
-└── utils/
+│   ├── audio/              # VOICEVOX、音声生成・mix
+│   ├── config/             # YAML設定とvalidation
+│   ├── markdown/           # Markdown input pipeline
+│   ├── pipeline_phases/    # Audio / Video / Finalize / BGM
+│   ├── script/             # include / vars / script resolution
+│   ├── subtitles/          # PNG / ASS subtitle generation
+│   └── video/              # clip renderer、overlay、effect
+├── plugins/                # built-in / drop-in plugin registry
+├── reporting/              # reporting helpers
+├── templates/              # package default config
+└── utils/                  # FFmpeg、probe、runtime、logging
 ```
 
-## 主な責務
+## Pipeline
 
-- `components/audio/`
-  - VOICEVOX 通常発話、音声生成、音声ミックス
-- `components/config/`
-  - YAML ロード、マージ、検証
-- `components/script/`
-  - 設定統合の入口 API
-- `components/subtitles/`
-  - 字幕生成、PNG 字幕レンダリング
-- `components/video/`
-  - 動画レンダリング、overlay 合成、立ち絵処理
-- `components/pipeline_phases/`
-  - Audio / Video / Finalize / BGM 各フェーズ
-- `utils/`
-  - FFmpeg 実行、probe、ハードウェア判定、ログ
+`GenerationPipeline` はフェーズ順序制御を担当し、詳細処理を抱え込みません。
 
-## VideoPhase のシーン描画
+```text
+AudioPhase
+  ↓
+VideoPhase
+  ↓
+FinalizePhase
+  ↓
+BGMPhase
+  ↓
+final output / sidecars
+```
 
-`components/pipeline_phases/video_phase/scene_renderer.py` は公開入口です。
-既存コードは引き続き `SceneRenderer` をこのモジュールから import します。
-実装を調べるときは、変更内容に応じて次のファイルだけを先に読みます。
+設定解決、reporting、cache、各フェーズ内部の処理は専用モジュールへ分離されています。
 
-| 変更内容 | 最初に読むファイル | 責務 |
-| --- | --- | --- |
-| 初期化、シーン実行順序、公開 API | `scene_renderer.py` | `SceneRenderer` facade、永続状態適用、描画経路の呼び出し |
-| 背景、badge、画像レイヤー、顔差分の事前準備 | `scene_preparation.py` | scene / line 単位の素材・状態解決とprecache |
-| simple scene fast path | `scene_fast_path.py` | 適用可否、キャラクター式、単一FFmpegグラフ生成 |
-| scene cache、字幕entry | `scene_cache.py` | base/subtitle cache payloadと字幕タイミング |
-| 通常の行クリップ描画とscene組み立て | `scene_standard_renderer.py` | line並列描画、base/subtitle合成、cache保存 |
+## Audio
 
-`scene_*.py` の Mixin は内部実装です。外部から直接インスタンス化せず、
-`scene_renderer.SceneRenderer` 経由で利用します。
+主な責務:
 
-`scene_standard_renderer.py` は既存の標準描画処理を挙動変更なしで隔離した段階で、
-まだ規約上限を超えています。変更時はファイル全体を先に読まず、
-対象ブロックと呼び出す Mixin の契約を確認してください。
+- `components/audio/`: VOICEVOX client、speech生成、cache、複数音声mix
+- `pipeline_phases/audio_phase*.py`: line entry、speech、face animation、control、ordered execution
+- `utils/ffmpeg_audio.py`: FFmpeg audio primitive
 
-## 関連ドキュメント
+現在は VOICEVOX が音声合成実装の中心です。将来の TTS Provider 抽象化は `project_status.md` の後続タスクとして扱います。
 
-- YAML の書き方: [`../../scripts/script_cheatsheet.md`](../../scripts/script_cheatsheet.md)
+## VideoPhase / SceneRenderer
+
+公開入口は `components/pipeline_phases/video_phase/scene_renderer.py` の `SceneRenderer` です。
+外部コードは隣接する mixin を直接利用せず、この facade 経由で扱います。
+
+| 責務 | 主なモジュール |
+| --- | --- |
+| scene facade / persistent state | `scene_renderer.py` |
+| standard orchestration | `scene_standard_renderer.py` |
+| context / timing | `scene_standard_context.py`, `scene_timing.py` |
+| precache / preparation | `scene_precache.py`, `scene_preparation.py`, `scene_*_preparation.py` |
+| scene base / run base | `scene_base_*.py`, `scene_run_base_*.py` |
+| line plan / wait / talk / executor | `scene_line_*.py`, `scene_wait_renderer.py`, `scene_talk_*.py` |
+| assembly / result cache | `scene_assembly.py`, `scene_result_cache.py` |
+| fast path | `scene_fast_path*.py` |
+
+大規模な standard renderer 分割は完了済みです。`scene_standard_renderer.py` は名前付きstageの呼出を中心とする orchestration です。
+
+## ClipRenderer
+
+公開入口は `components/video/clip_renderer.py::render_clip` です。
+内部は次へ分離されています。
+
+- input collection
+- background / overlay / subtitle / video / audio graph
+- backend policy
+- FFmpeg command generation
+- process execution / fallback
+- pipeline orchestration
+
+`clip_renderer.py` 自体は public compatibility wrapper として扱います。
+
+## Subtitle
+
+字幕は PNG / ASS / auto を扱います。
+
+- `components/subtitles/png_*.py`: style、metadata、text、draw、executor、renderer
+- `components/video/subtitle_segment_*.py`: segment planning / execution / video-only processing
+- `components/video/subtitle_overlay_*.py`: overlay runtime / graph / FFmpeg execution
+
+字幕segment性能変更では `performance_regression_ledger.md` と専用benchmarkを先に確認します。
+
+## FFmpeg utility
+
+共有FFmpeg責務は用途別に分離されています。
+
+- `ffmpeg_background.py`
+- `ffmpeg_concat.py`
+- `ffmpeg_transition.py`
+- `ffmpeg_normalize.py`
+- `ffmpeg_capability_listing.py`
+- `ffmpeg_encoder_capabilities.py`
+- `ffmpeg_filter_smoke.py`
+- `ffmpeg_threading.py`
+- `ffmpeg_progress.py`
+- `ffmpeg_diagnostics.py`
+- `ffmpeg_process.py`
+- `ffmpeg_runner.py`
+
+`ffmpeg_ops.py`、`ffmpeg_capabilities.py`、`ffmpeg_runner.py` には compatibility facade として残る責務があります。行数だけを理由に再分割しません。
+
+## Cache
+
+public API は `zundamotion.cache.CacheManager` を維持します。
+内部では generic runtime、media probe、lifecycle、observability、signature memo を分離しています。
+historical compatibility base が残っていても、active public dispatch を基準に判断します。
+
+## Markdown / Plugin
+
+- `components/markdown/`: frontmatter parse、line model、render config resolution
+- `plugins/`: built-in registry と drop-in plugin discovery、allow/deny policy
+
+## 関連資料
+
+- 現在状態: [`project_status.md`](./project_status.md)
+- YAML: [`../../scripts/script_cheatsheet.md`](../../scripts/script_cheatsheet.md)
 - 機能一覧: [`../features.md`](../features.md)
-- docs 入口: [`../README.md`](../README.md)
+- Python規約: [`python_coding_rules.md`](./python_coding_rules.md)
+- 性能判断: [`performance_regression_ledger.md`](./performance_regression_ledger.md)
+- 大規模分割の履歴: [`source_refactoring_plan.md`](./source_refactoring_plan.md)
