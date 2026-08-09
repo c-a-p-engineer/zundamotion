@@ -1,96 +1,124 @@
 # AGENTS.md
 
-このファイルは、`zundamotion` 本体で AI / Codex が常時読む最小ルールだけを置く。
-詳細な実装規約は `docs/guides/ai_coding_rules.md` を正とし、必要時だけ参照する。
+このファイルは、`zundamotion` で AI / Codex が常時読む**最小ルール**だけを置く。
+詳細な実装規約は `docs/guides/ai_coding_rules.md`、現在状態と次タスクは `docs/guides/project_status.md` を正とし、必要時だけ参照する。
 
 ## 1. 最初に確認するもの
 
 1. `README.md`
-2. `scripts/script_cheatsheet.md`
-3. `docs/README.md`
-4. `docs/guides/ai_coding_rules.md`
+2. `docs/guides/project_status.md`
+3. `scripts/script_cheatsheet.md`
+4. `docs/README.md`
 
-性能、設計、サンプル対応を触る場合は `docs/README.md` から該当詳細へ進む。
+コード、CLI、FFmpeg、cache、設計を変更する場合だけ `docs/guides/ai_coding_rules.md` を追加で読む。
+日付付きタスク計画、過去ログ、完了済みリファクタリング計画を現在状態の正本として扱わない。
 
-## 2. 作業ごとに読む資料
+## 2. 作業ごとの正本
 
-- Python 実装を触るとき
-  - `docs/guides/project_structure.md`
-  - `docs/guides/python_coding_rules.md`
-  - 必要に応じて対象モジュールの近接コード
-- YAML オプション、台本挙動、サンプルを触るとき
-  - `scripts/script_cheatsheet.md`
-  - `docs/features.md`
-  - `docs/script_samples.md`
-- CLI、セットアップ、実行方法を触るとき
-  - `docs/guides/setup_and_runtime.md`
-  - `README.md`
-- Docker runtime、digest、固定ランタイム更新を触るとき
-  - `docs/guides/runtime_version_policy.md`
-- 再現性、乱数、media 比較、cache key を触るとき
-  - `docs/guides/reproducibility_contract.md`
-- GitHub Pages、機能デモサイト、デモ動画、`site/`、Pages Workflowを触るとき
-  - `docs/guides/github_pages_feature_demo.md`
-  - `docs/features.md`
-  - `scripts/script_cheatsheet.md`
-  - `docs/guides/runtime_version_policy.md`
-  - `docs/guides/reproducibility_contract.md`
-- 性能、並列度、キャッシュ、FFmpeg 経路を触るとき
-  - `docs/guides/performance_regression_ledger.md`
-  - `docs/guides/performance_tuning.md`
-  - `docs/design/ffmpeg_filter_mapping.md`
-- pipeline や設計分割を触るとき
-  - `docs/guides/project_structure.md`
-  - `docs/guides/source_refactoring_plan.md`
-  - `docs/guides/refactoring_check.md`
-  - `docs/design/parser_and_builder.md`
-  - 必要に応じて `docs/design/` の関連資料
-- 立ち絵や素材前提を触るとき
-  - `docs/guides/character_assets.md`
-- submodule 利用前提や親プロジェクト連携を触るとき
-  - `docs/guides/submodule.md`
-- 不採用判断、保留事項、再検討条件を確認するとき
-  - `docs/issues_pending.md`
-  - 必要に応じて `docs/guides/song_mode_rejected.md`
+| 作業 | 最初に読む資料 |
+| --- | --- |
+| 現在状態、次タスク、完了状況 | `docs/guides/project_status.md` |
+| Python 実装、責務分割 | `docs/guides/project_structure.md`, `docs/guides/python_coding_rules.md` |
+| YAML、台本挙動、サンプル | `scripts/script_cheatsheet.md`, `docs/features.md`, `docs/script_samples.md` |
+| CLI、セットアップ、実行 | `docs/guides/setup_and_runtime.md`, `README.md` |
+| runtime lock、Docker、固定バージョン | `docs/guides/runtime_version_policy.md` |
+| 再現性、乱数、media比較、cache key | `docs/guides/reproducibility_contract.md` |
+| 性能、並列度、cache、FFmpeg経路 | `docs/guides/performance_regression_ledger.md`, `docs/guides/performance_tuning.md` |
+| filter / A/V sync | `docs/design/ffmpeg_filter_mapping.md` と対象実装 |
+| pipeline / scene / clip 構造 | `docs/guides/project_structure.md`, `docs/design/parser_and_builder.md` |
+| 立ち絵・表情差分素材 | `docs/guides/character_assets.md` |
+| GitHub Pages / demo | `docs/guides/github_pages_feature_demo.md`, `docs/features.md` |
+| submodule 利用 | `docs/guides/submodule.md` |
+| 未確定、不採用、再検討条件 | `docs/issues_pending.md` |
 
-作業前に、対象変更に対応する資料を読んでから実装する。不要な資料まで広く読まず、変更理由に直結する範囲へ絞る。
+過去の性能比較が必要な場合だけ `docs/guides/performance_logs/` や日付付き解析資料を読む。
+大規模責務分割の履歴を確認するときだけ `docs/guides/source_refactoring_plan.md` を読む。
 
 ## 3. 変更対象の原則
 
-- 通常の作業は `zundamotion/`、`scripts/`、`docs/`、`tools/` の範囲で完結できるかを先に確認する
-- YAML オプション、CLI オプション、設定項目、挙動フラグを追加・変更した場合は、`README.md`、`scripts/script_cheatsheet.md`、関連 docs の更新要否を確認する
-- 設定項目を追加・変更した場合は、利用者向けの正本に「項目名」「意味」「設定可能値」「デフォルト値」を記載し、省略時挙動や他設定との優先順位がある場合はそれも明記する
-- 利用者向け機能を追加・変更した場合は、`docs/features.md`に加え、機能デモmanifest、デモYAML、実生成動画、Pages用テストの更新要否を確認する
-- GitHub Pagesの正本は`master`側のソースとし、`gh-pages`を直接編集しない
-- `implemented`または利用者向けの`partial`機能をPagesへ掲載する場合は、現在のZundamotionで生成したデモ動画と制限事項を必須とする
-- 大きな仕様追加や不採用判断は、判断理由と再検討条件を `docs/issues_pending.md` または `docs/guides/` に残す
-- `visible` 未指定時の表示や暗黙的なキャラクター補完など、設定ミス補正か仕様変更かが曖昧な挙動は実装前に確認する
-- 新しい資料を `docs/` 配下へ追加した場合は、`AGENTS.md` に「何のときに読む資料か」を追記する
-- 新しい資料が主要な入口になる場合は、`docs/README.md` の導線も更新する
+- 通常の変更は `zundamotion/`、`scripts/`、`docs/`、`tools/` の必要範囲だけで完結させる。
+- 差分最小を優先し、無関係な整形や一括置換をしない。
+- 1 PR は原則 1 責務とする。
+- 行数や関数長の閾値を満たすことだけを目的に、動いている互換 facade を追加分割しない。
+- 挙動変更と構造整理を同時に大きく混ぜない。
 
-## 4. 参照先
+### 設定・利用者向け挙動
 
-- docs 入口: `docs/README.md`
-- AI 向け低トークン規約: `docs/guides/ai_coding_rules.md`
-- Python コード規約: `docs/guides/python_coding_rules.md`
-- GitHub Pages機能デモ規約: `docs/guides/github_pages_feature_demo.md`
-- 機能一覧: `docs/features.md`
-- サンプル台本一覧: `docs/script_samples.md`
-- 性能変更時: `docs/guides/performance_regression_ledger.md`
-- 台本 YAML 仕様: `scripts/script_cheatsheet.md`
+YAML、CLI、環境変数、preset、利用者向け挙動を追加・変更した場合は、正本へ次を記載する。
 
-## 5. ログと安全
+- 項目名
+- 意味
+- 設定可能値
+- デフォルト値
+- 省略時挙動
+- 他設定との優先順位がある場合はその順序
 
-- 日本語での説明、コメント、ドキュメント更新を基本にする
-- 標準出力への `print` は避け、既存の logger を使う
-- 差分最小を優先し、無関係な整形や大規模置換をしない
-- 本番資格情報、トークン、社内 URL、PII をログ、出力、サンプルへ含めない
+同じ仕様説明を複数資料へ複製しない。
 
-## 6. 完了時の確認
+### 利用者向け機能
 
-- 実装変更がある場合は、関連 docs とサンプル更新要否を確認したか報告する
-- 利用者向け機能を追加・変更した場合は、Pages機能紹介、デモYAML、実動画、manifestの更新要否を確認したか報告する
-- Pages関連変更では、作業ブランチから`gh-pages`を更新していないことと、`master` push時だけ公開される条件を確認する
-- 何を読んだか、なぜ他を読まなかったかを簡潔に説明できる状態にする
-- 新しい資料を追加した場合は、`AGENTS.md` と `docs/README.md` の更新有無を確認したか報告する
-- 未確認事項、残課題、必要なら `docs/issues_pending.md` への追記有無を報告する
+利用者向け機能を追加・変更した場合は、必要に応じて次を更新する。
+
+- `docs/features.md`
+- `scripts/script_cheatsheet.md`
+- demo manifest / demo YAML / 実生成動画
+- Pages 用テスト
+
+`implemented` または利用者向け `partial` 機能を Pages へ掲載する場合は、現在の Zundamotion で生成したデモ動画と制限事項を必須とする。
+
+## 4. FFmpeg / Python の最低ルール
+
+### FFmpeg
+
+- `filter_complex` 生成と process 実行を分離する。
+- `fps`、`setpts`、`asetpts`、`concat`、`overlay`、`enable` を触る場合は A/V sync への影響を確認する。
+- DEBUG ログから command を再現できる状態を維持する。
+- 性能変更は `performance_regression_ledger.md` の過去採用・却下を確認し、同一条件で前後比較する。
+- CPU simple scene fast path など、過去に実測で不採用となった方式を根拠なしに再導入しない。
+
+### Python
+
+- 副作用のある処理と純粋変換を分ける。
+- YAML / 外部 I/O 境界以外へ `Dict[str, Any]` を無制限に広げない。
+- 環境変数読み取りを深い処理へ散らさない。
+- 標準出力への `print` は避け、既存 logger を使う。
+- public import、YAML、CLI、cache key の互換性を変更する場合は明示する。
+
+## 5. ドキュメント管理
+
+文書の役割は次で固定する。
+
+- 現在状態・次タスク: `docs/guides/project_status.md`
+- 利用仕様: `scripts/script_cheatsheet.md`, `docs/features.md`
+- 作業規則: `AGENTS.md`, `docs/guides/ai_coding_rules.md`, `docs/guides/python_coding_rules.md`
+- 性能判断: `docs/guides/performance_regression_ledger.md`
+- 未確定・再検討条件: `docs/issues_pending.md`
+- 履歴: 日付付き計画、解析ログ、完了済みリファクタリング記録
+
+新しい資料を追加するときは、既存の正本へ統合できないかを先に確認する。
+主要な入口になる資料だけ `docs/README.md` と必要に応じてこのファイルへ導線を追加する。
+
+## 6. GitHub Pages
+
+- `master` 側を正本とし、`gh-pages` を直接編集しない。
+- Pages 関連変更は `master` push 時だけ公開される条件を維持する。
+- サイト未変更時に不要な deploy を増やさない。
+
+## 7. ログと安全
+
+- 日本語での説明、コメント、ドキュメント更新を基本にする。
+- 本番資格情報、token、cookie、社内 URL、PII をログ、出力、サンプルへ含めない。
+- 外部入力と plugin は信頼済みと仮定しない。
+
+## 8. 完了時の確認
+
+作業終了時は、変更内容に応じて次を確認する。
+
+- 実装変更: unit / FFmpeg integration / smoke / reproducibility の必要範囲
+- 性能変更: 同一条件 benchmark と A/V warning
+- 利用者向け変更: README / cheatsheet / features / demo の更新要否
+- 新規資料: `docs/README.md` とこの `AGENTS.md` の導線更新要否
+- 現在状態が変わった場合: `docs/guides/project_status.md` の更新要否
+- 未確定事項が生じた場合: `docs/issues_pending.md` への記録要否
+
+実行・確認していない検証を完了したと報告しない。
