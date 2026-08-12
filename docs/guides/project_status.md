@@ -28,7 +28,7 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 | Subtitle internals | 完了 | #43、PR #70〜#71 |
 | FFmpeg high-level ops / capabilities | 完了 | #43、PR #72〜#73 |
 | Finalize / FFmpeg runner / VideoPhase / Markdown | 完了 | #43、PR #74、#82〜#84 |
-| CPU overlay-heavy stall | 修正済み | #77、PR #78、#80 |
+| CPU overlay-heavy stall | 修正済み | #77、PR #78、#80。静止画入力の有限化で終端停止も防止 |
 | 最終構造監査 | 完了 | PR #87 |
 
 詳細な高速化の採用・却下理由は `performance_regression_ledger.md` を正とします。

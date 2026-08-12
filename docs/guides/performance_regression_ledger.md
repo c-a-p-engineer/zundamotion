@@ -1019,6 +1019,22 @@ GPU が利用できる環境の標準比較は `HW_FILTER_MODE=cpu --hw-encoder 
 - 狙い:
   - 外側 watchdog の起動忘れに依存せず、エンジン内で停止状態を検出して失敗扱いにする
 
+2026-08-11 `copipetan-dev-room/073_security_npm-install-supply-chain` 静止画入力の終端安定化:
+
+- 症状:
+  - CPU overlay-heavy clipを直列実行していても、異なる発話クリップが終端直前の`98.4%`または`88.0%`で停止した
+  - 900秒のstall検知後に同一FFmpegコマンドを単体再実行すると約2秒で完了し、素材破損や決定的なfilter構文エラーは再現しなかった
+- 原因:
+  - 背景、立ち絵、顔差分、字幕PNGを`-loop 1`だけで無限入力し、出力側の`-t`と`-shortest`だけに終端を依存していた
+  - BtbN FFmpegのCPU overlay graphで、無限画像streamのframesyncが終端直前に非決定的に停止する余地が残っていた
+- 対応:
+  - クリップ内の静止画入力へ出力FPSとクリップ尺を明示し、各streamを有限化する
+  - シーン合成などクリップ外の呼び出しは従来契約を維持し、対象を発話クリップ経路へ限定する
+- 検証:
+  - 実際に停止したFFmpegコマンドの単体再実行
+  - `test_clip_image_input_is_bounded_by_fps_and_duration`
+  - `test_cpu_overlay_render_is_bounded_across_repeated_runs`
+
 2026-05-02 `sample_subtitle_render_modes` 改善確認:
 
 - CPU固定時のOpenCL smoke testをスキップ

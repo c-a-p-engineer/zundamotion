@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from ...utils.logger import logger
 from ..character_image_resolver import CharacterImageResolver
+from ..clip_image_input import append_looped_image_input
 from .effects import resolve_character_effects
 from .movement import (
     build_dynamic_scale_filter,
@@ -93,6 +94,7 @@ async def collect_character_inputs(
     characters_config: List[Dict[str, Any]],
     cmd: List[str],
     input_layers: List[Dict[str, Any]],
+    duration: Optional[float] = None,
 ) -> CharacterInputs:
     """Collect FFmpeg inputs for character overlays and gather placement metadata."""
 
@@ -100,6 +102,14 @@ async def collect_character_inputs(
     char_effective_scale: Dict[int, float] = {}
     any_character_visible = False
     metadata: Dict[int, Dict[str, Any]] = {}
+
+    def _add_image(path: Path) -> None:
+        append_looped_image_input(
+            cmd,
+            path,
+            duration=duration,
+            fps=renderer.video_params.fps if duration is not None else None,
+        )
 
     for i, char_config in enumerate(characters_config):
         if not char_config.get("visible", False):
@@ -161,19 +171,19 @@ async def collect_character_inputs(
                     vertical_flip=flip_y,
                 )
                 character_indices[i] = len(input_layers)
-                cmd.extend(["-loop", "1", "-i", str(scaled_path.resolve())])
+                _add_image(scaled_path.resolve())
                 input_layers.append({"type": "video", "index": len(input_layers)})
                 effective_scale = 1.0
                 preprocessed_flip_x = flip_x
                 preprocessed_flip_y = flip_y
             except Exception:
                 character_indices[i] = len(input_layers)
-                cmd.extend(["-loop", "1", "-i", str(char_image_path.resolve())])
+                _add_image(char_image_path.resolve())
                 input_layers.append({"type": "video", "index": len(input_layers)})
                 effective_scale = scale_cfg
         else:
             character_indices[i] = len(input_layers)
-            cmd.extend(["-loop", "1", "-i", str(char_image_path.resolve())])
+            _add_image(char_image_path.resolve())
             input_layers.append({"type": "video", "index": len(input_layers)})
             effective_scale = scale_cfg
 

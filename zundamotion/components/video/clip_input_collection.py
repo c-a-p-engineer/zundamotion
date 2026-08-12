@@ -17,6 +17,7 @@ from ...utils.ffmpeg_ops import (
 )
 from ...utils.logger import logger
 from .clip.characters import collect_character_inputs
+from .clip_image_input import append_looped_image_input
 
 if TYPE_CHECKING:
     from .renderer import VideoRenderer
@@ -137,7 +138,7 @@ async def _normalize_background(
 
 
 async def _append_background_input(
-    renderer: "VideoRenderer", config: Dict[str, Any], cmd: List[str]
+    renderer: "VideoRenderer", config: Dict[str, Any], cmd: List[str], duration: float
 ) -> tuple[Path, BackgroundInputSettings]:
     path_value = config.get("path")
     if not path_value:
@@ -145,7 +146,9 @@ async def _append_background_input(
     path = Path(path_value)
     settings = _background_settings(renderer, config)
     if config.get("type") != "video":
-        cmd.extend(["-loop", "1", "-i", str(path)])
+        append_looped_image_input(
+            cmd, path, duration=duration, fps=renderer.video_params.fps
+        )
         return path, settings
     try:
         normalized_hint = bool(config.get("normalized", False))
@@ -158,7 +161,9 @@ async def _append_background_input(
         cmd.extend(["-ss", str(config.get("start_time", 0.0)), "-i", str(path)])
     except Exception as exc:
         logger.warning("Failed to process background video: %s. Falling back to image loop.", exc)
-        cmd.extend(["-loop", "1", "-i", str(path)])
+        append_looped_image_input(
+            cmd, path, duration=duration, fps=renderer.video_params.fps
+        )
     return path, settings
 
 
@@ -171,7 +176,7 @@ def _append_speech_input(audio_path: Path, cmd: List[str], layers: List[Dict[str
 
 async def _append_insert_input(
     renderer: "VideoRenderer", config: Optional[Dict[str, Any]],
-    cmd: List[str], layers: List[Dict[str, Any]],
+    cmd: List[str], layers: List[Dict[str, Any]], duration: float,
 ) -> InsertInput:
     if not config:
         return InsertInput()
@@ -179,7 +184,9 @@ async def _append_insert_input(
     speed = _media_speed(config.get("speed", 1.0))
     is_image = path.suffix.lower() in _IMAGE_SUFFIXES
     if is_image:
-        cmd.extend(["-loop", "1", "-i", str(path.resolve())])
+        append_looped_image_input(
+            cmd, path.resolve(), duration=duration, fps=renderer.video_params.fps
+        )
     else:
         try:
             if not bool(config.get("normalized", False)):
@@ -200,6 +207,7 @@ async def _append_insert_input(
 def _append_overlay_inputs(
     overlays: Optional[List[Dict[str, Any]]], cmd: List[str],
     layers: List[Dict[str, Any]], *, audio: bool,
+    duration: float, fps: float,
 ) -> List[Dict[str, Any]]:
     collected: List[Dict[str, Any]] = []
     for overlay in overlays or []:
@@ -209,7 +217,12 @@ def _append_overlay_inputs(
         if not path_value:
             continue
         path = Path(str(path_value))
-        cmd.extend(["-i", str(path)] if audio else ["-loop", "1", "-i", str(path.resolve())])
+        if audio:
+            cmd.extend(["-i", str(path)])
+        else:
+            append_looped_image_input(
+                cmd, path.resolve(), duration=duration, fps=fps
+            )
         index = len(layers)
         layers.append({"type": "audio" if audio else "video", "index": index})
         entry = dict(overlay)
@@ -220,6 +233,7 @@ def _append_overlay_inputs(
 
 async def collect_clip_inputs(
     *, renderer: "VideoRenderer", audio_path: Path,
+    duration: float,
     background_config: Dict[str, Any], characters_config: List[Dict[str, Any]],
     insert_config: Optional[Dict[str, Any]] = None,
     image_layer_overlays: Optional[List[Dict[str, Any]]] = None,
@@ -229,14 +243,25 @@ async def collect_clip_inputs(
     cmd = [renderer.ffmpeg_path, "-y", "-hide_banner", "-loglevel", "warning", *get_profile_flags()]
     cmd.extend(renderer.ffmpeg_thread_flags())
     layers: List[Dict[str, Any]] = []
-    bg_path, bg = await _append_background_input(renderer, background_config, cmd)
+    bg_path, bg = await _append_background_input(
+        renderer, background_config, cmd, duration
+    )
     layers.append({"type": "video", "index": len(layers)})
     speech_index = _append_speech_input(audio_path, cmd, layers)
-    insert = await _append_insert_input(renderer, insert_config, cmd, layers)
-    images = _append_overlay_inputs(image_layer_overlays, cmd, layers, audio=False)
-    audio_overlays = _append_overlay_inputs(extra_audio_overlays, cmd, layers, audio=True)
+    insert = await _append_insert_input(
+        renderer, insert_config, cmd, layers, duration
+    )
+    images = _append_overlay_inputs(
+        image_layer_overlays, cmd, layers, audio=False,
+        duration=duration, fps=renderer.video_params.fps,
+    )
+    audio_overlays = _append_overlay_inputs(
+        extra_audio_overlays, cmd, layers, audio=True,
+        duration=duration, fps=renderer.video_params.fps,
+    )
     chars = await collect_character_inputs(
-        renderer=renderer, characters_config=characters_config, cmd=cmd, input_layers=layers
+        renderer=renderer, characters_config=characters_config, cmd=cmd,
+        input_layers=layers, duration=duration,
     )
     return ClipInputCollection(
         cmd=cmd, input_layers=layers, background_path=bg_path,

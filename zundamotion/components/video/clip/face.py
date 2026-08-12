@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from ...utils.ffmpeg_ops import calculate_overlay_position
 from ...utils.logger import logger
+from ..clip_image_input import append_looped_image_input
 from .characters import is_horizontal_flip_enabled, is_vertical_flip_enabled
 from .movement import build_dynamic_scale_filter
 
@@ -213,7 +214,12 @@ async def apply_face_overlays(
 
     def _add_image_input(path: Path) -> Optional[int]:
         if path.exists():
-            cmd.extend(["-loop", "1", "-i", str(path.resolve())])
+            append_looped_image_input(
+                cmd,
+                path.resolve(),
+                duration=duration,
+                fps=renderer.video_params.fps,
+            )
             index = len(input_layers)
             input_layers.append({"type": "video", "index": index, "path": str(path.resolve()), "role": "face"})
             return index

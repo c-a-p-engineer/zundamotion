@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from ...utils.logger import logger
+from .clip_image_input import append_looped_image_input
 from ...utils.subtitle_text import is_effective_subtitle_text
 from .clip_filter_policy import ClipFilterPolicy
 from .clip_input_collection import ClipInputCollection
@@ -36,7 +37,13 @@ async def append_subtitle_overlay(
             logger.warning("Unexpected subtitle extra inputs: %s. Skipping subtitle overlay.", extra_inputs)
             return current_video_stream, subtitle_png_path, None
         loop_value, png_path = extra_inputs.get("-loop", "1"), extra_inputs["-i"]
-        inputs.cmd.extend(["-loop", loop_value, "-i", str(Path(png_path).resolve())])
+        append_looped_image_input(
+            inputs.cmd,
+            Path(png_path).resolve(),
+            duration=duration,
+            fps=renderer.video_params.fps,
+            loop=loop_value,
+        )
         inputs.input_layers.append({"type": "video", "index": index})
         try:
             subtitle_png_path = Path(png_path)

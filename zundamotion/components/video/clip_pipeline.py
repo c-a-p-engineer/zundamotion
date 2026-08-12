@@ -70,6 +70,7 @@ async def run_clip_pipeline(
     logger.info("[Video] Rendering clip -> %s", output_path.name)
     inputs = await collect_clip_inputs(
         renderer=renderer, audio_path=request.audio_path,
+        duration=request.duration,
         background_config=request.background_config,
         characters_config=request.characters_config, insert_config=request.insert_config,
         image_layer_overlays=request.image_layer_overlays,

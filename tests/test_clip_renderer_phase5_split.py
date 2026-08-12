@@ -6,6 +6,7 @@ from pathlib import Path
 
 from zundamotion.components.video.clip_command import build_clip_command
 from zundamotion.components.video.clip_executor import _is_gpu_failure
+from zundamotion.components.video.clip_image_input import append_looped_image_input
 from zundamotion.components.video.clip_renderer import render_clip
 
 
@@ -57,3 +58,23 @@ def test_gpu_failure_classifier_keeps_legacy_fallback_signals() -> None:
 
     assert _is_gpu_failure(nvenc) is True
     assert _is_gpu_failure(generic) is False
+
+
+def test_clip_image_input_is_bounded_by_fps_and_duration() -> None:
+    command = ["ffmpeg"]
+
+    append_looped_image_input(
+        command, Path("still.png"), duration=0.533333333, fps=30
+    )
+
+    assert command == [
+        "ffmpeg",
+        "-loop",
+        "1",
+        "-framerate",
+        "30",
+        "-t",
+        "0.533333333",
+        "-i",
+        "still.png",
+    ]
