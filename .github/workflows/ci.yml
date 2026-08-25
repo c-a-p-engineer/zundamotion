@@ -114,14 +114,6 @@ jobs:
           assert load_plugins_cached(builtin_plugin_paths())
           PY
 
-      - name: Upload Python 3.14 distributions
-        uses: actions/upload-artifact@v6
-        with:
-          name: packages-python-${{ env.PYTHON_VERSION }}
-          if-no-files-found: error
-          retention-days: 7
-          path: dist/*
-
       - name: Run render smoke tests
         env:
           ZUNDAMOTION_RUN_SMOKE: "1"
@@ -146,21 +138,3 @@ jobs:
           python scripts/verify_reproducibility.py scripts/smoke_minimal.yaml \
             --no-voice --hw-encoder cpu --jobs auto \
             --output-dir output/reproducibility
-
-      - name: Upload render smoke diagnostics
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: smoke-python-${{ env.PYTHON_VERSION }}-render
-          if-no-files-found: warn
-          retention-days: 7
-          path: |
-            output/test_smoke/*.mp4
-            output/perf/*.json
-            output/test_smoke/*.stdout.log
-            output/test_smoke/*.stderr.log
-            output/test_smoke/ffprobe-result.json
-            output/test_smoke/performance-baseline.json
-            output/reproducibility/**
-            output/source-metrics.json
-            output/source-metrics.md
