@@ -1,0 +1,39 @@
+name: Actions Artifact Cleanup
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/actions-artifact-cleanup.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Delete retained non-Pages artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          deleted=0
+          while IFS= read -r artifact_id; do
+            [ -n "${artifact_id}" ] || continue
+            gh api --method DELETE "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
+            deleted=$((deleted + 1))
+          done < <(
+            gh api --paginate "/repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.name != "github-pages") | .id'
+          )
+
+          echo "Deleted ${deleted} retained non-Pages artifact(s)."
+          echo "GitHub Pages deployment artifacts are intentionally left to their 1-day retention."
