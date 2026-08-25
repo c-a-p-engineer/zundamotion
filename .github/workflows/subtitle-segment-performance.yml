@@ -81,15 +81,3 @@ jobs:
         run: |
           python tools/verify_subtitle_segment_benchmark.py \
             output/benchmarks/subtitle-segment-ci
-
-      - name: Upload subtitle segment benchmark
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: subtitle-segment-python-${{ env.PYTHON_VERSION }}
-          if-no-files-found: error
-          retention-days: 14
-          path: |
-            output/benchmarks/subtitle-segment-ci/**
-            output/benchmarks/subtitle-segment-ci.log
-            output/perf/perf_summary*.json
