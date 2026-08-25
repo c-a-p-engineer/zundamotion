@@ -26,11 +26,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      contents: read
+      contents: write
+    outputs:
+      changed: ${{ steps.publish.outputs.changed }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Validate runtime lock
         run: python3 scripts/check_runtime_lock.py
@@ -148,50 +152,18 @@ jobs:
         if: always() && steps.media-cache.outputs.voice_required == 'true'
         run: docker rm -f voicevox || true
 
-      - name: Upload generated site
-        uses: actions/upload-artifact@v6
-        with:
-          name: pages-site
-          path: site-dist
-          if-no-files-found: error
-          include-hidden-files: true
-
-      - name: Upload Pages diagnostics
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: pages-diagnostics
-          path: site-work
-          if-no-files-found: warn
-
-  publish-branch:
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      changed: ${{ steps.publish.outputs.changed }}
-
-    steps:
-      - name: Checkout source repository
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Download generated site
-        uses: actions/download-artifact@v7
-        with:
-          name: pages-site
-          path: ${{ runner.temp }}/pages-site
-
       - name: Replace generated gh-pages snapshot
         id: publish
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
         shell: bash
         run: |
           set -euo pipefail
           echo "changed=false" >> "$GITHUB_OUTPUT"
-          test "${GITHUB_REF}" = "refs/heads/master"
+
+          publish_dir="${RUNNER_TEMP}/pages-site"
+          rm -rf "${publish_dir}"
+          mkdir -p "${publish_dir}"
+          cp -a site-dist/. "${publish_dir}/"
 
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
             git fetch --depth=1 origin gh-pages
@@ -204,7 +176,7 @@ jobs:
             ! -name .git \
             -exec rm -rf {} +
 
-          cp -a "${RUNNER_TEMP}/pages-site/." .
+          cp -a "${publish_dir}/." .
           touch .nojekyll
 
           git config user.name "github-actions[bot]"
@@ -221,14 +193,20 @@ jobs:
           git push origin HEAD:gh-pages
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
+      - name: Upload GitHub Pages deployment artifact
+        if: steps.publish.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/pages-site
+          retention-days: 1
+          include-hidden-files: true
+
   deploy:
     if: >-
       github.ref == 'refs/heads/master' &&
       github.event_name == 'push' &&
-      needs.publish-branch.outputs.changed == 'true'
-    needs:
-      - build
-      - publish-branch
+      needs.build.outputs.changed == 'true'
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -239,20 +217,8 @@ jobs:
       url: "${{ steps.deployment.outputs.page_url }}"
 
     steps:
-      - name: Download generated site
-        uses: actions/download-artifact@v7
-        with:
-          name: pages-site
-          path: public
-
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
-
-      - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: public
-          include-hidden-files: true
 
       - name: Deploy GitHub Pages
         id: deployment
