@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
+import os
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from . import __version__
 from .authoring import compiled_document
@@ -24,7 +26,11 @@ def create_render_lock(script_path: str, *, project_root: Path | None = None) ->
     script_file = script if script.is_absolute() else root / script
     script_file = script_file.resolve()
 
-    compiled = compiled_document(str(script_file))
+    # The script loader intentionally resolves relative asset/include paths from
+    # the working directory.  Mirror CLI --project-root semantics for callers of
+    # this library helper and restore the caller's cwd immediately afterwards.
+    with _working_directory(root):
+        compiled = compiled_document(str(script_file))
     compiled_bytes = _canonical_json_bytes(compiled)
     assets = _collect_existing_files(compiled["config"], root=root)
 
@@ -145,6 +151,16 @@ def render_lock_json(document: dict[str, Any], *, pretty: bool = True) -> str:
     if pretty:
         return json.dumps(document, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
     return json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+
+
+@contextmanager
+def _working_directory(path: Path) -> Iterator[None]:
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
 
 
 def _collect_existing_files(value: Any, *, root: Path) -> dict[str, str]:
