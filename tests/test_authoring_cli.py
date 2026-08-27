@@ -57,7 +57,7 @@ def test_validation_document_reports_stable_error_code(tmp_path: Path) -> None:
     assert document["format"] == VALIDATION_FORMAT
     assert document["format_version"] == 1
     assert document["valid"] is False
-    assert document["errors"][0]["code"] == "ZDM-E1001"
+    assert document["errors"][0]["code"] == "ZDM-E1000"
     assert "scenes" in document["errors"][0]["message"]
 
 
