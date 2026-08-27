@@ -14,6 +14,7 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 - source metrics 上の大きいファイルや長い関数は残っていますが、互換 facade や既存契約維持の責務を含むため、数値超過だけを理由に追加分割しません。
 - AI / CI 向けの machine-readable compiler interface と TTS Provider 境界は導入済みです。
 - project-level Render Lock / provenance を追加し、`capabilities -> validate -> compile -> lock -> verify-lock -> render` の事前検査経路を揃えています。
+- PR #93 / #94 は current `master` から責務差分を再構成し、CI と Performance Smoke の成功を確認して統合済みです。
 
 ## 2. 完了した主要フェーズ
 
@@ -32,7 +33,7 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 | 最終構造監査 | 完了 | PR #87 |
 | machine-readable compiler interface | 完了 | PR #89。`validate` / `compile` / `capabilities`、compiled-config v1 |
 | TTS Provider 基盤 | 完了 | PR #93。共通 Provider / capability、VOICEVOX compatibility adapter。第二providerは未実装 |
-| Render Lock / provenance | 実装・統合検証中 | PR #94。script / compiled-config / asset / runtime lock hash と `verify-lock` |
+| Render Lock / provenance | 完了 | PR #94。script / compiled-config / asset / runtime lock hash と `verify-lock` |
 
 詳細な高速化の採用・却下理由は `performance_regression_ledger.md` を正とします。
 過去の分割計画は `source_refactoring_plan.md`、2026-08-07 時点のタスク表は `current_task_plan_20260807.md` に履歴として残します。

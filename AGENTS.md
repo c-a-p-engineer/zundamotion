@@ -5,12 +5,14 @@
 
 ## 1. 最初に確認するもの
 
+常時読む入口は次の 3 つに限定する。
+
 1. `README.md`
 2. `docs/guides/project_status.md`
-3. `scripts/script_cheatsheet.md`
-4. `docs/README.md`
+3. `docs/README.md`
 
-コード、CLI、FFmpeg、cache、設計を変更する場合だけ `docs/guides/ai_coding_rules.md` を追加で読む。
+その後、作業種別を判定して「作業ごとの正本」から必要な資料だけを読む。
+`scripts/script_cheatsheet.md` は YAML / 台本仕様を扱う場合だけ読む。コード、CLI、FFmpeg、cache、設計を変更する場合は `docs/guides/ai_coding_rules.md` を追加で読む。
 日付付きタスク計画、過去ログ、完了済みリファクタリング計画を現在状態の正本として扱わない。
 
 ## 2. 作業ごとの正本
@@ -21,6 +23,9 @@
 | Python 実装、責務分割 | `docs/guides/project_structure.md`, `docs/guides/python_coding_rules.md` |
 | YAML、台本挙動、サンプル | `scripts/script_cheatsheet.md`, `docs/features.md`, `docs/script_samples.md` |
 | CLI、セットアップ、実行 | `docs/guides/setup_and_runtime.md`, `README.md` |
+| AI / CI authoring、`validate` / `compile` / `capabilities` | `docs/guides/compiler_interface.md`, `zundamotion/authoring.py`, `zundamotion/cli.py` |
+| TTS backend / Provider 境界 | `docs/guides/tts_provider.md`, `zundamotion/components/audio/provider.py` と対象 backend |
+| Render Lock、入力 provenance | `docs/guides/render_lock.md`, `docs/guides/reproducibility_contract.md`, `docs/guides/runtime_version_policy.md` |
 | runtime lock、Docker、固定バージョン | `docs/guides/runtime_version_policy.md` |
 | 再現性、乱数、media比較、cache key | `docs/guides/reproducibility_contract.md` |
 | 性能、並列度、cache、FFmpeg経路 | `docs/guides/performance_regression_ledger.md`, `docs/guides/performance_tuning.md` |
@@ -39,6 +44,8 @@
 - 通常の変更は `zundamotion/`、`scripts/`、`docs/`、`tools/` の必要範囲だけで完結させる。
 - 差分最小を優先し、無関係な整形や一括置換をしない。
 - 1 PR は原則 1 責務とする。
+- stacked PR は暫定状態として扱う。base PR が統合された後は current `master` との差分と mergeability を再確認し、必要なら current `master` から責務差分だけを再構成して CI を取り直す。
+- 古い stacked branch の CI 成功を、current `master` への統合成功の証拠として扱わない。
 - 行数や関数長の閾値を満たすことだけを目的に、動いている互換 facade を追加分割しない。
 - 挙動変更と構造整理を同時に大きく混ぜない。
 
@@ -82,7 +89,7 @@ YAML、CLI、環境変数、preset、利用者向け挙動を追加・変更し�
 - YAML / 外部 I/O 境界以外へ `Dict[str, Any]` を無制限に広げない。
 - 環境変数読み取りを深い処理へ散らさない。
 - 標準出力への `print` は避け、既存 logger を使う。
-- public import、YAML、CLI、cache key の互換性を変更する場合は明示する。
+- public import、YAML、CLI、cache key、machine-readable format の互換性を変更する場合は明示する。
 
 ## 5. ドキュメント管理
 
@@ -91,6 +98,10 @@ YAML、CLI、環境変数、preset、利用者向け挙動を追加・変更し�
 - 現在状態・次タスク: `docs/guides/project_status.md`
 - 利用仕様: `scripts/script_cheatsheet.md`, `docs/features.md`
 - 作業規則: `AGENTS.md`, `docs/guides/ai_coding_rules.md`, `docs/guides/python_coding_rules.md`
+- machine-readable authoring 契約: `docs/guides/compiler_interface.md`
+- TTS backend 境界: `docs/guides/tts_provider.md`
+- 入力 provenance: `docs/guides/render_lock.md`
+- 出力再現性: `docs/guides/reproducibility_contract.md`
 - 性能判断: `docs/guides/performance_regression_ledger.md`
 - 未確定・再検討条件: `docs/issues_pending.md`
 - 履歴: 日付付き計画、解析ログ、完了済みリファクタリング記録
@@ -109,6 +120,7 @@ YAML、CLI、環境変数、preset、利用者向け挙動を追加・変更し�
 - 日本語での説明、コメント、ドキュメント更新を基本にする。
 - 本番資格情報、token、cookie、社内 URL、PII をログ、出力、サンプルへ含めない。
 - 外部入力と plugin は信頼済みと仮定しない。
+- Render Lock / provenance の検証中に network asset や生成AIを暗黙取得しない。
 
 ## 8. 完了時の確認
 
@@ -117,8 +129,12 @@ YAML、CLI、環境変数、preset、利用者向け挙動を追加・変更し�
 - 実装変更: unit / FFmpeg integration / smoke / reproducibility の必要範囲
 - 性能変更: 同一条件 benchmark と A/V warning
 - 利用者向け変更: README / cheatsheet / features / demo の更新要否
+- machine-readable contract 変更: format version、stable key / error code / exit code、help、互換性テスト
+- TTS Provider 変更: capability と既存 compatibility wrapper、AudioGenerator / timeline / cache 責務への影響
+- Render Lock 変更: deterministic hash、difference code、network 非取得、出力再現性との責務分離
 - 新規資料: `docs/README.md` とこの `AGENTS.md` の導線更新要否
 - 現在状態が変わった場合: `docs/guides/project_status.md` の更新要否
 - 未確定事項が生じた場合: `docs/issues_pending.md` への記録要否
+- stacked PR: base 統合後の current `master` を基準に差分と CI を再確認したか
 
 実行・確認していない検証を完了したと報告しない。
