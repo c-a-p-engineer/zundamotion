@@ -27,6 +27,7 @@ VOICEVOX による音声合成、FFmpeg による映像合成、字幕焼き込�
 - `include` / `vars` による台本の再利用
 - `--no-voice` による無音トラック生成
 - Markdown 入力からの中間台本生成
+- AI / CI 向け `validate` / `compile` / `capabilities` の機械可読 CLI
 
 ## 最短の使い方
 
@@ -62,6 +63,20 @@ python -m zundamotion.main scripts/sample.yaml -o output/sample.mp4 --no-voice -
 
 CLI 実行例、ログ形式、GPU/NVENC 確認、字幕出力、`--project-root` の説明は [`docs/guides/setup_and_runtime.md`](docs/guides/setup_and_runtime.md) を参照してください。
 
+## AI / CI から台本を確認する
+
+レンダーを始めずに、通常レンダーと同じ resolver / defaults / validation を利用できます。
+
+```bash
+zundamotion capabilities --json
+zundamotion validate scripts/sample.yaml --json
+zundamotion compile scripts/sample.yaml -o build/sample.compiled.json --pretty
+```
+
+`compile` の出力は `zundamotion.compiled-config` v1 で、実レンダーへ渡る解決済み configuration を固定したものです。
+FFmpeg や VOICEVOX を起動しないため、AI authoring や CI の事前検査に利用できます。
+詳細な JSON 契約、終了コード、旧 CLI との互換性は [`docs/guides/compiler_interface.md`](docs/guides/compiler_interface.md) を参照してください。
+
 ## 台本を書くときの入口
 
 - YAML の基本構造: [`scripts/script_cheatsheet.md#基本構造`](scripts/script_cheatsheet.md#基本構造)
@@ -79,6 +94,7 @@ CLI 実行例、ログ形式、GPU/NVENC 確認、字幕出力、`--project-root
 - サンプル台本一覧: [`docs/script_samples.md`](docs/script_samples.md)
 - 台本チートシート: [`scripts/script_cheatsheet.md`](scripts/script_cheatsheet.md)
 - セットアップと実行: [`docs/guides/setup_and_runtime.md`](docs/guides/setup_and_runtime.md)
+- machine-readable compiler interface: [`docs/guides/compiler_interface.md`](docs/guides/compiler_interface.md)
 - パフォーマンスと運用: [`docs/guides/performance_tuning.md`](docs/guides/performance_tuning.md)
 - キャラクター素材: [`docs/guides/character_assets.md`](docs/guides/character_assets.md)
 - プロジェクト構造: [`docs/guides/project_structure.md`](docs/guides/project_structure.md)
