@@ -61,6 +61,22 @@ def test_validation_document_reports_stable_error_code(tmp_path: Path) -> None:
     assert "scenes" in document["errors"][0]["message"]
 
 
+def test_module_cli_help_lists_authoring_commands() -> None:
+    proc = subprocess.run(
+        [sys.executable, "-m", "zundamotion", "--help"],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "validate" in proc.stdout
+    assert "compile" in proc.stdout
+    assert "capabilities" in proc.stdout
+    assert "render" in proc.stdout
+
+
 def test_module_cli_capabilities_json_does_not_start_render_runtime() -> None:
     proc = subprocess.run(
         [sys.executable, "-m", "zundamotion", "capabilities", "--json"],
