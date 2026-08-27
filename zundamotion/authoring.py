@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .components.audio.voicevox_client import VoicevoxTTSProvider
 from .components.script.loader import load_script_and_config
 from .exceptions import ValidationError
 from .plugins.loader import builtin_plugin_paths, discover_plugins
@@ -120,6 +121,8 @@ def capabilities_document() -> dict[str, Any]:
         )
 
     plugins.sort(key=lambda item: (str(item["kind"]), str(item["id"])))
+    voicevox = VoicevoxTTSProvider()
+    tts_capabilities = voicevox.capabilities.as_dict()
     return {
         "format": CAPABILITIES_FORMAT,
         "format_version": CAPABILITIES_FORMAT_VERSION,
@@ -129,8 +132,9 @@ def capabilities_document() -> dict[str, Any]:
         "export_presets": sorted(EXPORT_PRESETS),
         "subtitle_render_modes": ["png", "auto", "ass"],
         "tts": {
-            "providers": ["voicevox"],
-            "default_provider": "voicevox",
+            "providers": [voicevox.provider_id],
+            "default_provider": voicevox.provider_id,
+            "provider_capabilities": {voicevox.provider_id: tts_capabilities},
         },
         "plugins": plugins,
     }

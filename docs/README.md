@@ -21,6 +21,7 @@ AI / Codex が常時読む最小ルールはリポジトリ直下の `AGENTS.md`
 | Python 構造・分割規約 | [`guides/python_coding_rules.md`](./guides/python_coding_rules.md) |
 | セットアップ、CLI、実行 | [`guides/setup_and_runtime.md`](./guides/setup_and_runtime.md) |
 | AI / CI 向け validate / compile / capabilities | [`guides/compiler_interface.md`](./guides/compiler_interface.md) |
+| TTS backend の provider 境界 | [`guides/tts_provider.md`](./guides/tts_provider.md) |
 | runtime lock、更新・rollback | [`guides/runtime_version_policy.md`](./guides/runtime_version_policy.md) |
 | 再現性、乱数、media比較、cache key | [`guides/reproducibility_contract.md`](./guides/reproducibility_contract.md) |
 | GitHub Pages 機能デモ | [`guides/github_pages_feature_demo.md`](./guides/github_pages_feature_demo.md) |
@@ -64,6 +65,7 @@ AI / Codex が常時読む最小ルールはリポジトリ直下の `AGENTS.md`
 - **利用仕様**: `scripts/script_cheatsheet.md`, `features.md`
 - **作業規則**: `AGENTS.md`, `guides/ai_coding_rules.md`, `guides/python_coding_rules.md`
 - **machine-readable authoring契約**: `guides/compiler_interface.md`
+- **TTS backend 境界**: `guides/tts_provider.md`
 - **性能判断**: `guides/performance_regression_ledger.md`
 - **未確定・再検討条件**: `issues_pending.md`
 - **履歴**: 日付付き計画、解析ログ、完了済みリファクタリング記録
