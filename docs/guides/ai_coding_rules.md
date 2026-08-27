@@ -16,9 +16,8 @@ AI / Codex が `zundamotion` で不要なファイル読み込み、過剰な入
 
 1. `README.md`
 2. `scripts/script_cheatsheet.md`
-3. `docs/README.md`
-4. `docs/features.md`
-5. 必要に応じて `docs/script_samples.md` と対象コード
+3. `docs/features.md`
+4. 必要に応じて `docs/script_samples.md` と対象コード
 
 ### 実行、セットアップ、CLI 運用
 
@@ -26,6 +25,33 @@ AI / Codex が `zundamotion` で不要なファイル読み込み、過剰な入
 2. `docs/guides/setup_and_runtime.md`
 3. `docs/README.md`
 4. 対象 CLI コード
+
+### machine-readable authoring / compiler contract
+
+1. `docs/guides/compiler_interface.md`
+2. `zundamotion/authoring.py`
+3. `zundamotion/cli.py`
+4. `tests/test_authoring_cli.py`
+
+`compiled-config` / validation / capabilities の公開 JSON は内部辞書ではなく versioned contract として扱う。
+
+### TTS backend / Provider
+
+1. `docs/guides/tts_provider.md`
+2. `zundamotion/components/audio/provider.py`
+3. 対象 backend client
+4. `zundamotion/components/audio/generator.py` と AudioPhase は責務影響がある場合だけ読む
+
+Provider の追加・変更だけで timeline / mix / cache 責務を暗黙に移動しない。
+
+### Render Lock / provenance / 再現性
+
+1. `docs/guides/render_lock.md`
+2. `docs/guides/reproducibility_contract.md`
+3. `docs/guides/runtime_version_policy.md`
+4. `zundamotion/render_lock.py` と対象テスト
+
+Render Lock は入力 provenance、framemd5 / audio PCM / A/V sync は出力同等性と分けて判断する。
 
 ### 性能、並列度、キャッシュ、FFmpeg 経路
 
@@ -44,11 +70,13 @@ AI / Codex が `zundamotion` で不要なファイル読み込み、過剰な入
 
 ## 3. AI 低トークン運用
 
+- 常時読むものは `AGENTS.md` が指定する最小入口に限定する
+- `scripts/script_cheatsheet.md`、performance ledger、design資料など大きい正本は該当作業でだけ読む
 - ファイル冒頭には、責務、入口、関連ファイルを最大 10 行で置く
 - 長い仕様説明はコードコメントではなく docs に置く
 - 同じ仕様を README、docs、コードコメントへ重複記述しない
 - 変更に不要な大きいファイルや無関係ディレクトリを広く読まない
-- 読む順序は `AGENTS.md`、`README.md`、`docs/README.md` を起点に固定する
+- 読む順序は `AGENTS.md` → `README.md` / `project_status.md` / `docs/README.md` → 作業種別の正本とする
 - PR や作業報告では、読んだファイルと読まなかった理由を 1 行ずつ書ける粒度で作業する
 
 ### 設定項目のドキュメント
@@ -78,12 +106,15 @@ AI / Codex が `zundamotion` で不要なファイル読み込み、過剰な入
 - DEBUG ログからコマンドを再現できるようにする
 - フィルタ列の組み立てとプロセス実行を同じ関数へ混ぜない
 
-## 6. CLI 規約
+## 6. CLI / contract 規約
 
 - `argparse` が増える場合は、オプショングループ単位で関数分割する
 - CLI、環境変数、YAML の優先順位をコードか docs のどちらか一方で明記する
 - CLI 追加時は `README.md`、`docs/README.md`、`docs/guides/setup_and_runtime.md` の更新要否を確認する
 - ヘルプ表示だけで分からない運用前提は docs 側へ寄せる
+- machine-readable JSON の key、error code、exit code を利用者が依存できる値として公開した場合、互換性を維持するか format version を上げる
+- `capabilities` は実際に利用可能な機能だけを宣言し、未実装 provider / option を先行して公開しない
+- Render Lock / validation / compile の事前検査では、FFmpeg / TTS / network asset を不要に起動しない
 
 ## 7. Pipeline 規約
 
@@ -98,6 +129,9 @@ AI / Codex が `zundamotion` で不要なファイル読み込み、過剰な入
 - ドキュメント整理と挙動変更を同時に大きく混ぜない
 - 変更理由、読んだファイル、読まなかった理由を短く説明できない変更は分割を検討する
 - 生成物更新が不要なら含めない
+- stacked PR は base 未統合時の暫定検証として扱う
+- base PR が `master` へ入ったら、後段 PR は current `master` に対して `behind=0` と責務差分を確認する。履歴が複雑化した場合は force で整形するより current `master` から責務差分だけを再構成する
+- 後段 PR の完了判定は、current `master` を base にした CI / benchmark を証拠とし、古い merge ref の結果を流用しない
 
 ## 9. 分割基準
 
@@ -112,6 +146,10 @@ AI / Codex が `zundamotion` で不要なファイル読み込み、過剰な入
 ## 10. 既存ルールの移設先
 
 - ドキュメント更新義務: `AGENTS.md` と `README.md`
+- authoring contract: `docs/guides/compiler_interface.md`
+- TTS Provider contract: `docs/guides/tts_provider.md`
+- 入力 provenance: `docs/guides/render_lock.md`
+- 出力再現性: `docs/guides/reproducibility_contract.md`
 - 性能変更前の必読資料: `docs/guides/performance_regression_ledger.md`
 - 設計メモや検証履歴の置き場: `docs/design/`, `docs/guides/`, `docs/issues_pending.md`
 - ログ方針や外部 I/O の詳細実装は、既存コードと対象モジュールの関連 docs を正とする
