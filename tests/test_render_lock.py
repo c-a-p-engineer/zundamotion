@@ -65,3 +65,17 @@ def test_render_lock_is_deterministic(monkeypatch, tmp_path: Path) -> None:
     second = create_render_lock("script.yaml", project_root=tmp_path)
 
     assert first == second
+
+
+def test_render_lock_project_root_scopes_loader_and_restores_cwd(tmp_path: Path) -> None:
+    asset = tmp_path / "assets" / "bg.png"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(b"asset")
+    script = tmp_path / "script.yaml"
+    _write_script(script, "assets/bg.png")
+    original_cwd = Path.cwd()
+
+    lock = create_render_lock("script.yaml", project_root=tmp_path)
+
+    assert Path.cwd() == original_cwd
+    assert any(item["path"] == "assets/bg.png" for item in lock["assets"])
