@@ -128,7 +128,14 @@ def capabilities_document() -> dict[str, Any]:
         "format_version": CAPABILITIES_FORMAT_VERSION,
         "zundamotion_version": __version__,
         "inputs": ["yaml", "markdown"],
-        "commands": ["render", "validate", "compile", "capabilities"],
+        "commands": [
+            "render",
+            "validate",
+            "compile",
+            "capabilities",
+            "lock",
+            "verify-lock",
+        ],
         "export_presets": sorted(EXPORT_PRESETS),
         "subtitle_render_modes": ["png", "auto", "ass"],
         "tts": {
