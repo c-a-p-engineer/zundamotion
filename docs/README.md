@@ -3,14 +3,15 @@
 このディレクトリは、Zundamotion の利用仕様、実装ガイド、設計記録、性能・判断履歴を置く場所です。
 AI / Codex が常時読む最小ルールはリポジトリ直下の `AGENTS.md`、コード変更時の低トークン規約は `guides/ai_coding_rules.md` を正とします。
 
-## まず読む
+## AI / Codex の入口
+
+`AGENTS.md` を読んだ後の常時入口は、次の 3 資料だけです。
 
 - [`../README.md`](../README.md): 利用者向け概要、セットアップ、主要機能
-- [`../AGENTS.md`](../AGENTS.md): AI / Codex の最小運用ルール
 - [`guides/project_status.md`](./guides/project_status.md): **現在状態、未完了事項、次の作業の正本**
-- [`../scripts/script_cheatsheet.md`](../scripts/script_cheatsheet.md): YAML 台本仕様の利用者向け正本
-- [`features.md`](./features.md): 機能一覧と実装状態
+- この `docs/README.md`: 作業種別ごとの正本索引
 
+YAML 台本を扱う場合だけ [`../scripts/script_cheatsheet.md`](../scripts/script_cheatsheet.md)、機能状態を確認する場合だけ [`features.md`](./features.md) を追加で参照します。
 「次に何をするか」を調べる場合は、日付付き計画や過去ログではなく `guides/project_status.md` を優先してください。
 
 ## 実装・運用ガイド
@@ -68,6 +69,7 @@ AI / Codex が常時読む最小ルールはリポジトリ直下の `AGENTS.md`
 - **machine-readable authoring契約**: `guides/compiler_interface.md`
 - **TTS backend 境界**: `guides/tts_provider.md`
 - **入力 provenance**: `guides/render_lock.md`
+- **出力再現性**: `guides/reproducibility_contract.md`
 - **性能判断**: `guides/performance_regression_ledger.md`
 - **未確定・再検討条件**: `issues_pending.md`
 - **履歴**: 日付付き計画、解析ログ、完了済みリファクタリング記録
