@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+from zundamotion.render_lock import create_render_lock, verify_render_lock
+
+
+def _write_script(path: Path, bg_path: str) -> None:
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "lock", "version": 3},
+                "scenes": [
+                    {
+                        "id": "scene1",
+                        "bg": bg_path,
+                        "lines": [{"wait": 0.1}],
+                    }
+                ],
+            },
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_render_lock_detects_asset_changes(monkeypatch, tmp_path: Path) -> None:
+    asset = tmp_path / "assets" / "bg.png"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(b"first")
+    script = tmp_path / "script.yaml"
+    _write_script(script, "assets/bg.png")
+    monkeypatch.chdir(tmp_path)
+
+    lock = create_render_lock("script.yaml", project_root=tmp_path)
+    assets = {item["path"]: item["sha256"] for item in lock["assets"]}
+
+    assert lock["format"] == "zundamotion.render-lock"
+    assert lock["format_version"] == 1
+    assert lock["source"]["script"] == "script.yaml"
+    assert "assets/bg.png" in assets
+    assert verify_render_lock("script.yaml", lock, project_root=tmp_path)["valid"] is True
+
+    asset.write_bytes(b"second")
+    verification = verify_render_lock("script.yaml", lock, project_root=tmp_path)
+
+    assert verification["valid"] is False
+    assert any(
+        item["code"] == "ZDM-L1200" and item["subject"] == "assets:assets/bg.png"
+        for item in verification["differences"]
+    )
+
+
+def test_render_lock_is_deterministic(monkeypatch, tmp_path: Path) -> None:
+    script = tmp_path / "script.yaml"
+    script.write_text(
+        yaml.safe_dump({"meta": {"title": "same", "version": 3}, "scenes": []}),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    first = create_render_lock("script.yaml", project_root=tmp_path)
+    second = create_render_lock("script.yaml", project_root=tmp_path)
+
+    assert first == second
