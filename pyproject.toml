@@ -30,7 +30,7 @@ dependencies = [
 dev = ["build>=1", "pytest>=7"]
 
 [project.scripts]
-zundamotion = "zundamotion.main:cli"
+zundamotion = "zundamotion.cli:cli"
 
 [tool.setuptools]
 include-package-data = true
