@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 from zundamotion.components.video.clip.face import apply_face_overlays
 
@@ -19,6 +20,7 @@ class _StubFaceCache:
 class _StubRenderer:
     def __init__(self) -> None:
         self.face_cache = _StubFaceCache()
+        self.video_params = SimpleNamespace(fps=30)
 
 
 class _RecordingColorFilterCache:
