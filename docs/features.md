@@ -39,6 +39,8 @@
 | compressor | 一部実装 | `radio` preset 内の固定 `acompressor` のみ | `filter_presets.py` |
 | reverb / echo | 一部実装 | `echo` preset の固定 `aecho` のみ。任意 reverb 設定はない | `filter_presets.py` |
 | loudnorm | 実装済み | `audio.master_loudnorm` / `mastering.loudnorm` | `bgm_phase.py`, `test_bgm_phase_loop.py` |
+| TTS Provider 境界 | 実装済み | 共通 `TTSProvider` / capability と `VoicevoxTTSProvider`。現時点の provider は VOICEVOX のみ | `audio/provider.py`, `voicevox_client.py`, `test_tts_provider.py` |
+| 多言語 TTS provider | 未実装 | provider 境界はあるが第二provider、language/font契約は未実装 | `guides/tts_provider.md`, `guides/project_status.md` |
 
 ## 台本・出力・保守
 
@@ -52,6 +54,10 @@
 | plugin | 実装済み | built-in と drop-in、allow/deny | `plugins`, `test_plugins_integration.py` |
 | Shorts 書き出し | 実装済み | `shorts_1080x1920` preset | `export_presets.py`, `test_media_params_resolution.py` |
 | 1440p 書き出し | 実装済み | `youtube_1440p` preset | `export_presets.py`, `test_media_params_resolution.py` |
+| machine-readable validation | 実装済み | `validate --json`。通常renderと同じloader/validationを使用しFFmpeg/TTSは起動しない | `authoring.py`, `cli.py`, `test_authoring_cli.py` |
+| canonical compile | 実装済み | `zundamotion.compiled-config` v1。解決済み・検証済みconfigurationでありrenderer-native IRとは別契約 | `authoring.py`, `guides/compiler_interface.md` |
+| capability discovery | 実装済み | `capabilities --json`。export preset、subtitle mode、TTS capability、built-in plugin manifestを機械可読化 | `authoring.py`, `test_authoring_cli.py` |
+| Render Lock / provenance | 実装済み | script / compiled-config / 実在asset / runtime lockのSHA-256を固定し `verify-lock` で差分検出 | `render_lock.py`, `test_render_lock.py`, `guides/render_lock.md` |
 | template 管理 | 一部実装 | package default config と include 再利用は可能。template catalog/version 管理はない | `templates/config.yaml`, `components/script/resolver.py` |
 | proxy 生成 | 未実装 | proxy asset pipeline はない | 実装・テストなし |
 | 複数 sequence | 未実装 | 1 台本 1 timeline | `pipeline.py` |
@@ -76,5 +82,8 @@
 ## 関連資料
 
 - YAML: [`../scripts/script_cheatsheet.md`](../scripts/script_cheatsheet.md)
+- machine-readable authoring: [`guides/compiler_interface.md`](./guides/compiler_interface.md)
+- Render Lock: [`guides/render_lock.md`](./guides/render_lock.md)
+- TTS Provider: [`guides/tts_provider.md`](./guides/tts_provider.md)
 - サンプル: [`script_samples.md`](./script_samples.md)
 - filter mapping: [`design/ffmpeg_filter_mapping.md`](./design/ffmpeg_filter_mapping.md)
