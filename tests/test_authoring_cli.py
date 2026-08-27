@@ -30,7 +30,13 @@ def test_capabilities_document_is_machine_readable_and_stable() -> None:
     assert document["format_version"] == 1
     assert document["tts"]["default_provider"] == "voicevox"
     assert "youtube_1080p" in document["export_presets"]
-    assert {"validate", "compile", "capabilities"}.issubset(document["commands"])
+    assert {
+        "validate",
+        "compile",
+        "capabilities",
+        "lock",
+        "verify-lock",
+    }.issubset(document["commands"])
     assert document["plugins"] == sorted(
         document["plugins"], key=lambda item: (item["kind"], item["id"])
     )
@@ -74,6 +80,8 @@ def test_module_cli_help_lists_authoring_commands() -> None:
     assert "validate" in proc.stdout
     assert "compile" in proc.stdout
     assert "capabilities" in proc.stdout
+    assert "lock" in proc.stdout
+    assert "verify-lock" in proc.stdout
     assert "render" in proc.stdout
 
 

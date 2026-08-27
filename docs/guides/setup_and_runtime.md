@@ -73,6 +73,8 @@ test -f /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf
 
 ## CLI 実行
 
+既存の render CLI は引き続き利用できます。
+
 ```bash
 python -m zundamotion.main scripts/sample.yaml -o output/sample.mp4
 python -m zundamotion.main scripts/sample.yaml -o output/sample.mp4 --no-voice --no-cache
@@ -80,6 +82,20 @@ python -m zundamotion.main scripts/sample.yaml --log-json
 python -m zundamotion.main scripts/sample.yaml --log-kv
 python -m zundamotion.main scripts/sample.yaml --jobs auto --hw-encoder gpu --quality speed
 ```
+
+AI / CI の事前検査と入力 provenance には unified CLI を利用できます。
+
+```bash
+zundamotion capabilities --json
+zundamotion validate scripts/sample.yaml --json
+zundamotion compile scripts/sample.yaml -o build/sample.compiled.json --pretty
+zundamotion lock scripts/sample.yaml -o zundamotion.lock.json
+zundamotion verify-lock scripts/sample.yaml --lock-file zundamotion.lock.json
+zundamotion render scripts/sample.yaml -o output/sample.mp4
+```
+
+`validate` / `compile` / `capabilities` の契約は [compiler_interface.md](./compiler_interface.md)、`lock` / `verify-lock` の入力 provenance 契約は [render_lock.md](./render_lock.md) を参照してください。
+Render Lock の成功は最終 MP4 の framemd5 / audio PCM / A/V sync の一致を保証しません。出力同等性は [reproducibility_contract.md](./reproducibility_contract.md) の責務です。
 
 `--project-root` または `ZUNDAMOTION_PROJECT_ROOT` を指定すると相対パスの基準を変更します。
 submodule 利用は [submodule.md](./submodule.md) を参照してください。

@@ -13,8 +13,14 @@ from typing import Iterator, Sequence
 from . import __version__
 from .authoring import capabilities_document, compiled_document, validation_document
 from .main import cli as legacy_render_cli
+from .render_lock import (
+    create_render_lock,
+    load_render_lock,
+    render_lock_json,
+    verify_render_lock,
+)
 
-_AUTHORING_COMMANDS = {"validate", "compile", "capabilities"}
+_AUTHORING_COMMANDS = {"validate", "compile", "capabilities", "lock", "verify-lock"}
 
 
 def _json_text(value: object, *, pretty: bool = False) -> str:
@@ -80,7 +86,9 @@ def _authoring_parser() -> argparse.ArgumentParser:
         "compile", help="Resolve and validate input into canonical compiled-config JSON."
     )
     _common_script_parser(compile_parser)
-    compile_parser.add_argument("-o", "--output", default=None, help="Output JSON path; stdout when omitted.")
+    compile_parser.add_argument(
+        "-o", "--output", default=None, help="Output JSON path; stdout when omitted."
+    )
     compile_parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON.")
 
     capabilities = subparsers.add_parser(
@@ -88,6 +96,33 @@ def _authoring_parser() -> argparse.ArgumentParser:
     )
     capabilities.add_argument(
         "--json", action="store_true", help="Emit the stable capabilities JSON contract."
+    )
+
+    lock_parser = subparsers.add_parser(
+        "lock", help="Create deterministic render provenance for a script and its assets."
+    )
+    _common_script_parser(lock_parser)
+    lock_parser.add_argument(
+        "-o",
+        "--output",
+        default="zundamotion.lock.json",
+        help="Lock output path (default: zundamotion.lock.json).",
+    )
+    lock_parser.add_argument(
+        "--compact", action="store_true", help="Write compact JSON instead of indented JSON."
+    )
+
+    verify_lock = subparsers.add_parser(
+        "verify-lock", help="Recompute render provenance and compare it with a lock file."
+    )
+    _common_script_parser(verify_lock)
+    verify_lock.add_argument(
+        "--lock-file",
+        default="zundamotion.lock.json",
+        help="Lock file to verify (default: zundamotion.lock.json).",
+    )
+    verify_lock.add_argument(
+        "--json", action="store_true", help="Emit machine-readable verification JSON."
     )
 
     subparsers.add_parser(
@@ -126,7 +161,7 @@ def _run_authoring(argv: Sequence[str]) -> int:
             )
         return 0
 
-    if args.command not in {"validate", "compile"}:
+    if args.command not in {"validate", "compile", "lock", "verify-lock"}:
         parser.print_help()
         return 0
 
@@ -140,21 +175,48 @@ def _run_authoring(argv: Sequence[str]) -> int:
                     sys.stdout.write(f"valid: {args.script_path}\n")
                 else:
                     for error in document["errors"]:
-                        sys.stderr.write(
-                            f"{error['code']}: {error['message']}\n"
-                        )
+                        sys.stderr.write(f"{error['code']}: {error['message']}\n")
                 return 0 if document["valid"] else 1
 
-            document = compiled_document(args.script_path)
-            text = _json_text(document, pretty=args.pretty)
-            if args.output:
+            if args.command == "compile":
+                document = compiled_document(args.script_path)
+                text = _json_text(document, pretty=args.pretty)
+                if args.output:
+                    output = Path(args.output)
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    output.write_text(text, encoding="utf-8")
+                else:
+                    sys.stdout.write(text)
+                return 0
+
+            if args.command == "lock":
+                document = create_render_lock(args.script_path, project_root=Path.cwd())
                 output = Path(args.output)
                 output.parent.mkdir(parents=True, exist_ok=True)
-                output.write_text(text, encoding="utf-8")
+                output.write_text(
+                    render_lock_json(document, pretty=not args.compact), encoding="utf-8"
+                )
+                sys.stdout.write(f"render lock: {output}\n")
+                return 0
+
+            lock_document = load_render_lock(args.lock_file)
+            document = verify_render_lock(
+                args.script_path,
+                lock_document,
+                project_root=Path.cwd(),
+            )
+            if args.json:
+                sys.stdout.write(_json_text(document))
+            elif document["valid"]:
+                sys.stdout.write(f"lock valid: {args.lock_file}\n")
             else:
-                sys.stdout.write(text)
-            return 0
-    except ValueError as exc:
+                for difference in document["differences"]:
+                    sys.stderr.write(
+                        f"{difference['code']}: {difference['subject']} "
+                        f"expected={difference['expected']!r} actual={difference['actual']!r}\n"
+                    )
+            return 0 if document["valid"] else 1
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
         parser.error(str(exc))
         return 2
 

@@ -20,6 +20,7 @@ VOICEVOX による音声合成、FFmpeg による映像合成、字幕焼き込�
 ## 主な機能
 
 - VOICEVOX 連携による通常発話音声生成
+- 将来の音声 backend 追加に向けた共通 TTS Provider 境界
 - VOICEVOX の音声合成失敗時は無音で継続せず、対象発話を示して生成を停止
 - FFmpeg ベースの背景、立ち絵、字幕、音声合成
 - BGM / 効果音 / 前景オーバーレイ / テキストバッジ
@@ -28,6 +29,7 @@ VOICEVOX による音声合成、FFmpeg による映像合成、字幕焼き込�
 - `--no-voice` による無音トラック生成
 - Markdown 入力からの中間台本生成
 - AI / CI 向け `validate` / `compile` / `capabilities` の機械可読 CLI
+- script / compiled config / 実在素材 / runtime lock を固定する Render Lock / provenance
 
 ## 最短の使い方
 
@@ -77,6 +79,19 @@ zundamotion compile scripts/sample.yaml -o build/sample.compiled.json --pretty
 FFmpeg や VOICEVOX を起動しないため、AI authoring や CI の事前検査に利用できます。
 詳細な JSON 契約、終了コード、旧 CLI との互換性は [`docs/guides/compiler_interface.md`](docs/guides/compiler_interface.md) を参照してください。
 
+## 入力状態を固定してからレンダーする
+
+素材確定後の入力 provenance を保存し、後から変更を検出できます。
+
+```bash
+zundamotion lock scripts/sample.yaml -o zundamotion.lock.json
+zundamotion verify-lock scripts/sample.yaml --lock-file zundamotion.lock.json
+zundamotion render scripts/sample.yaml -o output/sample.mp4
+```
+
+Render Lock は source script、canonical compiled config、実在する参照素材、runtime lock の入力状態を検証します。
+最終 MP4 の framemd5 / audio PCM / A/V sync の同等性検査とは責務を分けています。詳細は [`docs/guides/render_lock.md`](docs/guides/render_lock.md) を参照してください。
+
 ## 台本を書くときの入口
 
 - YAML の基本構造: [`scripts/script_cheatsheet.md#基本構造`](scripts/script_cheatsheet.md#基本構造)
@@ -95,6 +110,8 @@ FFmpeg や VOICEVOX を起動しないため、AI authoring や CI の事前検�
 - 台本チートシート: [`scripts/script_cheatsheet.md`](scripts/script_cheatsheet.md)
 - セットアップと実行: [`docs/guides/setup_and_runtime.md`](docs/guides/setup_and_runtime.md)
 - machine-readable compiler interface: [`docs/guides/compiler_interface.md`](docs/guides/compiler_interface.md)
+- TTS Provider contract: [`docs/guides/tts_provider.md`](docs/guides/tts_provider.md)
+- Render Lock / provenance: [`docs/guides/render_lock.md`](docs/guides/render_lock.md)
 - パフォーマンスと運用: [`docs/guides/performance_tuning.md`](docs/guides/performance_tuning.md)
 - キャラクター素材: [`docs/guides/character_assets.md`](docs/guides/character_assets.md)
 - プロジェクト構造: [`docs/guides/project_structure.md`](docs/guides/project_structure.md)
