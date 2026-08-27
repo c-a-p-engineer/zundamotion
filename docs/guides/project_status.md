@@ -30,9 +30,9 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 | Finalize / FFmpeg runner / VideoPhase / Markdown | 完了 | #43、PR #74、#82〜#84 |
 | CPU overlay-heavy stall | 修正済み | #77、PR #78、#80。静止画入力の有限化で終端停止も防止 |
 | 最終構造監査 | 完了 | PR #87 |
-| machine-readable compiler interface | 完了 | `validate` / `compile` / `capabilities`、compiled-config v1 |
-| TTS Provider 基盤 | 完了 | 共通 Provider / capability、VOICEVOX compatibility adapter。第二providerは未実装 |
-| Render Lock / provenance | 完了 | script / compiled-config / asset / runtime lock hash と `verify-lock` |
+| machine-readable compiler interface | 完了 | PR #89。`validate` / `compile` / `capabilities`、compiled-config v1 |
+| TTS Provider 基盤 | 完了 | PR #93。共通 Provider / capability、VOICEVOX compatibility adapter。第二providerは未実装 |
+| Render Lock / provenance | 実装・統合検証中 | PR #94。script / compiled-config / asset / runtime lock hash と `verify-lock` |
 
 詳細な高速化の採用・却下理由は `performance_regression_ledger.md` を正とします。
 過去の分割計画は `source_refactoring_plan.md`、2026-08-07 時点のタスク表は `current_task_plan_20260807.md` に履歴として残します。
