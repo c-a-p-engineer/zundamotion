@@ -4,9 +4,12 @@ from pathlib import Path
 
 import pytest
 
+from zundamotion.authoring import validation_document
 from zundamotion.components.audio.factory import resolve_tts_provider
 from zundamotion.components.config.validate_voice import validate_voice_config
 from zundamotion.exceptions import ValidationError
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _config(tmp_path: Path, **voice_overrides):
@@ -45,6 +48,12 @@ def test_resolve_tts_provider_keeps_voicevox_default() -> None:
 def test_chatterbox_multilingual_config_validates_without_runtime(tmp_path: Path) -> None:
     config = _config(tmp_path)
     validate_voice_config(config)
+
+
+def test_repository_chatterbox_sample_validates_through_canonical_loader() -> None:
+    document = validation_document(str(ROOT / "scripts" / "sample_chatterbox_multilingual.yaml"))
+
+    assert document["valid"] is True, document["errors"]
 
 
 def test_chatterbox_rejects_unknown_language(tmp_path: Path) -> None:
