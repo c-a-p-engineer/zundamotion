@@ -28,6 +28,7 @@ from .validate_common import (
 from .validate_layers import _validate_image_layer_transition, _validate_image_layers
 from .validate_overlays import _validate_fg_overlays
 from .validate_script import validate_script
+from .validate_voice import validate_voice_config
 
 
 def _validate_plugins_config(cfg: Dict[str, Any]) -> None:
@@ -174,4 +175,5 @@ def validate_config(config: Dict[str, Any]) -> None:
     _validate_bgm_layers(script)
     _validate_defaults(config)
     _validate_transitions(config)
+    validate_voice_config(config)
     validate_script(config, script)

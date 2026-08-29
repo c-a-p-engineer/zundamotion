@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from zundamotion.cache import CacheManager
-from zundamotion.components.audio import AudioGenerator
+from zundamotion.components.audio import create_audio_generator as AudioGenerator
 from zundamotion.utils.subtitle_text import (
     is_effective_subtitle_text,
     normalize_subtitle_text,
@@ -38,16 +38,19 @@ class AudioPhase(AudioPhaseRunMixin):
         self.temp_dir = temp_dir
         self.cache_manager = AudioDurationCacheProxy(cache_manager)
         self.audio_params = audio_params
+        # Keep the historical module-level AudioGenerator hook for tests and
+        # external monkeypatches while routing the real constructor through the
+        # provider-aware factory.
         self.audio_gen = AudioGenerator(
             self.config, self.temp_dir, audio_params, self.cache_manager
-        )  # cache_managerを渡す
+        )
         self.video_extensions = self.config.get("system", {}).get(
             "video_extensions",
             [".mp4", ".mov", ".webm", ".avi", ".mkv"],
         )
-        self.used_voicevox_info: List[Tuple[int, str]] = (
-            []
-        )  # Initialize list to store (speaker_id, text)
+        # Kept for backward-compatible VOICEVOX reporting. Other providers do
+        # not fabricate numeric speaker IDs and therefore leave this list empty.
+        self.used_voicevox_info: List[Tuple[int, str]] = []
         policy = self._resolve_audio_worker_policy()
         self.audio_workers = max(1, int(self._determine_audio_workers()))
         if self.audio_workers != policy.resolved:

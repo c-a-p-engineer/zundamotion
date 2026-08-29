@@ -7,6 +7,7 @@ Zundamotion に同梱されている YAML 台本サンプルを用途別に整�
 | ファイル | 主な用途 | ハイライト |
 | --- | --- | --- |
 | [`sample.yaml`](../scripts/sample.yaml) | デフォルト設定の総合例 | キャラクターごとのデフォルト、字幕色の上書き、前景オーバーレイ、表情切り替え |
+| [`sample_chatterbox_multilingual.yaml`](../scripts/sample_chatterbox_multilingual.yaml) | Chatterbox 多言語TTS | Multilingual V3、English/Spanish/French/German/Japanese の行単位切替、optional voice cloning設定 |
 | [`sample_image_layers.yaml`](../scripts/sample_image_layers.yaml) | 画像レイヤーの表示/非表示 | 複数画像の show/hide とフェード演出 |
 | [`sample_effects.yaml`](../scripts/sample_effects.yaml) | 前景エフェクト最小構成 | `fg_overlays` のエフェクトチェーンとループ制御 |
 | [`sample_overlay_static_image_effect.yaml`](../scripts/sample_overlay_static_image_effect.yaml) | 静止画像 overlay effect スモーク | `warning.png` に `shake` を適用し、透過PNGと背景が分離されることを確認 |
@@ -54,7 +55,7 @@ Zundamotion に同梱されている YAML 台本サンプルを用途別に整�
 | [背景エフェクト (`background_effects`)](../scripts/script_cheatsheet.md#背景エフェクト-background_effects) | [`sample_bg_shake.yaml`](../scripts/sample_bg_shake.yaml) |
 | [画像レイヤー (`image_layers`)](../scripts/script_cheatsheet.md#画像レイヤー-image_layers) | [`sample_image_layers.yaml`](../scripts/sample_image_layers.yaml), [`sample.yaml`](../scripts/sample.yaml) |
 | [前景オーバーレイ (`fg_overlays`)](../scripts/script_cheatsheet.md#前景オーバーレイ-fg_overlays) | [`sample.yaml`](../scripts/sample.yaml), [`sample_effects.yaml`](../scripts/sample_effects.yaml), [`sample_overlay_static_image_effect.yaml`](../scripts/sample_overlay_static_image_effect.yaml), [`sample_overlay_blink.yaml`](../scripts/sample_overlay_blink.yaml), [`sample_registry_smoke.yaml`](../scripts/sample_registry_smoke.yaml), [`sample_user_overlay_plugin.yaml`](../scripts/sample_user_overlay_plugin.yaml) |
-| [BGM と音声チューニング](../scripts/script_cheatsheet.md#bgm-と音声チューニング) | [`sample.yaml`](../scripts/sample.yaml) |
+| [BGM と音声チューニング](../scripts/script_cheatsheet.md#bgm-と音声チューニング) | [`sample.yaml`](../scripts/sample.yaml), [`sample_chatterbox_multilingual.yaml`](../scripts/sample_chatterbox_multilingual.yaml) |
 | [効果音 (`sound_effects`)](../scripts/script_cheatsheet.md#効果音-sound_effects) | [`sample.yaml`](../scripts/sample.yaml) |
 | [顔アニメ用差分素材](../scripts/script_cheatsheet.md#顔アニメ用差分素材) | [`sample.yaml`](../scripts/sample.yaml), [`copetan_all_expressions.yaml`](../scripts/copetan_all_expressions.yaml) |
 | [読みと字幕テキストの制御](../scripts/script_cheatsheet.md#読みと字幕テキストの制御) | [`sample.yaml`](../scripts/sample.yaml) |

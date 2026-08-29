@@ -1,0 +1,41 @@
+meta:
+  title: Chatterbox Multilingual V3 sample
+  version: 3
+
+voice:
+  provider: chatterbox
+  language: en
+  model: v3
+  device: cpu
+  exaggeration: 0.5
+  cfg_weight: 0.5
+  # Optional zero-shot voice cloning:
+  # reference_audio: assets/voice/reference.wav
+
+subtitle:
+  font_path: /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf
+  size: 48
+  color: white
+  outline: black
+  wrap_mode: chars
+  max_chars_per_line: 34
+
+system:
+  subtitle_file:
+    enabled: true
+    format: srt
+
+scenes:
+  - id: multilingual_intro
+    bg: assets/bg/room.png
+    lines:
+      - text: Hello. Zundamotion creates videos automatically from structured scripts.
+        language: en
+      - text: Hola. Zundamotion crea vídeos automáticamente a partir de guiones estructurados.
+        language: es
+      - text: Bonjour. Zundamotion crée automatiquement des vidéos à partir de scripts structurés.
+        language: fr
+      - text: Hallo. Zundamotion erstellt automatisch Videos aus strukturierten Skripten.
+        language: de
+      - text: こんにちは。ずんだもーしょんは、構造化された台本から動画を自動生成します。
+        language: ja

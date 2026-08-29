@@ -1,7 +1,7 @@
 # Zundamotion
 
 Zundamotion は、YAML 台本から `.mp4` 動画を生成するツールです。  
-VOICEVOX による音声合成、FFmpeg による映像合成、字幕焼き込み、BGM/SE 合成、立ち絵表示をまとめて扱います。
+VOICEVOX / Chatterbox による音声合成、FFmpeg による映像合成、字幕焼き込み、BGM/SE 合成、立ち絵表示をまとめて扱います。
 
 公開デモサイト: [Zundamotion feature demos](https://c-a-p-engineer.github.io/zundamotion/)
 
@@ -19,9 +19,10 @@ VOICEVOX による音声合成、FFmpeg による映像合成、字幕焼き込�
 
 ## 主な機能
 
-- VOICEVOX 連携による通常発話音声生成
-- 将来の音声 backend 追加に向けた共通 TTS Provider 境界
-- VOICEVOX の音声合成失敗時は無音で継続せず、対象発話を示して生成を停止
+- VOICEVOX 連携による日本語発話音声生成（既定Provider）
+- Chatterbox Multilingual V3 による23言語TTS、行単位言語切替、zero-shot voice cloning（optional runtime）
+- 共通 TTS Provider capability による backend 選択
+- VOICEVOX / Chatterbox の音声合成失敗時は無音で継続せず生成を停止
 - FFmpeg ベースの背景、立ち絵、字幕、音声合成
 - BGM / 効果音 / 前景オーバーレイ / テキストバッジ
 - SRT / ASS 字幕ファイル出力
@@ -35,11 +36,13 @@ VOICEVOX による音声合成、FFmpeg による映像合成、字幕焼き込�
 
 ### 1. 依存を用意する
 
-必要なのは主に以下です。
+通常構成で必要なのは主に以下です。
 
 - Python
 - FFmpeg / ffprobe
 - VOICEVOX Engine
+
+Chatterbox は optional runtime です。使用する場合だけ `chatterbox-tts` を別途導入します。詳細は [`docs/guides/tts_provider.md`](docs/guides/tts_provider.md) を参照してください。
 
 セットアップ詳細:
 
@@ -63,6 +66,16 @@ python -m zundamotion.main scripts/sample.yaml -o output/sample.mp4
 python -m zundamotion.main scripts/sample.yaml -o output/sample.mp4 --no-voice --no-cache
 ```
 
+Chatterbox Multilingual V3 の設定例:
+
+```bash
+python -m pip install "chatterbox-tts==0.1.7"
+zundamotion validate scripts/sample_chatterbox_multilingual.yaml
+zundamotion render scripts/sample_chatterbox_multilingual.yaml -o output/chatterbox.mp4
+```
+
+このサンプルは English / Spanish / French / German / Japanese を1本の台本で切り替えます。Chatterbox package/modelは通常のZundamotion runtime lockにはまだ含めていません。
+
 CLI 実行例、ログ形式、GPU/NVENC 確認、字幕出力、`--project-root` の説明は [`docs/guides/setup_and_runtime.md`](docs/guides/setup_and_runtime.md) を参照してください。
 
 ## AI / CI から台本を確認する
@@ -76,7 +89,7 @@ zundamotion compile scripts/sample.yaml -o build/sample.compiled.json --pretty
 ```
 
 `compile` の出力は `zundamotion.compiled-config` v1 で、実レンダーへ渡る解決済み configuration を固定したものです。
-FFmpeg や VOICEVOX を起動しないため、AI authoring や CI の事前検査に利用できます。
+FFmpeg や TTS runtime を起動しないため、AI authoring や CI の事前検査に利用できます。
 詳細な JSON 契約、終了コード、旧 CLI との互換性は [`docs/guides/compiler_interface.md`](docs/guides/compiler_interface.md) を参照してください。
 
 ## 入力状態を固定してからレンダーする
@@ -121,6 +134,7 @@ Render Lock は source script、canonical compiled config、実在する参照�
 ## サンプル台本
 
 - 標準サンプル: [`scripts/sample.yaml`](scripts/sample.yaml)
+- Chatterbox 多言語: [`scripts/sample_chatterbox_multilingual.yaml`](scripts/sample_chatterbox_multilingual.yaml)
 - 縦長レイアウト: [`scripts/sample_vertical.yaml`](scripts/sample_vertical.yaml)
 - シーン遷移: [`scripts/sample_transitions.yaml`](scripts/sample_transitions.yaml)
 - 字幕スタイル: [`scripts/sample_subtitle_styles.yaml`](scripts/sample_subtitle_styles.yaml)
@@ -154,4 +168,4 @@ Render Lock は source script、canonical compiled config、実在する参照�
 
 本プロジェクトは MIT License です。  
 同梱素材の出典や再配布条件は [`assets/ATTRIBUTION.md`](assets/ATTRIBUTION.md) を確認してください。  
-VOICEVOX の利用条件は [VOICEVOX 公式サイト](https://voicevox.hiroshiba.jp/) を参照してください。
+VOICEVOX の利用条件は [VOICEVOX 公式サイト](https://voicevox.hiroshiba.jp/) を参照してください。Chatterbox は upstream の MIT license と model/runtime条件も確認してください。

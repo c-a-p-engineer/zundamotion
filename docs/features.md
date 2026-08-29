@@ -39,8 +39,8 @@
 | compressor | 一部実装 | `radio` preset 内の固定 `acompressor` のみ | `filter_presets.py` |
 | reverb / echo | 一部実装 | `echo` preset の固定 `aecho` のみ。任意 reverb 設定はない | `filter_presets.py` |
 | loudnorm | 実装済み | `audio.master_loudnorm` / `mastering.loudnorm` | `bgm_phase.py`, `test_bgm_phase_loop.py` |
-| TTS Provider 境界 | 実装済み | 共通 `TTSProvider` / capability と `VoicevoxTTSProvider`。現時点の provider は VOICEVOX のみ | `audio/provider.py`, `voicevox_client.py`, `test_tts_provider.py` |
-| 多言語 TTS provider | 未実装 | provider 境界はあるが第二provider、language/font契約は未実装 | `guides/tts_provider.md`, `guides/project_status.md` |
+| TTS Provider 境界 | 実装済み | `voicevox` / `chatterbox` を共通 capability で公開。既定は VOICEVOX | `audio/provider.py`, `audio/factory.py`, `test_tts_provider.py` |
+| Chatterbox Multilingual V3 | 一部実装 | 23言語、行単位language、voice cloning、expression option。runtime/modelはoptionalで公式lock未固定、font fallback未完了 | `chatterbox_provider.py`, `chatterbox_generator.py`, `sample_chatterbox_multilingual.yaml` |
 
 ## 台本・出力・保守
 

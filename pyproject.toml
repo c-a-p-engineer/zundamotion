@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zundamotion"
 dynamic = ["version"]
-description = "Generate videos from YAML scripts using VOICEVOX and FFmpeg."
+description = "Generate videos from YAML scripts using multilingual TTS providers and FFmpeg."
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
@@ -28,6 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["build>=1", "pytest>=7"]
+chatterbox = ["chatterbox-tts==0.1.7"]
 
 [project.scripts]
 zundamotion = "zundamotion.cli:cli"

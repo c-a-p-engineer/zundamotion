@@ -29,6 +29,11 @@ def test_capabilities_document_is_machine_readable_and_stable() -> None:
     assert document["format"] == CAPABILITIES_FORMAT
     assert document["format_version"] == 1
     assert document["tts"]["default_provider"] == "voicevox"
+    assert document["tts"]["providers"] == ["voicevox", "chatterbox"]
+    chatterbox = document["tts"]["provider_capabilities"]["chatterbox"]
+    assert len(chatterbox["languages"]) == 23
+    assert chatterbox["supports_voice_cloning"] is True
+    assert chatterbox["optional_runtime"] is True
     assert "youtube_1080p" in document["export_presets"]
     assert {
         "validate",
@@ -97,7 +102,8 @@ def test_module_cli_capabilities_json_does_not_start_render_runtime() -> None:
     assert proc.returncode == 0, proc.stderr
     document = json.loads(proc.stdout)
     assert document["format"] == CAPABILITIES_FORMAT
-    assert document["tts"]["providers"] == ["voicevox"]
+    assert document["tts"]["providers"] == ["voicevox", "chatterbox"]
+    assert "en" in document["tts"]["provider_capabilities"]["chatterbox"]["languages"]
 
 
 def test_module_cli_compile_to_stdout(tmp_path: Path) -> None:
