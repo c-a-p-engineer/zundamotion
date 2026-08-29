@@ -59,13 +59,21 @@ Chatterbox の生成音声には upstream の Perth watermark が入ります。
 
 ## Chatterbox runtime
 
-2026-08-29 時点の検証対象 package は `chatterbox-tts==0.1.7` です。
+2026-08-29 時点の検証対象 package は `chatterbox-tts==0.1.7` です。Zundamotion では optional extra として固定します。
+
+Repository checkout:
 
 ```bash
-python -m pip install "chatterbox-tts==0.1.7"
+python -m pip install -e ".[chatterbox]"
 ```
 
-これは **Zundamotion の通常依存には含めません**。Chatterbox は PyTorch / model download を伴うため、公式 Dev Container / reproducible runtime へ固定する前に別途 runtime lock を設計します。
+配布 package:
+
+```bash
+python -m pip install "zundamotion[chatterbox]"
+```
+
+`chatterbox` extra は **通常依存には含めません**。Chatterbox は PyTorch / model download を伴うため、公式 Dev Container / reproducible runtime へ固定する前に別途 runtime lock を設計します。
 最初の `from_pretrained()` では upstream model cache が必要になる場合があります。Render Lock v1 はこの remote model 内容を固定しないため、現段階では Chatterbox runtime を optional / experimental と扱います。
 
 ## YAML
