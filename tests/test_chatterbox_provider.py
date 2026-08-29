@@ -99,3 +99,10 @@ def test_chatterbox_rejects_invalid_device_and_cfg_weight(tmp_path: Path) -> Non
         validate_voice_config(_config(tmp_path, device="auto"))
     with pytest.raises(ValidationError, match="cfg_weight"):
         validate_voice_config(_config(tmp_path, cfg_weight=1.5))
+
+
+def test_chatterbox_rejects_non_neutral_speed_and_pitch(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="speed"):
+        validate_voice_config(_config(tmp_path, speed=1.1))
+    with pytest.raises(ValidationError, match="pitch"):
+        validate_voice_config(_config(tmp_path, pitch=0.1))
