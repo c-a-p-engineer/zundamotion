@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from zundamotion.components.audio.chatterbox_generator import ChatterboxAudioGenerator
 from zundamotion.components.audio.factory import resolve_tts_provider
 from zundamotion.components.config.validate_voice import validate_voice_config
 from zundamotion.exceptions import ValidationError
@@ -15,7 +14,7 @@ def _config(tmp_path: Path, **voice_overrides):
         "provider": "chatterbox",
         "language": "en",
         "device": "cpu",
-        "model": "multilingual_v2",
+        "model": "v3",
         "exaggeration": 0.5,
         "cfg_weight": 0.5,
     }
