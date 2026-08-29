@@ -5,9 +5,11 @@ from pathlib import Path
 import pytest
 
 from zundamotion.authoring import validation_document
-from zundamotion.components.audio.factory import resolve_tts_provider
+from zundamotion.components.audio.chatterbox_generator import ChatterboxAudioGenerator
+from zundamotion.components.audio.factory import create_audio_generator, resolve_tts_provider
 from zundamotion.components.config.validate_voice import validate_voice_config
 from zundamotion.exceptions import ValidationError
+from zundamotion.utils.ffmpeg_params import AudioParams
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -43,6 +45,19 @@ def test_resolve_tts_provider_keeps_voicevox_default() -> None:
     assert resolve_tts_provider({"voice": {}}) == "voicevox"
     assert resolve_tts_provider({}) == "voicevox"
     assert resolve_tts_provider({"voice": {"provider": "ChatterBox"}}) == "chatterbox"
+
+
+def test_audio_factory_selects_chatterbox_without_loading_runtime(tmp_path: Path) -> None:
+    generator = create_audio_generator(
+        _config(tmp_path),
+        tmp_path,
+        AudioParams(),
+        object(),
+    )
+
+    assert isinstance(generator, ChatterboxAudioGenerator)
+    assert generator.provider.provider_id == "chatterbox"
+    assert generator.provider._model is None
 
 
 def test_chatterbox_multilingual_config_validates_without_runtime(tmp_path: Path) -> None:
