@@ -38,7 +38,7 @@ CHATTERBOX_LANGUAGES: tuple[str, ...] = (
     "tr",
     "zh",
 )
-CHATTERBOX_DEFAULT_MODEL = "multilingual_v2"
+CHATTERBOX_DEFAULT_MODEL = "v3"
 CHATTERBOX_DEFAULT_LANGUAGE = "en"
 CHATTERBOX_SUPPORTED_DEVICES = ("cpu", "cuda", "mps")
 
