@@ -1,11 +1,11 @@
 meta:
-  title: Chatterbox Multilingual sample
+  title: Chatterbox Multilingual V3 sample
   version: 3
 
 voice:
   provider: chatterbox
   language: en
-  model: multilingual_v2
+  model: v3
   device: cpu
   exaggeration: 0.5
   cfg_weight: 0.5
