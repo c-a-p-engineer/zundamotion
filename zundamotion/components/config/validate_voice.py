@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable
+from typing import Any, Dict
 
 from ...exceptions import ValidationError
 from ..audio.chatterbox_provider import (
@@ -91,6 +91,8 @@ def _validate_chatterbox_settings(
 
     _validate_number(cfg, "exaggeration", label, minimum=0.0)
     _validate_number(cfg, "cfg_weight", label, minimum=0.0, maximum=1.0)
+    _validate_neutral_unsupported_value(cfg, "speed", label, neutral=1.0)
+    _validate_neutral_unsupported_value(cfg, "pitch", label, neutral=0.0)
 
 
 def _validate_number(
@@ -111,3 +113,22 @@ def _validate_number(
         raise ValidationError(f"{label}.{key} must be >= {minimum}.")
     if maximum is not None and number > maximum:
         raise ValidationError(f"{label}.{key} must be <= {maximum}.")
+
+
+def _validate_neutral_unsupported_value(
+    cfg: Dict[str, Any],
+    key: str,
+    label: str,
+    *,
+    neutral: float,
+) -> None:
+    if key not in cfg:
+        return
+    value = cfg.get(key)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValidationError(f"{label}.{key} must be a number.")
+    if float(value) != neutral:
+        raise ValidationError(
+            f"{label}.{key}={value!r} is not supported by the Chatterbox provider; "
+            f"use the neutral value {neutral}."
+        )
