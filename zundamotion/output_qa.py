@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+import tempfile
 from typing import Any
 
 from PIL import Image, ImageDraw
@@ -209,13 +210,18 @@ async def create_contact_sheet(
 
     source = Path(file_path)
     output = Path(output_path)
+    if output.suffix.lower() != ".png":
+        raise ValueError("contact sheet output must use a .png extension")
+    if frame_width <= 0:
+        raise ValueError("frame_width must be positive")
     output.parent.mkdir(parents=True, exist_ok=True)
     timestamps = representative_timestamps(float(duration), samples)
-    frame_dir = output.parent / f".{output.stem}_frames"
-    frame_dir.mkdir(parents=True, exist_ok=True)
-    frames: list[Path] = []
 
-    try:
+    with tempfile.TemporaryDirectory(
+        prefix=f".{output.stem}_frames_", dir=str(output.parent)
+    ) as temp_dir:
+        frame_dir = Path(temp_dir)
+        frames: list[Path] = []
         for index, timestamp in enumerate(timestamps):
             frame = frame_dir / f"frame_{index:02d}.png"
             await run_ffmpeg_async(
@@ -247,6 +253,7 @@ async def create_contact_sheet(
             frames.append(frame)
 
         images: list[Image.Image] = []
+        sheet: Image.Image | None = None
         try:
             for frame in frames:
                 with Image.open(frame) as source_image:
@@ -270,17 +277,11 @@ async def create_contact_sheet(
                     fill="white",
                 )
             sheet.save(output, format="PNG")
-            sheet.close()
         finally:
+            if sheet is not None:
+                sheet.close()
             for image in images:
                 image.close()
-    finally:
-        for frame in frame_dir.glob("frame_*.png"):
-            frame.unlink(missing_ok=True)
-        try:
-            frame_dir.rmdir()
-        except OSError:
-            pass
 
     return {
         "status": "pending_review",
