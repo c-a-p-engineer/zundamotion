@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 from typing import Iterator, Sequence
 
@@ -204,32 +205,37 @@ def _run_legacy_render(argv: Sequence[str]) -> None:
 
 
 def _run_inspect(args: argparse.Namespace) -> int:
-    expected = None
-    with _project_root(args.project_root):
-        if args.inspect_script:
-            expected = expected_from_config(load_canonical_config(args.inspect_script))
-        elif args.preset:
-            expected = expected_from_preset(args.preset)
+    media_path = Path(args.media_path).expanduser().resolve()
+    requested_contact_sheet = (
+        None
+        if args.contact_sheet is None
+        else (
+            media_path.with_name(f"{media_path.stem}_contact_sheet.png")
+            if args.contact_sheet == "auto"
+            else Path(args.contact_sheet).expanduser().resolve()
+        )
+    )
 
-        document = asyncio.run(inspect_output(args.media_path, expected=expected))
-        if args.contact_sheet is not None:
-            duration = (document.get("media") or {}).get("duration")
-            if duration is None or float(duration) <= 0.0:
-                raise ValueError("contact sheet requires a positive media duration")
-            media = Path(args.media_path)
-            contact_sheet = (
-                media.with_name(f"{media.stem}_contact_sheet.png")
-                if args.contact_sheet == "auto"
-                else Path(args.contact_sheet)
+    expected = None
+    if args.inspect_script:
+        with _project_root(args.project_root):
+            expected = expected_from_config(load_canonical_config(args.inspect_script))
+    elif args.preset:
+        expected = expected_from_preset(args.preset)
+
+    document = asyncio.run(inspect_output(media_path, expected=expected))
+    if requested_contact_sheet is not None:
+        duration = (document.get("media") or {}).get("duration")
+        if duration is None or float(duration) <= 0.0:
+            raise ValueError("contact sheet requires a positive media duration")
+        document["visual_review"] = asyncio.run(
+            create_contact_sheet(
+                media_path,
+                requested_contact_sheet,
+                duration=float(duration),
+                samples=args.samples,
             )
-            document["visual_review"] = asyncio.run(
-                create_contact_sheet(
-                    args.media_path,
-                    contact_sheet,
-                    duration=float(duration),
-                    samples=args.samples,
-                )
-            )
+        )
 
     if args.json:
         sys.stdout.write(_json_text(document))
@@ -238,7 +244,7 @@ def _run_inspect(args: argparse.Namespace) -> int:
         video = media.get("video") or {}
         audio = media.get("audio") or {}
         duration = media.get("duration")
-        state = "PASS" if document["valid"] else "FAIL"
+        state = "MACHINE PASS" if document["machine_valid"] else "MACHINE FAIL"
         sys.stdout.write(
             f"{state}: {document['path']} — {duration}s, "
             f"{video.get('width')}x{video.get('height')}, {video.get('fps')} fps, "
@@ -259,7 +265,7 @@ def _run_inspect(args: argparse.Namespace) -> int:
             sys.stdout.write("Visual review: pending (inspect the PNG; metadata is not visual QA)\n")
         else:
             sys.stdout.write("Visual review: not generated\n")
-    return 0 if document["valid"] else 1
+    return 0 if document["machine_valid"] else 1
 
 
 def _run_authoring(argv: Sequence[str]) -> int:
@@ -284,7 +290,7 @@ def _run_authoring(argv: Sequence[str]) -> int:
     if args.command == "inspect":
         try:
             return _run_inspect(args)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
+        except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
             parser.error(str(exc))
             return 2
 
