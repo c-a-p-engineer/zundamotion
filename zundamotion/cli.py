@@ -3,16 +3,29 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 from typing import Iterator, Sequence
 
 from . import __version__
-from .authoring import capabilities_document, compiled_document, validation_document
+from .authoring import (
+    capabilities_document,
+    compiled_document,
+    load_canonical_config,
+    validation_document,
+)
 from .main import cli as legacy_render_cli
+from .output_qa import (
+    create_contact_sheet,
+    expected_from_config,
+    expected_from_preset,
+    inspect_output,
+)
 from .render_lock import (
     create_render_lock,
     load_render_lock,
@@ -20,7 +33,14 @@ from .render_lock import (
     verify_render_lock,
 )
 
-_AUTHORING_COMMANDS = {"validate", "compile", "capabilities", "lock", "verify-lock"}
+_MACHINE_COMMANDS = {
+    "validate",
+    "compile",
+    "capabilities",
+    "lock",
+    "verify-lock",
+    "inspect",
+}
 
 
 def _json_text(value: object, *, pretty: bool = False) -> str:
@@ -67,8 +87,8 @@ def _authoring_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="zundamotion",
         description=(
-            "Generate a video from YAML/Markdown, or inspect the same canonical "
-            "configuration without rendering."
+            "Generate a video from YAML/Markdown, inspect canonical configuration, "
+            "or verify a rendered deliverable."
         ),
     )
     parser.add_argument("--version", action="version", version=__version__)
@@ -125,6 +145,48 @@ def _authoring_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="Emit machine-readable verification JSON."
     )
 
+    inspect_parser = subparsers.add_parser(
+        "inspect",
+        help="Probe a rendered video, compare expected media parameters, and prepare visual QA.",
+    )
+    inspect_parser.add_argument("media_path", help="Rendered video to inspect.")
+    expected_group = inspect_parser.add_mutually_exclusive_group()
+    expected_group.add_argument(
+        "--script",
+        dest="inspect_script",
+        default=None,
+        help="Compare against the canonical output settings of this YAML/Markdown input.",
+    )
+    expected_group.add_argument(
+        "--preset",
+        default=None,
+        help="Compare against a named Zundamotion export preset.",
+    )
+    inspect_parser.add_argument(
+        "--project-root",
+        default=None,
+        help="Base directory for resolving --script assets/includes.",
+    )
+    inspect_parser.add_argument(
+        "--contact-sheet",
+        nargs="?",
+        const="auto",
+        default=None,
+        metavar="PATH",
+        help="Generate representative review frames as one PNG. PATH defaults beside the video.",
+    )
+    inspect_parser.add_argument(
+        "--samples",
+        type=int,
+        default=5,
+        help="Number of representative frames for --contact-sheet (1-12, default: 5).",
+    )
+    inspect_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the stable output-inspection JSON contract.",
+    )
+
     subparsers.add_parser(
         "render",
         add_help=False,
@@ -140,6 +202,70 @@ def _run_legacy_render(argv: Sequence[str]) -> None:
         legacy_render_cli()
     finally:
         sys.argv = previous
+
+
+def _run_inspect(args: argparse.Namespace) -> int:
+    media_path = Path(args.media_path).expanduser().resolve()
+    requested_contact_sheet = (
+        None
+        if args.contact_sheet is None
+        else (
+            media_path.with_name(f"{media_path.stem}_contact_sheet.png")
+            if args.contact_sheet == "auto"
+            else Path(args.contact_sheet).expanduser().resolve()
+        )
+    )
+
+    expected = None
+    if args.inspect_script:
+        with _project_root(args.project_root):
+            expected = expected_from_config(load_canonical_config(args.inspect_script))
+    elif args.preset:
+        expected = expected_from_preset(args.preset)
+
+    document = asyncio.run(inspect_output(media_path, expected=expected))
+    if requested_contact_sheet is not None:
+        duration = (document.get("media") or {}).get("duration")
+        if duration is None or float(duration) <= 0.0:
+            raise ValueError("contact sheet requires a positive media duration")
+        document["visual_review"] = asyncio.run(
+            create_contact_sheet(
+                media_path,
+                requested_contact_sheet,
+                duration=float(duration),
+                samples=args.samples,
+            )
+        )
+
+    if args.json:
+        sys.stdout.write(_json_text(document))
+    else:
+        media = document["media"]
+        video = media.get("video") or {}
+        audio = media.get("audio") or {}
+        duration = media.get("duration")
+        state = "MACHINE PASS" if document["machine_valid"] else "MACHINE FAIL"
+        sys.stdout.write(
+            f"{state}: {document['path']} — {duration}s, "
+            f"{video.get('width')}x{video.get('height')}, {video.get('fps')} fps, "
+            f"{video.get('codec_name') or '-'}, {audio.get('codec_name') or '-'} "
+            f"{audio.get('sample_rate') or '-'} Hz {audio.get('channels') or '-'} ch\n"
+        )
+        passed = sum(1 for item in document["checks"] if item["status"] == "pass")
+        sys.stdout.write(f"Checks: {passed}/{len(document['checks'])} pass\n")
+        for item in document["checks"]:
+            if item["status"] != "pass":
+                sys.stdout.write(
+                    f"  FAIL {item['id']}: expected={item.get('expected')!r} "
+                    f"actual={item.get('actual')!r}\n"
+                )
+        visual = document["visual_review"]
+        if visual.get("contact_sheet"):
+            sys.stdout.write(f"Contact sheet: {visual['contact_sheet']}\n")
+            sys.stdout.write("Visual review: pending (inspect the PNG; metadata is not visual QA)\n")
+        else:
+            sys.stdout.write("Visual review: not generated\n")
+    return 0 if document["machine_valid"] else 1
 
 
 def _run_authoring(argv: Sequence[str]) -> int:
@@ -160,6 +286,13 @@ def _run_authoring(argv: Sequence[str]) -> int:
                 f"  built-in plugins: {len(document['plugins'])}\n"
             )
         return 0
+
+    if args.command == "inspect":
+        try:
+            return _run_inspect(args)
+        except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
+            parser.error(str(exc))
+            return 2
 
     if args.command not in {"validate", "compile", "lock", "verify-lock"}:
         parser.print_help()
@@ -222,13 +355,13 @@ def _run_authoring(argv: Sequence[str]) -> int:
 
 
 def cli() -> None:
-    """Dispatch authoring commands while preserving the historical render CLI."""
+    """Dispatch machine-readable commands while preserving historical render CLI."""
 
     argv = sys.argv[1:]
     if argv and argv[0] == "render":
         _run_legacy_render(argv[1:])
         return
-    if argv and argv[0] in _AUTHORING_COMMANDS:
+    if argv and argv[0] in _MACHINE_COMMANDS:
         raise SystemExit(_run_authoring(argv))
     if not argv or argv[0] in {"-h", "--help", "--version"}:
         raise SystemExit(_run_authoring(argv))

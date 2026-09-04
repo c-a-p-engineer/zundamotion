@@ -22,6 +22,7 @@ YAML 台本を扱う場合だけ [`../scripts/script_cheatsheet.md`](../scripts/
 | Python 構造・分割規約 | [`guides/python_coding_rules.md`](./guides/python_coding_rules.md) |
 | セットアップ、CLI、実行 | [`guides/setup_and_runtime.md`](./guides/setup_and_runtime.md) |
 | AI / CI 向け validate / compile / capabilities | [`guides/compiler_interface.md`](./guides/compiler_interface.md) |
+| レンダー後の probe / output check / contact sheet | [`guides/output_qa.md`](./guides/output_qa.md) |
 | TTS backend の provider 境界 | [`guides/tts_provider.md`](./guides/tts_provider.md) |
 | project-level Render Lock / provenance | [`guides/render_lock.md`](./guides/render_lock.md) |
 | runtime lock、更新・rollback | [`guides/runtime_version_policy.md`](./guides/runtime_version_policy.md) |
@@ -68,6 +69,7 @@ YAML 台本を扱う場合だけ [`../scripts/script_cheatsheet.md`](../scripts/
 - **利用仕様**: `scripts/script_cheatsheet.md`, `features.md`
 - **作業規則**: `AGENTS.md`, `guides/ai_coding_rules.md`, `guides/python_coding_rules.md`
 - **machine-readable authoring契約**: `guides/compiler_interface.md`
+- **レンダー後の機械検査・visual review artifact**: `guides/output_qa.md`
 - **動画演出・実動画QA**: `guides/video_direction_and_qa.md`
 - **TTS backend 境界**: `guides/tts_provider.md`
 - **入力 provenance**: `guides/render_lock.md`
