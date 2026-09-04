@@ -2,6 +2,7 @@
 
 Zundamotion を AI / CI から安全に扱うための、レンダー前の機械可読 CLI 契約です。
 通常レンダーの YAML / Markdown loader、`include` / `vars` resolver、default / export preset 適用、validation を再利用し、別系統の解釈器を持ちません。
+レンダー後の成果物検査は [output_qa.md](./output_qa.md) の `inspect` 契約へ分離します。
 
 ## コマンド一覧
 
@@ -13,6 +14,7 @@ Zundamotion を AI / CI から安全に扱うための、レンダー前の機�
 | `zundamotion compile SCRIPT -o FILE` | compiled-config をファイルへ保存 | しない |
 | `zundamotion capabilities --json` | package が公開する能力を JSON で取得 | しない |
 | `zundamotion render SCRIPT ...` | 従来レンダーを明示的に呼ぶ | する |
+| `zundamotion inspect VIDEO ...` | レンダー済み成果物を probe / 比較し、任意で contact sheet を生成 | ffprobe。contact sheet 時は FFmpeg |
 
 従来の `zundamotion SCRIPT ...` も互換のため維持します。
 `python -m zundamotion` は同じ unified CLI を使用し、`python -m zundamotion.main` は従来 render entrypoint として残ります。
@@ -109,6 +111,22 @@ JSON には少なくとも次を含みます。
 `capabilities` は外部 runtime を起動せず、package と built-in manifest から決定論的に生成します。
 ユーザー drop-in plugin を勝手に import して能力一覧へ混ぜません。
 
+## `inspect` との境界
+
+`inspect` は compiler interface の前処理ではなく **post-render QA** です。
+`--script` を指定した場合だけ canonical config を再利用し、生成済み MP4 の observable media parameter と照合します。
+
+```bash
+zundamotion inspect output/sample.mp4 \
+  --script scripts/sample.yaml \
+  --contact-sheet \
+  --json
+```
+
+machine-readable 出力は `zundamotion.output-inspection` v1 です。
+`machine_valid` は ffprobe で確認できる条件だけの合否であり、contact sheet の目視確認を含みません。
+詳細は [output_qa.md](./output_qa.md) を正とします。
+
 ## AI authoring の標準ループ
 
 ```text
@@ -125,7 +143,12 @@ compile
 canonical config を必要時に監査
         ↓
 render
+        ↓
+inspect --script ... --contact-sheet --json
+        ↓
+machine_valid を確認し、contact sheet を実際に見る
 ```
 
 `validate` / `compile` を使っても render 自体の A/V sync、FFmpeg compatibility、VOICEVOX availability を検証したことにはなりません。
-最終成果物の確認には従来の smoke / integration / reproducibility 契約を使用します。
+`inspect` の machine check を使っても transition / motion / subtitle placement 等を目視したことにはなりません。
+最終成果物の確認には smoke / integration / reproducibility と [video_direction_and_qa.md](./video_direction_and_qa.md) の実動画 QA を併用します。
