@@ -1,0 +1,2 @@
+# Keep repository text deterministic across Windows, WSL, and Linux containers.
+* text=auto eol=lf
