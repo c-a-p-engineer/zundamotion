@@ -59,7 +59,8 @@ def _project_root(path: str | None) -> Iterator[None]:
     if not path:
         yield
         return
-n    root = Path(path).expanduser().resolve()
+
+    root = Path(path).expanduser().resolve()
     if not root.exists():
         raise ValueError(f"--project-root does not exist: {root}")
     if not root.is_dir():
