@@ -188,7 +188,7 @@ async def inspect_output(
         "media": media,
         "expected": wanted or None,
         "checks": checks,
-        "valid": all(item["status"] == "pass" for item in checks),
+        "machine_valid": all(item["status"] == "pass" for item in checks),
         "visual_review": {
             "status": "not_generated",
             "contact_sheet": None,
@@ -246,8 +246,11 @@ async def create_contact_sheet(
                 raise ValueError(f"failed to extract review frame at {timestamp:.3f}s")
             frames.append(frame)
 
-        images = [Image.open(frame).convert("RGB") for frame in frames]
+        images: list[Image.Image] = []
         try:
+            for frame in frames:
+                with Image.open(frame) as source_image:
+                    images.append(source_image.convert("RGB"))
             columns = min(3, len(images))
             rows = int(math.ceil(len(images) / columns))
             label_height = 28
@@ -267,11 +270,12 @@ async def create_contact_sheet(
                     fill="white",
                 )
             sheet.save(output, format="PNG")
+            sheet.close()
         finally:
             for image in images:
                 image.close()
     finally:
-        for frame in frames:
+        for frame in frame_dir.glob("frame_*.png"):
             frame.unlink(missing_ok=True)
         try:
             frame_dir.rmdir()
