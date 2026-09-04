@@ -59,8 +59,7 @@ def _project_root(path: str | None) -> Iterator[None]:
     if not path:
         yield
         return
-
-    root = Path(path).expanduser().resolve()
+n    root = Path(path).expanduser().resolve()
     if not root.exists():
         raise ValueError(f"--project-root does not exist: {root}")
     if not root.is_dir():
@@ -87,7 +86,7 @@ def _authoring_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="zundamotion",
         description=(
-            "Generate video from YAML/Markdown, inspect canonical configuration, "
+            "Generate a video from YAML/Markdown, inspect canonical configuration, "
             "or verify a rendered deliverable."
         ),
     )
