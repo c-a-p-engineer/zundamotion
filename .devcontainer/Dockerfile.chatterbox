@@ -1,0 +1,44 @@
+ARG PYTHON_IMAGE=python:3.14.6-slim-bookworm@sha256:f70215e5dbe2a47dee6d23f9c6d358bf3c148f59cce2fd165b61118e9d80f2bb
+
+FROM ${PYTHON_IMAGE} AS chatterbox-build
+ARG ZUNDAMOTION_TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+ARG ZUNDAMOTION_TORCH_VERSION=2.11.0+cpu
+ARG ZUNDAMOTION_TORCHAUDIO_VERSION=2.11.0+cpu
+ARG ZUNDAMOTION_CHATTERBOX_VERSION=0.1.7
+ENV PATH="/opt/chatterbox/bin:${PATH}" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+COPY requirements.txt /tmp/requirements.txt
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gcc g++ \
+ && rm -rf /var/lib/apt/lists/* \
+ && python -m venv /opt/chatterbox \
+ && python -m pip install --no-cache-dir --upgrade pip \
+ && python -m pip install --no-cache-dir -r /tmp/requirements.txt \
+ && python -m pip install --no-cache-dir \
+      --index-url "${ZUNDAMOTION_TORCH_INDEX_URL}" \
+      "torch==${ZUNDAMOTION_TORCH_VERSION}" \
+      "torchaudio==${ZUNDAMOTION_TORCHAUDIO_VERSION}" \
+ && python -m pip install --no-cache-dir \
+      "build>=1" \
+      "pytest>=7" \
+      "chatterbox-tts==${ZUNDAMOTION_CHATTERBOX_VERSION}"
+COPY . /tmp/zundamotion
+RUN python -m pip install --no-cache-dir --no-deps /tmp/zundamotion
+
+FROM ${PYTHON_IMAGE}
+ENV PATH="/opt/chatterbox/bin:${PATH}" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+WORKDIR /workspace
+COPY .devcontainer/runtime.lock.json /tmp/runtime.lock.json
+COPY scripts/install_locked_ffmpeg.py /usr/local/bin/install_locked_ffmpeg.py
+COPY scripts/write_build_info.py /usr/local/bin/write_build_info.py
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends fontconfig fonts-ipafont-gothic libgomp1 \
+ && rm -rf /var/lib/apt/lists/* \
+ && test -f /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf \
+ && fc-match IPAGothic \
+ && python /usr/local/bin/install_locked_ffmpeg.py --lock /tmp/runtime.lock.json \
+ && python /usr/local/bin/write_build_info.py --lock /tmp/runtime.lock.json
+COPY --from=chatterbox-build /opt/chatterbox /opt/chatterbox

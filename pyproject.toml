@@ -28,7 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["build>=1", "pytest>=7"]
-chatterbox = ["chatterbox-tts==0.1.7"]
+chatterbox = ["chatterbox-tts==0.1.7", "soundfile==0.14.0"]
 
 [project.scripts]
 zundamotion = "zundamotion.cli:cli"

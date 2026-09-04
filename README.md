@@ -74,7 +74,19 @@ zundamotion validate scripts/sample_chatterbox_multilingual.yaml
 zundamotion render scripts/sample_chatterbox_multilingual.yaml -o output/chatterbox.mp4
 ```
 
-このサンプルは English / Spanish / French / German / Japanese を1本の台本で切り替えます。Chatterbox package/modelは通常のZundamotion runtime lockにはまだ含めていません。
+Chatterbox runtimeを含むDev Containerはopt-in overrideで起動します。標準の
+`.devcontainer/Dockerfile`は変更せず、専用`.devcontainer/Dockerfile.chatterbox`だけが
+追加TTS runtimeを持ちます。このoverrideは
+Python 3.14対応のCPU wheelを`torch==2.11.0+cpu` / `torchaudio==2.11.0+cpu`へ固定し、
+通常のVOICEVOX imageへPyTorchを追加しません。
+
+```bash
+docker compose -f .devcontainer/docker-compose.yml \
+  -f .devcontainer/docker-compose.chatterbox.yml \
+  up -d --build app
+```
+
+このサンプルは English / Spanish / French / German / Japanese を1本の台本で切り替えます。Chatterbox packageとCPU版PyTorchはcontainer build引数で固定していますが、remote model artifactは通常のZundamotion runtime lockにはまだ含めていません。
 
 CLI 実行例、ログ形式、GPU/NVENC 確認、字幕出力、`--project-root` の説明は [`docs/guides/setup_and_runtime.md`](docs/guides/setup_and_runtime.md) を参照してください。
 

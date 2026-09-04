@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+from types import ModuleType
 
 import pytest
 
 from zundamotion.authoring import validation_document
 from zundamotion.components.audio.chatterbox_generator import ChatterboxAudioGenerator
+from zundamotion.components.audio.chatterbox_provider import ChatterboxTTSProvider
 from zundamotion.components.audio.factory import create_audio_generator, resolve_tts_provider
 from zundamotion.components.config.validate_voice import validate_voice_config
 from zundamotion.exceptions import ValidationError
@@ -99,6 +102,99 @@ def test_chatterbox_rejects_invalid_device_and_cfg_weight(tmp_path: Path) -> Non
         validate_voice_config(_config(tmp_path, device="auto"))
     with pytest.raises(ValidationError, match="cfg_weight"):
         validate_voice_config(_config(tmp_path, cfg_weight=1.5))
+
+
+def test_chatterbox_rejects_unknown_model(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="model"):
+        validate_voice_config(_config(tmp_path, model="unknown"))
+
+
+def test_chatterbox_017_loads_fixed_multilingual_model_without_model_keyword(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    loaded_model = object()
+
+    class FakeMultilingualTTS:
+        @classmethod
+        def from_pretrained(cls, **kwargs: object) -> object:
+            calls.append(kwargs)
+            return loaded_model
+
+    chatterbox_module = ModuleType("chatterbox")
+    multilingual_module = ModuleType("chatterbox.mtl_tts")
+    multilingual_module.ChatterboxMultilingualTTS = FakeMultilingualTTS
+    chatterbox_module.mtl_tts = multilingual_module
+    monkeypatch.setitem(sys.modules, "chatterbox", chatterbox_module)
+    monkeypatch.setitem(sys.modules, "chatterbox.mtl_tts", multilingual_module)
+
+    provider = ChatterboxTTSProvider(model="v3", device="cpu")
+
+    assert provider._load_model() is loaded_model
+    assert calls == [{"device": "cpu"}]
+
+
+def test_chatterbox_writes_wav_with_soundfile_without_torchcodec(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: dict[str, object] = {}
+
+    class FakeTensor:
+        ndim = 2
+        shape = (1, 3)
+
+        def detach(self):
+            return self
+
+        def cpu(self):
+            return self
+
+        def float(self):
+            return self
+
+        def transpose(self, first: int, second: int):
+            calls["transpose"] = (first, second)
+            return self
+
+        def numpy(self):
+            return "samples"
+
+    class FakeModel:
+        sr = 24_000
+
+        def generate(self, text: str, **kwargs: object) -> FakeTensor:
+            calls["generate"] = {"text": text, **kwargs}
+            return FakeTensor()
+
+    def fake_write(
+        filepath: str,
+        samples: object,
+        sample_rate: int,
+        *,
+        subtype: str,
+    ) -> None:
+        calls["write"] = (filepath, samples, sample_rate, subtype)
+
+    soundfile_module = ModuleType("soundfile")
+    soundfile_module.write = fake_write
+    monkeypatch.setitem(sys.modules, "soundfile", soundfile_module)
+
+    provider = ChatterboxTTSProvider(model="v3", device="cpu")
+    provider._model = FakeModel()
+    output = tmp_path / "nested" / "speech.wav"
+    provider._synthesize_sync("Hello", "en", str(output), None, 0.5, 0.5)
+
+    assert calls["generate"] == {
+        "text": "Hello",
+        "language_id": "en",
+        "audio_prompt_path": None,
+        "exaggeration": 0.5,
+        "cfg_weight": 0.5,
+    }
+    assert calls["transpose"] == (0, 1)
+    assert calls["write"] == (str(output), "samples", 24_000, "PCM_16")
+    assert output.parent.is_dir()
 
 
 def test_chatterbox_rejects_non_neutral_speed_and_pitch(tmp_path: Path) -> None:

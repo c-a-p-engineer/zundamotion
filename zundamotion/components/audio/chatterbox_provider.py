@@ -39,6 +39,7 @@ CHATTERBOX_LANGUAGES: tuple[str, ...] = (
     "zh",
 )
 CHATTERBOX_DEFAULT_MODEL = "v3"
+CHATTERBOX_SUPPORTED_MODELS = (CHATTERBOX_DEFAULT_MODEL,)
 CHATTERBOX_DEFAULT_LANGUAGE = "en"
 CHATTERBOX_SUPPORTED_DEVICES = ("cpu", "cuda", "mps")
 
@@ -55,6 +56,11 @@ class ChatterboxTTSProvider:
         device: str = "cpu",
     ) -> None:
         self.model_name = str(model or CHATTERBOX_DEFAULT_MODEL).strip()
+        if self.model_name not in CHATTERBOX_SUPPORTED_MODELS:
+            raise ValueError(
+                "Chatterbox model must be one of "
+                f"{list(CHATTERBOX_SUPPORTED_MODELS)}, got {self.model_name!r}."
+            )
         self.device = str(device or "cpu").strip().lower()
         if self.device not in CHATTERBOX_SUPPORTED_DEVICES:
             raise ValueError(
@@ -155,10 +161,10 @@ class ChatterboxTTSProvider:
                 "docs/guides/tts_provider.md."
             ) from exc
 
-        self._model = ChatterboxMultilingualTTS.from_pretrained(
-            device=self.device,
-            t3_model=self.model_name,
-        )
+        # chatterbox-tts 0.1.7 exposes one multilingual checkpoint through
+        # from_pretrained(device). ``v3`` is Zundamotion's stable alias for
+        # that runtime, not an upstream keyword argument.
+        self._model = ChatterboxMultilingualTTS.from_pretrained(device=self.device)
         return self._model
 
     def _synthesize_sync(
@@ -171,10 +177,10 @@ class ChatterboxTTSProvider:
         cfg_weight: float,
     ) -> None:
         try:
-            import torchaudio
+            import soundfile
         except ImportError as exc:
             raise RuntimeError(
-                "Chatterbox provider requires torchaudio from the optional runtime."
+                "Chatterbox provider requires soundfile from the optional runtime."
             ) from exc
 
         model = self._load_model()
@@ -187,4 +193,12 @@ class ChatterboxTTSProvider:
         )
         output = Path(filepath)
         output.parent.mkdir(parents=True, exist_ok=True)
-        torchaudio.save(str(output), wav, model.sr)
+        audio = wav.detach().cpu().float()
+        if audio.ndim == 2:
+            # Chatterbox returns channel-first audio; soundfile expects frames first.
+            audio = audio.transpose(0, 1)
+        elif audio.ndim != 1:
+            raise RuntimeError(
+                f"Unexpected Chatterbox waveform shape: {tuple(audio.shape)}"
+            )
+        soundfile.write(str(output), audio.numpy(), model.sr, subtype="PCM_16")

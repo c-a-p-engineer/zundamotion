@@ -73,8 +73,19 @@ python -m pip install -e ".[chatterbox]"
 python -m pip install "zundamotion[chatterbox]"
 ```
 
-`chatterbox` extra は **通常依存には含めません**。Chatterbox は PyTorch / model download を伴うため、公式 Dev Container / reproducible runtime へ固定する前に別途 runtime lock を設計します。
+`chatterbox` extra は **通常依存には含めません**。Chatterbox は PyTorch / model download を伴うため、既定のVOICEVOX runtimeから分離します。
+
+Dev Containerでは、必要なときだけChatterbox overrideを追加します。通常のComposeへこのoverrideを重ねると、標準Dockerfileとは別の`.devcontainer/Dockerfile.chatterbox`を使い、packageを専用imageへ導入し、初回取得したモデルを名前付きvolumeへ保持します。Python 3.14でPyPIのCUDA依存を誤って取り込まないよう、CPU版`torch==2.11.0+cpu`と`torchaudio==2.11.0+cpu`をPyTorch公式CPU indexから先に導入します。モデル取得は長時間のXet/CAS転送失敗を避けるため、専用override内で`HF_HUB_DISABLE_XET=1`を設定して通常HTTP経路を使います。
+
+生成波形のWAV保存には`SoundFile`を使います。Torchaudio 2.11の保存APIが別途要求する`torchcodec`は、Chatterbox専用imageへ追加しません。
+
+```bash
+docker compose -f .devcontainer/docker-compose.yml \
+  -f .devcontainer/docker-compose.chatterbox.yml \
+  up -d --build app
+```
 最初の `from_pretrained()` では upstream model cache が必要になる場合があります。Render Lock v1 はこの remote model 内容を固定しないため、現段階では Chatterbox runtime を optional / experimental と扱います。
+このoverrideは`voice.device: cpu`専用です。CUDA経路はwheel/runtime/実機smokeを固定するまで正式サポートしません。
 
 ## YAML
 
@@ -128,7 +139,7 @@ voice:
 | --- | --- | --- | --- |
 | `voice.provider` | `voicevox` / `chatterbox` | `voicevox` | TTS backend |
 | `voice.language` | 上記23 code | `en` (Chatterbox) | 発話言語。行単位上書き可 |
-| `voice.model` | `v3` 等 upstream accepted value | `v3` | Multilingual checkpoint |
+| `voice.model` | `v3` | `v3` | `chatterbox-tts==0.1.7` の固定 Multilingual runtime を表す Zundamotion 側の別名 |
 | `voice.device` | `cpu` / `cuda` / `mps` | `cpu` | 明示 runtime device。再現性のため `auto` は使わない |
 | `voice.reference_audio` | file path | なし | zero-shot voice cloning |
 | `voice.exaggeration` | 0以上の数値 | `0.5` | 表現強度 |

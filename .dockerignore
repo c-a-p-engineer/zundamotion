@@ -1,0 +1,13 @@
+.cache
+.git
+.pytest_cache
+.run
+.tmp
+.venv
+**/__pycache__
+**/*.pyc
+assets
+logs
+output
+site-dist
+site-work

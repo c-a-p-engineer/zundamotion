@@ -1,0 +1,31 @@
+services:
+  app:
+    build:
+      dockerfile: .devcontainer/Dockerfile.chatterbox
+      args:
+        ZUNDAMOTION_TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+        ZUNDAMOTION_TORCH_VERSION: 2.11.0+cpu
+        ZUNDAMOTION_TORCHAUDIO_VERSION: 2.11.0+cpu
+        ZUNDAMOTION_CHATTERBOX_VERSION: 0.1.7
+    volumes:
+      - chatterbox-cache:/root/.cache
+    environment:
+      # Xet/CAS can fail on long unauthenticated model downloads. Use the
+      # regular HTTP path while keeping the shared Hugging Face cache.
+      HF_HUB_DISABLE_XET: "1"
+
+  render:
+    build:
+      dockerfile: .devcontainer/Dockerfile.chatterbox
+      args:
+        ZUNDAMOTION_TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+        ZUNDAMOTION_TORCH_VERSION: 2.11.0+cpu
+        ZUNDAMOTION_TORCHAUDIO_VERSION: 2.11.0+cpu
+        ZUNDAMOTION_CHATTERBOX_VERSION: 0.1.7
+    volumes:
+      - chatterbox-cache:/root/.cache
+    environment:
+      HF_HUB_DISABLE_XET: "1"
+
+volumes:
+  chatterbox-cache:

@@ -9,6 +9,7 @@ from ...exceptions import ValidationError
 from ..audio.chatterbox_provider import (
     CHATTERBOX_DEFAULT_LANGUAGE,
     CHATTERBOX_LANGUAGES,
+    CHATTERBOX_SUPPORTED_MODELS,
     CHATTERBOX_SUPPORTED_DEVICES,
 )
 from ..audio.factory import DEFAULT_TTS_PROVIDER, SUPPORTED_TTS_PROVIDERS
@@ -76,8 +77,15 @@ def _validate_chatterbox_settings(
             )
 
     model = cfg.get("model")
-    if model is not None and (not isinstance(model, str) or not model.strip()):
-        raise ValidationError(f"{label}.model must be a non-empty string.")
+    if model is not None:
+        if not isinstance(model, str) or not model.strip():
+            raise ValidationError(f"{label}.model must be a non-empty string.")
+        normalized_model = model.strip()
+        if normalized_model not in CHATTERBOX_SUPPORTED_MODELS:
+            raise ValidationError(
+                f"{label}.model must be one of {list(CHATTERBOX_SUPPORTED_MODELS)}, "
+                f"got {model!r}."
+            )
 
     reference_audio = cfg.get("reference_audio")
     if reference_audio is not None:

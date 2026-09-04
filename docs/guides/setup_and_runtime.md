@@ -40,6 +40,23 @@ docker compose -f .devcontainer/docker-compose.yml \
   -f .devcontainer/docker-compose.voicevox-gpu.yml up -d --build app voicevox
 ```
 
+## Chatterbox opt-in runtime
+
+ChatterboxはPyTorchとモデル取得を伴うため、既定のVOICEVOXコンテナには含めません。必要な場合だけoverrideを追加すると、専用`.devcontainer/Dockerfile.chatterbox`でapp/render imageをbuildし、モデルキャッシュを名前付きvolumeへ保持します。標準`.devcontainer/Dockerfile`の依存とimageサイズは変わりません。このoverrideはPython 3.14対応のCPU wheelを`torch==2.11.0+cpu` / `torchaudio==2.11.0+cpu`へ固定し、モデル取得は`HF_HUB_DISABLE_XET=1`で通常HTTP経路へ固定します。
+
+```bash
+docker compose -f .devcontainer/docker-compose.yml \
+  -f .devcontainer/docker-compose.chatterbox.yml \
+  up -d --build app
+
+docker compose -f .devcontainer/docker-compose.yml \
+  -f .devcontainer/docker-compose.chatterbox.yml \
+  exec -T app zundamotion render scripts/sample_chatterbox_multilingual.yaml \
+  -o output/sample_chatterbox_multilingual.mp4
+```
+
+このoverrideはCPU合成専用です。台本は`voice.device: cpu`を使用してください。CUDA合成は対応するPyTorch wheel、CUDA runtime、実機smokeを別途固定するまで正式経路に含めません。
+
 ## ランタイム確認
 
 ```bash

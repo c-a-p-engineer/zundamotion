@@ -98,3 +98,38 @@ def test_dockerfile_installs_locked_font() -> None:
     dockerfile = (root / ".devcontainer/Dockerfile").read_text(encoding="utf-8")
     assert lock["font"]["package"] in dockerfile
     assert f"test -f {lock['font']['required_path']}" in dockerfile
+
+
+def test_chatterbox_container_is_explicitly_opt_in() -> None:
+    root = Path(__file__).resolve().parents[1]
+    default_dockerfile = (root / ".devcontainer/Dockerfile").read_text(encoding="utf-8")
+    dockerfile = (root / ".devcontainer/Dockerfile.chatterbox").read_text(encoding="utf-8")
+    override = yaml.safe_load(
+        (root / ".devcontainer/docker-compose.chatterbox.yml").read_text(encoding="utf-8")
+    )
+
+    assert "chatterbox" not in default_dockerfile.lower()
+    assert "download.pytorch.org" not in default_dockerfile
+    assert " gcc " not in default_dockerfile
+    assert "https://download.pytorch.org/whl/cpu" in dockerfile
+    assert " gcc g++ " in dockerfile
+    assert "ARG ZUNDAMOTION_TORCH_VERSION=2.11.0+cpu" in dockerfile
+    assert "ARG ZUNDAMOTION_TORCHAUDIO_VERSION=2.11.0+cpu" in dockerfile
+    assert "ARG ZUNDAMOTION_CHATTERBOX_VERSION=0.1.7" in dockerfile
+    assert "FROM ${PYTHON_IMAGE} AS chatterbox-build" in dockerfile
+    assert "COPY --from=chatterbox-build /opt/chatterbox /opt/chatterbox" in dockerfile
+    assert "--no-deps /tmp/zundamotion" in dockerfile
+    for service_name in ("app", "render"):
+        service = override["services"][service_name]
+        build_args = service["build"]["args"]
+        assert service["build"]["dockerfile"] == ".devcontainer/Dockerfile.chatterbox"
+        assert build_args["ZUNDAMOTION_TORCH_INDEX_URL"] == "https://download.pytorch.org/whl/cpu"
+        assert build_args["ZUNDAMOTION_TORCH_VERSION"] == "2.11.0+cpu"
+        assert build_args["ZUNDAMOTION_TORCHAUDIO_VERSION"] == "2.11.0+cpu"
+        assert build_args["ZUNDAMOTION_CHATTERBOX_VERSION"] == "0.1.7"
+        assert "chatterbox-cache:/root/.cache" in service["volumes"]
+        assert service["environment"]["HF_HUB_DISABLE_XET"] == "1"
+
+    dockerignore = (root / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    assert ".cache" in dockerignore
+    assert "output" in dockerignore

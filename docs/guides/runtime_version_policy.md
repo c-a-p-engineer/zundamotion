@@ -23,6 +23,8 @@ Python image は `image@sha256:...` で固定します。FFmpeg は
 同じパスを CI と標準サンプルも使用します。build の実測情報は
 `/opt/zundamotion-build-info/build-info.json` に記録されます。
 
+Chatterboxは`.devcontainer/docker-compose.chatterbox.yml`を追加した場合だけ、専用`.devcontainer/Dockerfile.chatterbox`で導入するCPU専用のopt-in runtimeです。標準Dockerfileは変更しません。`chatterbox-tts`はproject extra、CPU版PyTorch/TorchaudioはCompose build引数で固定します。remote model artifactは現時点の`runtime.lock.json`には含めず、既定のVOICEVOX runtimeと同一の再現性保証を与えません。
+
 ## CPU/GPU の違い
 
 base Compose は CPU render と CPU VOICEVOX を使用します。GPU render は
