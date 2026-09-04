@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from zundamotion.authoring import capabilities_document
 from zundamotion.output_qa import (
     OUTPUT_INSPECTION_FORMAT,
     expected_from_config,
@@ -12,6 +13,10 @@ from zundamotion.output_qa import (
     inspect_output,
     representative_timestamps,
 )
+
+
+def test_capabilities_publish_inspect_command() -> None:
+    assert "inspect" in capabilities_document()["commands"]
 
 
 def test_expected_from_config_tracks_observable_media_contract() -> None:
@@ -96,7 +101,7 @@ def test_inspect_output_reports_preset_mismatch(
     )
 
     assert document["format"] == OUTPUT_INSPECTION_FORMAT
-    assert document["valid"] is False
+    assert document["machine_valid"] is False
     failures = {item["id"] for item in document["checks"] if item["status"] == "fail"}
     assert failures == {"width", "height"}
     assert document["visual_review"]["status"] == "not_generated"
