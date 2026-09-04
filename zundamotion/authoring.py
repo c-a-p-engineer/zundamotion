@@ -138,6 +138,7 @@ def capabilities_document() -> dict[str, Any]:
             "capabilities",
             "lock",
             "verify-lock",
+            "inspect",
         ],
         "export_presets": sorted(EXPORT_PRESETS),
         "subtitle_render_modes": ["png", "auto", "ass"],
