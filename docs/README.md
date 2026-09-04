@@ -26,6 +26,7 @@ YAML 台本を扱う場合だけ [`../scripts/script_cheatsheet.md`](../scripts/
 | project-level Render Lock / provenance | [`guides/render_lock.md`](./guides/render_lock.md) |
 | runtime lock、更新・rollback | [`guides/runtime_version_policy.md`](./guides/runtime_version_policy.md) |
 | 再現性、乱数、media比較、cache key | [`guides/reproducibility_contract.md`](./guides/reproducibility_contract.md) |
+| 動画演出、scene/shot、実動画Render QA | [`guides/video_direction_and_qa.md`](./guides/video_direction_and_qa.md) |
 | GitHub Pages機能デモ | [`guides/github_pages_feature_demo.md`](./guides/github_pages_feature_demo.md) |
 | プロジェクト構造 | [`guides/project_structure.md`](./guides/project_structure.md) |
 | 性能チューニング | [`guides/performance_tuning.md`](./guides/performance_tuning.md) |
@@ -67,6 +68,7 @@ YAML 台本を扱う場合だけ [`../scripts/script_cheatsheet.md`](../scripts/
 - **利用仕様**: `scripts/script_cheatsheet.md`, `features.md`
 - **作業規則**: `AGENTS.md`, `guides/ai_coding_rules.md`, `guides/python_coding_rules.md`
 - **machine-readable authoring契約**: `guides/compiler_interface.md`
+- **動画演出・実動画QA**: `guides/video_direction_and_qa.md`
 - **TTS backend 境界**: `guides/tts_provider.md`
 - **入力 provenance**: `guides/render_lock.md`
 - **出力再現性**: `guides/reproducibility_contract.md`
