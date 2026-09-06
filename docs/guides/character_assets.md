@@ -8,6 +8,7 @@
 - [README](../../README.md)
 - [台本チートシート](../../scripts/script_cheatsheet.md)
 - [プロジェクト構造](./project_structure.md)
+- [SVGキャラクターリグ](./svg_character_rig.md)
 
 ## 推奨ディレクトリ構成
 
@@ -71,6 +72,21 @@ assets/
 - 口や目の差分以外は描かない
 
 `flip_x: true` または `flip_y: true` を指定した場合、差分も同じ向きで反転されます。
+
+## SVG parts-sheet rigとの責務境界
+
+上記は**既存PNG立ち絵・表情差分レンダリング**の契約です。SVGリグをauthoringする場合は [`svg_character_rig.md`](./svg_character_rig.md) を正本とします。
+
+SVG parts-sheet rigでは、次を追加原則とします。
+
+- パーツシートから各パーツを固定pixel rectangleで抽出する
+- 抽出したsource partを、そのままSVG内の個別asset / state assetへ対応させる
+- いったん全身へ合成してから、合成結果を再分割しない
+- `fullbody_ref` はneutral pose比較用であり、可動ベース画像として使わない
+- 目・口のstateは同じslotで置換し、元の開眼・口をpatchで塗り潰して重ねない
+- 手足を動かす場合は、上腕/前腕/手、太もも/すね/足の元パーツ単位でparent/pivotを設定する
+
+この2系統を混同しません。PNG差分方式の「全身と同じキャンバスサイズ」と、SVG parts-sheet方式の「固定cell + registration metadata」は別のauthoring contractです。
 
 ## 表情変更と表示状態の継承
 
