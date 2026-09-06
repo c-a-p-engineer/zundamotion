@@ -64,6 +64,8 @@ neutral PNG vs fullbody_ref
   ↓
 face-state contact sheet
   ↓
+render_preview.py
+  ↓
 blink / lip-sync / hair / limb motion preview
   ↓
 MP4 visual review
@@ -89,21 +91,11 @@ iterate only failed source parts / placement / pivot
 顔:
 
 - `face_base`
-- `eye_L_open`
-- `eye_L_half`
-- `eye_L_closed`
-- `eye_R_open`
-- `eye_R_half`
-- `eye_R_closed`
+- `eye_L_open / half / closed`
+- `eye_R_open / half / closed`
 - `brow_L_normal / angry / troubled / surprised`
 - `brow_R_normal / angry / troubled / surprised`
-- `mouth_closed`
-- `mouth_small`
-- `mouth_a`
-- `mouth_i`
-- `mouth_u`
-- `mouth_e`
-- `mouth_o`
+- `mouth_closed / small / a / i / u / e / o`
 
 髪:
 
@@ -118,18 +110,10 @@ iterate only failed source parts / placement / pivot
 - `neck`
 - `torso`
 - `waist` または `skirt_waist`
-- `upper_arm_L`
-- `forearm_L`
-- `hand_L`
-- `upper_arm_R`
-- `forearm_R`
-- `hand_R`
-- `thigh_L`
-- `calf_L`
-- `foot_L`
-- `thigh_R`
-- `calf_R`
-- `foot_R`
+- `upper_arm_L / forearm_L / hand_L`
+- `upper_arm_R / forearm_R / hand_R`
+- `thigh_L / calf_L / foot_L`
+- `thigh_R / calf_R / foot_R`
 
 参照:
 
@@ -144,13 +128,11 @@ iterate only failed source parts / placement / pivot
 - ラベル・説明文・矢印をセル内へ描かない
 - `face_base` に目・眉・口を焼き込まない
 - facial stateは同じregistration pointへ置ける比率で揃える
-- fullbody_refと各パーツのキャラクター・衣装・比率を一致させる
+- `fullbody_ref` と各パーツのキャラクター・衣装・比率を一致させる
 
 ## parts_layout.json
 
 抽出座標の正本です。
-
-最低限:
 
 ```json
 {
@@ -170,7 +152,7 @@ iterate only failed source parts / placement / pivot
 }
 ```
 
-### Extraction rules
+Extraction rules:
 
 - 指定rectangleをそのままcropする
 - 輪郭検出で毎回crop範囲を推定しない
@@ -181,8 +163,6 @@ iterate only failed source parts / placement / pivot
 ### Tight crop
 
 透明余白を詰めること自体は許容しますが、trim前のcell原点を失ってはいけません。
-
-trimする場合は、最低限次を保持します。
 
 ```json
 {
@@ -209,9 +189,7 @@ trim後の画像中心から配置位置を再推定する方式は採用しま�
 - `pivot_x / pivot_y`
 - `z`
 
-状態slotには、全stateが共有するregistrationを持たせます。
-
-例:
+状態slotには全stateが共有するregistrationを持たせます。
 
 ```json
 {
@@ -235,7 +213,7 @@ trim後の画像中心から配置位置を再推定する方式は採用しま�
 
 ## Hybrid SVG policy
 
-`<image>`を使うハイブリッドSVGは許容します。ただし、標準形は次です。
+`<image>`を使うハイブリッドSVGは許容します。ただし標準形は次です。
 
 ```text
 per-part raster assets
@@ -255,15 +233,9 @@ empty semantic groups
 small overlay patches
 ```
 
-`fullbody_ref` をSVGへ含める場合は、QA用の非表示 `reference` group等へ置き、`character` animation hierarchyへ入れません。
+`fullbody_ref` をSVGへ含める場合はQA用の非表示 `reference` group等へ置き、`character` animation hierarchyへ入れません。
 
-純ベクターが必要な場合は、元パーツ単位でClean Vector Reconstructionへ置換します。画像全体の多色オートトレース結果を最終SVGへ採用しません。
-
-ハイブリッドSVGを純ベクターと報告してはいけません。
-
-## Source traceability
-
-可能なら各assetに元パーツ名を保持します。
+可能なら各raster assetに元パーツ名を保持します。
 
 ```xml
 <image
@@ -272,89 +244,85 @@ small overlay patches
   ... />
 ```
 
-これにより、visual QAで失敗した箇所をsource cellまで戻れます。
+純ベクターが必要な場合は元パーツ単位でClean Vector Reconstructionへ置換します。画像全体の多色オートトレース結果を最終SVGへ採用しません。
 
-## SVG ID contract v2 authoring model
+ハイブリッドSVGを純ベクターと報告してはいけません。
 
-既存validator v1の必須IDは互換wrapperとして維持しつつ、authoringでは手足をjoint単位へ分けます。
+## SVG ID contract v2
+
+v2リグはルートへ次を付けることを推奨します。
 
 ```xml
-<svg viewBox="0 0 1024 1536" ...>
-  <g id="character">
-    <g id="body">
-      <g id="torso"/>
-      <g id="waist"/>
-
-      <g id="arm-left">
-        <g id="upper-arm-left"/>
-        <g id="forearm-left"/>
-        <g id="hand-left"/>
-      </g>
-      <g id="arm-right">
-        <g id="upper-arm-right"/>
-        <g id="forearm-right"/>
-        <g id="hand-right"/>
-      </g>
-
-      <g id="leg-left">
-        <g id="thigh-left"/>
-        <g id="calf-left"/>
-        <g id="foot-left"/>
-      </g>
-      <g id="leg-right">
-        <g id="thigh-right"/>
-        <g id="calf-right"/>
-        <g id="foot-right"/>
-      </g>
-    </g>
-
-    <g id="head" data-pivot-x="512" data-pivot-y="320">
-      <g id="hair-back"/>
-      <g id="face">
-        <g id="face-base"/>
-        <g id="eyes">
-          <g id="eyes-open"/>
-          <g id="eyes-half"/>
-          <g id="eyes-closed"/>
-        </g>
-        <g id="mouth">
-          <g id="mouth-closed"/>
-          <g id="mouth-small"/>
-          <g id="mouth-a"/>
-          <g id="mouth-i"/>
-          <g id="mouth-u"/>
-          <g id="mouth-e"/>
-          <g id="mouth-o"/>
-        </g>
-      </g>
-      <g id="hair-front"/>
-      <g id="hair-left"/>
-      <g id="hair-right"/>
-      <g id="ahoge"/>
-    </g>
-  </g>
-</svg>
+<svg data-rig-version="2" viewBox="0 0 1024 1536" ...>
 ```
 
-### Current validator compatibility
+最低構造:
 
-`tools/character_rig/validate_rig.py` は現在、v1の最小IDを強制しています。
+```xml
+<g id="character">
+  <g id="body">
+    <g id="torso"/>
+    <g id="waist"/>
 
-- `character`
-- `body`
-- `head`
-- `face`
-- `eyes`
-- `eyes-open`
-- `eyes-closed`
-- `mouth`
-- `mouth-closed`
+    <g id="arm-left">
+      <g id="upper-arm-left"/>
+      <g id="forearm-left"/>
+      <g id="hand-left"/>
+    </g>
+    <g id="arm-right">
+      <g id="upper-arm-right"/>
+      <g id="forearm-right"/>
+      <g id="hand-right"/>
+    </g>
 
-v2のjoint分割はauthoring contractです。validatorでのjoint-level enforcementは別実装変更として扱います。
+    <g id="leg-left">
+      <g id="thigh-left"/>
+      <g id="calf-left"/>
+      <g id="foot-left"/>
+    </g>
+    <g id="leg-right">
+      <g id="thigh-right"/>
+      <g id="calf-right"/>
+      <g id="foot-right"/>
+    </g>
+  </g>
+
+  <g id="head">
+    <g id="hair-back"/>
+    <g id="face">
+      <g id="face-base"/>
+      <g id="eyes">
+        <g id="eyes-open"/>
+        <g id="eyes-half"/>
+        <g id="eyes-closed"/>
+      </g>
+      <g id="mouth">
+        <g id="mouth-closed"/>
+        <g id="mouth-small"/>
+        <g id="mouth-a"/>
+        <g id="mouth-i"/>
+        <g id="mouth-u"/>
+        <g id="mouth-e"/>
+        <g id="mouth-o"/>
+      </g>
+    </g>
+    <g id="hair-front"/>
+    <g id="hair-left"/>
+    <g id="hair-right"/>
+    <g id="ahoge"/>
+  </g>
+</g>
+```
+
+`waist` は衣装都合で `skirt-waist` に置き換えて構いません。
 
 ## Pivot / hierarchy
 
-pivotは画像矩形の中心ではなく、**接続上の根元**へ置きます。
+pivotは画像矩形の中心ではなく**接続上の根元**へ置きます。
+
+```xml
+<g id="forearm-left" data-pivot-x="310" data-pivot-y="610">
+```
 
 - `head` → 首
 - `hair-left/right` → 生え際
@@ -366,7 +334,7 @@ pivotは画像矩形の中心ではなく、**接続上の根元**へ置きま�
 - `calf-*` → 膝
 - `foot-*` → 足首
 
-手足はparent chainで動かします。
+論理上のparent chain:
 
 ```text
 upper-arm
@@ -377,6 +345,8 @@ thigh
   └─ calf
       └─ foot
 ```
+
+SVG上でjoint groupが兄弟配置でも、previewはroot側の回転を子へ累積してQAします。実際にnested groupとして記述した場合は、既に親transformを継承しているため二重適用しません。
 
 完成立ち絵を回転させた後に再切り出して疑似関節を作らないでください。
 
@@ -408,12 +378,47 @@ open → half → closed → half → open
 
 - 全stateを同じmouth slotで置換する
 - skin-color patchで元口を消して別口を重ねる方式を標準にしない
-- `face_base`に口が残っている場合はsource assetの不備として修正する
+- `face_base` に口が残っている場合はsource assetの不備として修正する
 - previewではstate cycleで位置ズレとscale差を先に確認する
+
+## validate_rig.py
+
+実行:
+
+```bash
+python tools/character_rig/validate_rig.py character.svg
+python tools/character_rig/validate_rig.py character.svg --json
+```
+
+validation JSONは `zundamotion.svg-character-rig-validation` **version 2** です。
+
+### v1互換
+
+従来の最小IDだけを持つリグはlegacy v1として引き続き検証できます。v1ではpivot不足はwarningです。
+
+### v2判定
+
+次のいずれかでv2として扱います。
+
+- ルートが `data-rig-version="2"`
+- joint-level IDを含む
+
+v2では次を検証します。
+
+- v1最小ID
+- `torso`
+- 左右の `arm / upper-arm / forearm / hand`
+- 左右の `leg / thigh / calf / foot`
+- `waist` または `skirt-waist`
+- 可動jointのpivot metadata
+- `fullbody_ref` が `character` 可動階層へ混入していないこと
+- raster assetの `data-source-part` 有無をtraceability warningとして報告
+
+v2で必須jointまたはpivotが不足した場合はexit code `2` です。
 
 ## PNG / MP4 preview
 
-`render_preview.py`は本体レンダラーとは分離したauthoring QAツールです。
+`render_preview.py` は本体レンダラーとは分離したauthoring QAツールです。
 
 追加依存:
 
@@ -427,7 +432,7 @@ FFmpegもPATH上に必要です。
 
 ```bash
 python tools/character_rig/render_preview.py \
-  assets/characters/tsuzuri/tsuzuri.svg \
+  character.svg \
   -o output/character_rig
 ```
 
@@ -437,16 +442,17 @@ python tools/character_rig/render_preview.py \
 - fps: `20`
 - width: `768`
 
-現在のpreviewは次を確認します。
+previewは次を確認します。
 
-- blink
-- `mouth-closed / a / i / u / e / o / small` cycle
+- `open → half → closed → half → open` のblink
+- `mouth-closed / a / i / u / e / o / small` の簡易cycle
 - 左右髪の異位相な小角度揺れ
 - 前髪の微小上下移動
 - アホ毛の揺れ
 - character全体の微揺れ
-
-joint-level limb previewはv2 authoring designに含みますが、現在の`render_preview.py`にはまだ統合していません。実装時は`upper-arm / forearm / hand`と`thigh / calf / foot`のparent/pivotを小振幅で確認します。
+- v2: 左右上腕・前腕・手首の小振幅回転
+- v2: 左右太もも・すね・足首の小振幅回転
+- v1: 従来どおり `arm-left / arm-right` の簡易揺れへfallback
 
 これは音素同期や演技生成ではなく、**リグ構造が実際に動かせるかを見るQA motion**です。
 
@@ -462,14 +468,14 @@ extracted_parts/
 extracted_parts_contact_sheet.png
 rig_config.json
 character.svg
+validation.json
 character.png
 face_state_contact_sheet.png
 character_preview.mp4
 video_contact_sheet.png
-validation.json
 ```
 
-### 1. Extracted-parts QA
+### Extracted-parts QA
 
 - part名と画像内容が一致する
 - 罫線・文字・別partが混入していない
@@ -477,11 +483,9 @@ validation.json
 - 必須partが欠けていない
 - trim offset / registrationが保持されている
 
-### 2. Neutral assembly QA
+### Neutral assembly QA
 
 SVGからneutral pose PNGをレンダリングし、`fullbody_ref`と比較します。
-
-確認:
 
 - 頭・首・肩・腰・膝・足首
 - scale
@@ -489,9 +493,9 @@ SVGからneutral pose PNGをレンダリングし、`fullbody_ref`と比較し�
 - 目・眉・口のregistration
 - 手足の接続
 
-`fullbody_ref`は比較用であり、animation sourceではありません。
+`fullbody_ref` は比較用でありanimation sourceではありません。
 
-### 3. Face-state contact sheet
+### Face-state QA
 
 同じcropで最低限以下を並べます。
 
@@ -507,13 +511,13 @@ SVGからneutral pose PNGをレンダリングし、`fullbody_ref`と比較し�
 - 口サイズが極端に暴れない
 - patch境界が見えない
 
-### 4. Motion visual QA
+### Motion visual QA
 
 - blink時に前髪・眼鏡との関係が破綻しない
 - mouth stateが髭/パッチのように見えない
 - 髪の根元が頭から外れない
-- joint motion実装後は肩・肘・手首が外れない
-- joint motion実装後は股関節・膝・足首が外れない
+- 肩・肘・手首が外れない
+- 股関節・膝・足首が外れない
 - character全体がフレーム外へ切れない
 - static PNGと初期フレームで見た目が不必要に変わらない
 
@@ -528,6 +532,7 @@ SVGからneutral pose PNGをレンダリングし、`fullbody_ref`と比較し�
 - 口パッチが必要になる → `face_base`に口が残っていないか確認
 - 髪の根元が外れる → hair source境界またはpivotを修正
 - 肘が外れる → upper-arm / forearmのjoint registrationを修正
+- 膝が外れる → thigh / calfのjoint registrationを修正
 - 全体がガビガビ → auto traceを捨て、per-part rasterまたはClean Vector Reconstructionへ戻る
 
 完成済みpartまで毎回再生成しません。
