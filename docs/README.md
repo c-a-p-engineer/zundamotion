@@ -33,6 +33,7 @@ YAML 台本を扱う場合だけ [`../scripts/script_cheatsheet.md`](../scripts/
 | 性能チューニング | [`guides/performance_tuning.md`](./guides/performance_tuning.md) |
 | 性能の採用・却下・回帰履歴 | [`guides/performance_regression_ledger.md`](./guides/performance_regression_ledger.md) |
 | 立ち絵・表情差分素材 | [`guides/character_assets.md`](./guides/character_assets.md) |
+| SVGキャラクターリグの規格・検証・preview | [`guides/svg_character_rig.md`](./guides/svg_character_rig.md) |
 | submodule 利用 | [`guides/submodule.md`](./guides/submodule.md) |
 
 ## 設計資料
@@ -74,6 +75,7 @@ YAML 台本を扱う場合だけ [`../scripts/script_cheatsheet.md`](../scripts/
 - **TTS backend 境界**: `guides/tts_provider.md`
 - **入力 provenance**: `guides/render_lock.md`
 - **出力再現性**: `guides/reproducibility_contract.md`
+- **キャラクターリグauthoring/QA**: `guides/svg_character_rig.md`
 - **性能判断**: `guides/performance_regression_ledger.md`
 - **未確定・再検討条件**: `issues_pending.md`
 - **履歴**: 日付付き計画、解析ログ、完了済みリファクタリング記録
