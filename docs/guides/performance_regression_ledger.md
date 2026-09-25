@@ -61,6 +61,7 @@
 | 画像内容署名付き cache key | 既存ローカル画像パスの cache key は `sha256` を正とし、`mtime` は含めない | 同名画像差し替えを検知しつつ、同一内容の再出力で scene cache を無効化しない | 採用 |
 | Performance summary instrumentation | FFmpeg/ffprobe/cache/字幕PNG/中間ファイル/VideoPhase内訳を記録する | 既存経路を変えずに次の削減対象を判断できる | 採用 |
 | VOICEVOX content-addressed speech cache | 音声 cache を line_id 依存から内容署名ベースに変える | 同一テキスト・同一話者・同一パラメータを scene/line をまたいで再利用できる | 採用 |
+| AudioPhase worker auto上限2 | VOICEVOX 0.24.1 / 4 CPU / 24発話で worker 1/2 を no-cache・順序反転で実測 | median 82.989s → 82.144sで約1.0%差。PCM/timelineは全trial一致、failure 0。高速化効果は小さいため既存policyを変更せず、3以上へ拡大しない | 現状維持 |
 | ffprobe 種別 PerfSummary | ffprobe を duration/stream/other に分類して集計する | probe 削減対象を判断しやすくなる | 採用 |
 | media probe in-flight dedupe | 同一実行内の同一 duration/media-info probe をまとめる | 同一 probe の多重起動を避けられる | 採用 |
 | media-info stream probe in-flight dedupe | `has_audio_stream` などの同一 media-info probe を同一実行内でまとめる | 並列処理中の同一ファイル stream ffprobe 多重起動を避けられる | 採用 |
@@ -76,6 +77,36 @@
 | scene-unit filter graph | scene 全体を 1 本の filter graph にまとめる案を検討した | 巨大 filter graph 化で debug 性と保守性が落ちる | 却下 |
 | GPU overlay / CUDA overlay | CUDA overlay を使う案を検証した | smoke test 失敗。CPU/GPU 往復のリスクが高い | 却下 |
 | transition suffix stream copy | next scene suffix を stream copy で切り出す案を試した | next scene 冒頭音声が再出現する場合がある | 却下 |
+
+## 2026-09-25 AudioPhase worker 1 / 2 benchmark
+
+VOICEVOX AudioPhase の bounded concurrency について、worker 1 / 2 を同一条件で比較した。
+
+条件とtrial単位の結果は
+[`performance_logs/20260925_audio_worker_1_vs_2.md`](./performance_logs/20260925_audio_worker_1_vs_2.md)
+を正とする。
+
+要点:
+
+- VOICEVOX 0.24.1 CPU image
+- GitHub-hosted `ubuntu-24.04`, reported 4 CPU
+- 24発話
+- no-cache
+- provider retry 1 attempt
+- 順序 `1, 2, 2, 1`
+- worker 1 median: **82.989s**
+- worker 2 median: **82.144s**
+- worker 2 improvement: **1.018%**
+- decode後PCM / timeline fingerprint: **全trial一致**
+- provider failure: **0**
+
+判断:
+
+- worker 2の高速化効果は、この条件では約1%でありmaterialではない。
+- 一方、出力同等性・failure面の悪化も観測されなかった。
+- 単一4 CPU runnerだけを根拠に既存policyを変更する利益がないため、現在の `auto` 上限2を維持する。
+- この結果はworker 3以上への拡大根拠にはならない。
+- provider/runtimeまたは低スペック基準機が変わった場合は再計測する。
 
 ## 2026-08-05 FinalizePhase cache self-healing
 
