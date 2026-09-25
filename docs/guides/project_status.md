@@ -10,6 +10,7 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 ## 1. 現在の基準線
 
 - `master` は大規模な責務分割フェーズを完了済みです。
+- J-cut の現行互換挙動は E2E characterization 済みです。`j_cut.duration` は同一行の pre-roll + audio delay として動き、字幕は pre-roll 冒頭から表示されます。一般的な音声先行J-cut semantics は未実装として明示します。
 - PR #87 の最終統合監査では unit / FFmpeg integration / wheel・sdist build / clean wheel install / CPU render smoke / no-voice reproducibility が成功しています。
 - 同検証の Performance Smoke は cold 6.251s / warm1 0.782s / warm2 0.774s、A/V warning 0 です。
 - 再現性検証では video framemd5、audio PCM、sidecar の比較が一致しています。
@@ -48,12 +49,7 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 
 ### P0: 正しさ・基準線の確定
 
-1. **J-cut の E2E characterization**
-   - `j_cut.duration` の映像 pre-padding 実装は存在します。
-   - 音声先行、字幕、scene 境界、transition を含む実レンダー契約を固定する必要があります。
-   - 完了条件: A/V timing と出力順を再現可能なテストで固定し、`docs/features.md` の「要再検証」を解消できること。
-
-2. **Audio worker 1/2 の長尺実測**
+1. **Audio worker 1/2 の長尺実測**
    - bounded concurrency と worker policy 自体は実装済みです。
    - 同一長尺 YAML で worker 1/2 を比較し、既定値を維持するか変更するかを決めます。
    - 完了条件: AudioPhase / total elapsed / provider failure / timeline order / output equivalence を比較可能な記録として残すこと。

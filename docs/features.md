@@ -33,7 +33,7 @@
 | BGM fade | 実装済み | event ごとの fade in/out | `bgm_phase.py`, `ffmpeg_audio.py` |
 | scene 間 audio crossfade | 実装済み | `scene.transition` の `acrossfade` | `ffmpeg_ops.py`, `test_audio_pcm_concat_integration.py` |
 | L カット | 実装済み | 前行の音声 tail を次行映像へ overlay | `audio_phase.py`, `test_audio_phase_voice_layers.py` |
-| J カット | 要再検証 | `j_cut.duration` の映像 pre-padding は実装。音声先行の render characterization が未整備 | `scene_standard_renderer.py` |
+| J カット | 一部実装 | `j_cut.duration` は現在、同一行の pre-roll と音声 delay として動作する。字幕は pre-roll 冒頭から表示される。一般的な「次の音声が先行し、映像切替が後から来る」J-cut semantics は未実装 | `scene_timing.py`, `clip_audio_graph.py`, `test_audio_pcm_concat_integration.py` |
 | 音声 filter preset | 実装済み | `phone` / `echo` / `radio` / `muffled` | `filter_presets.py`, `sample_filters.yaml` |
 | 任意 EQ | 未実装 | 任意 FFmpeg audio filter 文字列は受け付けない | `validate_script.py` |
 | compressor | 一部実装 | `radio` preset 内の固定 `acompressor` のみ | `filter_presets.py` |
