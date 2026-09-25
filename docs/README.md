@@ -40,6 +40,7 @@ YAML 台本を扱う場合だけ [`../scripts/script_cheatsheet.md`](../scripts/
 ## 設計資料
 
 - [`design/yaml_schema_draft.md`](./design/yaml_schema_draft.md): YAML schema 草案
+- [`design/motion_core_contract.md`](./design/motion_core_contract.md): 0.2 Motion Core の外部挙動・互換性・multi-keyframe契約
 - [`design/parser_and_builder.md`](./design/parser_and_builder.md): YAML → IR / filter graph の設計
 - [`design/ffmpeg_filter_mapping.md`](./design/ffmpeg_filter_mapping.md): FFmpeg filter 対応表
 - [`design/effects_extensibility_plan.md`](./design/effects_extensibility_plan.md): effect 拡張方針
