@@ -7,6 +7,13 @@ on:
     paths:
       - ".github/workflows/audio-worker-benchmark-temp.yml"
       - "tools/zundamotion_audio_worker_benchmark.py"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/audio-worker-benchmark-temp.yml"
+      - "tools/zundamotion_audio_worker_benchmark.py"
+      - "tests/test_audio_worker_benchmark.py"
 
 jobs:
   benchmark:
