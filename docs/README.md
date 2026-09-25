@@ -20,6 +20,7 @@ YAML 台本を扱う場合だけ [`../scripts/script_cheatsheet.md`](../scripts/
 | --- | --- |
 | AI / Codex 実装規約 | [`guides/ai_coding_rules.md`](./guides/ai_coding_rules.md) |
 | Python 構造・分割規約 | [`guides/python_coding_rules.md`](./guides/python_coding_rules.md) |
+| 中長期の製品ゴール・ロードマップ | [`guides/product_roadmap.md`](./guides/product_roadmap.md) |
 | セットアップ、CLI、実行 | [`guides/setup_and_runtime.md`](./guides/setup_and_runtime.md) |
 | AI / CI 向け validate / compile / capabilities | [`guides/compiler_interface.md`](./guides/compiler_interface.md) |
 | レンダー後の probe / output check / contact sheet | [`guides/output_qa.md`](./guides/output_qa.md) |
@@ -67,6 +68,7 @@ YAML 台本を扱う場合だけ [`../scripts/script_cheatsheet.md`](../scripts/
 ## 文書の役割分担
 
 - **現在状態・次タスク**: `guides/project_status.md`
+- **中長期の製品ゴール・フェーズ順序**: `guides/product_roadmap.md`
 - **利用仕様**: `scripts/script_cheatsheet.md`, `features.md`
 - **作業規則**: `AGENTS.md`, `guides/ai_coding_rules.md`, `guides/python_coding_rules.md`
 - **machine-readable authoring契約**: `guides/compiler_interface.md`
