@@ -1,0 +1,58 @@
+name: Temporary Audio Worker Benchmark
+
+on:
+  push:
+    branches:
+      - perf/101-audio-worker-benchmark
+    paths:
+      - ".github/workflows/audio-worker-benchmark-temp.yml"
+      - "tools/zundamotion_audio_worker_benchmark.py"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14.6"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Start locked VOICEVOX CPU engine
+        run: |
+          docker run -d --rm \
+            --name voicevox-benchmark \
+            --shm-size=2g \
+            -p 50021:50021 \
+            voicevox/voicevox_engine:cpu-ubuntu22.04-0.24.1@sha256:a6a96326ffda12a7292b235a6ef43d299ca33849993e262b230320e17c8c2be8
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:50021/version >/dev/null; then
+              curl -fsS http://127.0.0.1:50021/version
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs voicevox-benchmark
+          exit 1
+
+      - name: Benchmark workers 1 and 2
+        env:
+          VOICEVOX_URL: http://127.0.0.1:50021
+        run: |
+          python tools/zundamotion_audio_worker_benchmark.py \
+            --speaker 3 \
+            --lines 24 \
+            --rounds 2
+          cat output/benchmarks/audio-workers/audio-worker-benchmark.json
+
+      - name: Show VOICEVOX logs on failure
+        if: failure()
+        run: docker logs voicevox-benchmark || true
