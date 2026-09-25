@@ -11,6 +11,7 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 
 - `master` は大規模な責務分割フェーズを完了済みです。
 - J-cut の現行互換挙動は E2E characterization 済みです。`j_cut.duration` は同一行の pre-roll + audio delay として動き、字幕は pre-roll 冒頭から表示されます。一般的な音声先行J-cut semantics は未実装として明示します。
+- AudioPhase worker 1/2 は VOICEVOX 0.24.1 / 4 CPU / 24発話で実測済みです。worker 2はmedianで約1.0%だけ速く、PCM/timelineは全trial一致、failure 0でした。性能差が小さいため既存の `auto` 上限2を維持し、worker数拡大は行いません。
 - PR #87 の最終統合監査では unit / FFmpeg integration / wheel・sdist build / clean wheel install / CPU render smoke / no-voice reproducibility が成功しています。
 - 同検証の Performance Smoke は cold 6.251s / warm1 0.782s / warm2 0.774s、A/V warning 0 です。
 - 再現性検証では video framemd5、audio PCM、sidecar の比較が一致しています。
@@ -49,10 +50,7 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 
 ### P0: 正しさ・基準線の確定
 
-1. **Audio worker 1/2 の長尺実測**
-   - bounded concurrency と worker policy 自体は実装済みです。
-   - 同一長尺 YAML で worker 1/2 を比較し、既定値を維持するか変更するかを決めます。
-   - 完了条件: AudioPhase / total elapsed / provider failure / timeline order / output equivalence を比較可能な記録として残すこと。
+現在のP0基準線で未完了項目はありません。
 
 ### P1: 0.1.x Foundation stabilization
 
@@ -146,13 +144,12 @@ Google系など新しいcloud TTSを追加する場合も、既存 `TTSProvider`
 
 原則として次の順です。
 
-1. P0の正しさ未確定項目を閉じる
-2. 0.1.x release / compiler / provider 基準線を整理する
-3. Motion Core の behavior contract を定義する
-4. multi-keyframe + easing の最小縦切りを実装する
-5. 少数の motion preset で実動画を比較する
-6. Motion Core の費用対効果を確認して Character Runtime へ進む
-7. native経路で不足する具体例が集まってから Rich Renderer を比較する
+1. 0.1.x release / compiler / provider 基準線を整理する
+2. Motion Core の behavior contract を確定する
+3. multi-keyframe + easing の最小縦切りを実装する
+4. 少数の motion preset で実動画を比較する
+5. Motion Core の費用対効果を確認して Character Runtime へ進む
+6. native経路で不足する具体例が集まってから Rich Renderer を比較する
 
 ## 6. 状態更新ルール
 
