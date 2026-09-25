@@ -100,6 +100,34 @@ GitHub Actionsの`Performance Smoke`は`smoke_minimal.yaml`をCPU・音声なし
 比較JSONと生PerfSummaryをartifactとして保存します。長尺台本の性能判定では、この
 短尺CIだけで結論を出さず、同一runtime lockのローカルまたは専用runnerで再計測します。
 
+## Audio worker 1 / 2 固定ベンチマーク
+
+VOICEVOX の音声生成だけを分離して、`voice.parallel_workers=1` と `2` を同じ発話集合で比較できます。
+動画レンダー、字幕、GPU差を計測へ混ぜません。
+
+```bash
+python tools/zundamotion_audio_worker_benchmark.py \
+  --voicevox-url http://127.0.0.1:50021 \
+  --speaker 3 \
+  --lines 24 \
+  --rounds 2
+```
+
+結果は `output/benchmarks/audio-workers/audio-worker-benchmark.json` へ保存されます。
+
+ベンチマークは次を固定します。
+
+- 1 / 2 worker をラウンドごとに逆順で実行し、実行順バイアスを抑える
+- 各 trial は別の no-cache 作業領域を使う
+- provider retry は 1 attempt に固定し、backoff を性能値へ混ぜない
+- 各行の decode 後 PCM SHA-256 を比較する
+- timeline の順序、開始時刻、duration を比較する
+- VOICEVOX version、Python、OS、CPU数、runtime lock hash を結果へ残す
+
+`all_successful_trials_equivalent=false`、provider failure、または trial 欠落がある結果は
+性能比較として採用しません。共有 CI runner の絶対時間は低スペック基準値として扱わず、
+同一マシン内の worker 1 / 2 相対比較として使います。
+
 ## 自動チューニング
 
 - `video.auto_tune: true` で先頭クリップを軽く計測
