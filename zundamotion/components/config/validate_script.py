@@ -95,6 +95,11 @@ def _validate_scene_settings(config: Dict[str, Any], scene: Dict[str, Any], scen
                 raise ValidationError(
                     f"Scene '{scene_id}' character_defaults.{name} must be a dictionary."
                 )
+            if "rotate" in value:
+                raise ValidationError(
+                    f"Scene '{scene_id}' character_defaults.{name}.rotate is not "
+                    "supported; rotate is line-local."
+                )
             validate_character_color_filter(
                 value.get("color_filter"),
                 f"scene '{scene_id}' character_defaults.{name}.color_filter",
