@@ -4,7 +4,10 @@ import math
 
 import pytest
 
-from zundamotion.components.config.validate_script import _validate_character_move
+from zundamotion.components.config.validate_script import (
+    _validate_character_move,
+    _validate_character_rotate,
+)
 from zundamotion.exceptions import ValidationError
 
 
@@ -49,8 +52,10 @@ def test_empty_keyframe_list_keeps_legacy_string_compatibility() -> None:
         ([{"at": 0.0, "x": 10}], "0 < at < move.duration"),
         ([{"at": 1.0, "x": 10}], "0 < at < move.duration"),
         ([{"at": 1.2, "x": 10}], "0 < at < move.duration"),
-        ([{"at": 0.4, "easing": "ease_out"}], "at least one of x, y, or scale"),
-        ([{"at": 0.4, "rotate": 10}], "unsupported properties"),
+        (
+            [{"at": 0.4, "easing": "ease_out"}],
+            "at least one of x, y, scale, or rotate",
+        ),
         ([{"at": 0.4, "opacity": 0.5}], "unsupported properties"),
         ([{"at": 0.4, "x": "10"}], "x must be a finite number"),
         ([{"at": 0.4, "scale": 0}], "scale must be greater than 0"),
@@ -106,4 +111,59 @@ def test_multi_keyframe_validation_requires_positive_duration() -> None:
                 "keyframes": [{"at": 0.2, "x": 10}],
             },
             "character.move",
+        )
+
+
+
+def test_rotate_waypoints_are_valid_motion_properties() -> None:
+    move = {
+        "from": {"rotate": -10},
+        "duration": 1.0,
+        "keyframes": [
+            {"at": 0.3, "rotate": 15, "easing": "ease_out"},
+            {"at": 0.7, "x": 20},
+        ],
+    }
+
+    _validate_character_move(move, "character.move")
+    _validate_character_rotate(
+        {"rotate": 0, "move": move},
+        "character",
+    )
+
+
+def test_rotate_animation_requires_explicit_final_value() -> None:
+    with pytest.raises(ValidationError, match="rotate is required"):
+        _validate_character_rotate(
+            {
+                "move": {
+                    "from": {"rotate": -10},
+                    "duration": 1.0,
+                }
+            },
+            "character",
+        )
+
+
+def test_rotate_waypoint_requires_explicit_start_value() -> None:
+    with pytest.raises(ValidationError, match="move.from.rotate is required"):
+        _validate_character_rotate(
+            {
+                "rotate": 0,
+                "move": {
+                    "from": {"x": 0},
+                    "duration": 1.0,
+                    "keyframes": [{"at": 0.5, "rotate": 10}],
+                },
+            },
+            "character",
+        )
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf, "10deg"])
+def test_rotate_values_must_be_finite_numbers(value) -> None:
+    with pytest.raises(ValidationError, match="finite number"):
+        _validate_character_rotate(
+            {"rotate": value},
+            "character",
         )
