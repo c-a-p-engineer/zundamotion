@@ -362,7 +362,36 @@ lines:
 - `move` を指定すると、発話行または `wait` 行のクリップ内で `move.from` から `position` / `scale` へ補間できます。`position` と `scale` は移動後の最終状態です。
 - その場で拡縮する場合は `move.from: {scale: 0.6}`、移動と同時に拡縮する場合は `move.from: {x: -420, y: -32, scale: 0.6}` のように指定します。
 - `move.duration` は秒数、`move.start` はクリップ開始からの遅延秒数、`move.easing` は `linear` / `ease_in` / `ease_out` / `ease_in_out` を指定できます。
-- `characters_persist: true` で同一シーン内の直前状態がある場合は、`move.from` を省略できます。座標や倍率が変わる場合は直前値を開始状態として使います。省略できない場合は `move.from` を明示してください。
+- 複数地点を通る場合は `move.keyframes` を使います。`at` は `move.start` からの相対秒で、`0 < at < move.duration`、入力順で strictly increasing である必要があります。自動ソートは行いません。
+- 各 keyframe は `x` / `y` / `scale` のうち必要な項目だけを書けます。省略した property にはその時刻の keyframe を人工的に追加せず、property ごとに独立した track として補間します。
+- keyframe の `easing` は「直前の同じ property の keyframe から、その keyframe へ到達する segment」に適用します。省略時と最後の keyframe から最終 `position` / `scale` までは `move.easing` を使います。
+- `move.keyframes` を使う x / y / scale は finite number のみです。legacy の単一区間 `move.from.x/y` で許容している文字列表現は、multi-keyframe では使用できません。
+- 現在の multi-keyframe 対象は character の x / y / scale のみです。rotate / opacity / camera / background pan・zoom はこの `move.keyframes` には含まれません。
+- `characters_persist: true` で同一シーン内の直前状態がある場合は、`move.from` を省略できます。座標や倍率が変わる場合、および scale keyframe がある場合は直前値を開始状態として使います。省略できない場合は `move.from` を明示してください。
+
+複数 keyframe の例:
+
+```yaml
+characters:
+  - name: copetan
+    position: {x: 240, y: -32}
+    scale: 0.82
+    move:
+      from: {x: -420, y: -32, scale: 0.60}
+      start: 0.2
+      duration: 1.0
+      easing: ease_in_out
+      keyframes:
+        - at: 0.25
+          x: -180
+          y: -70
+          easing: ease_out
+        - at: 0.65
+          x: 40
+          y: -20
+          scale: 0.90
+          easing: ease_in_out
+```
 - `expression` は `assets/characters/<name>/<expression>/` の差分素材に対応。
 - `asset_name` を指定すると、`name` は別名のまま `assets/characters/<asset_name>/` の素材を共有できます。色違いキャラクターを独立して同時表示するときに使います。
 - `flip_x: true` で立ち絵、口パク、目パチ差分をまとめて左右反転できます。右向き素材を左向きにしたい時に使います。
