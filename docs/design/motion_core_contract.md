@@ -16,6 +16,7 @@ Issue: #102
 - [Compiler Interface](../guides/compiler_interface.md)
 - [FFmpeg Filter Mapping](./ffmpeg_filter_mapping.md)
 - [Video Direction and QA](../guides/video_direction_and_qa.md)
+- [Rotate Behavior Contract](./motion_rotate_contract.md)
 
 ## 1. Objective
 
@@ -372,7 +373,10 @@ Motion Coreはcharacter stateとmotion commandを分離します。
 - opacityはfade / enter / leaveとの合成順序を決める必要がある
 - 現在のcharacter persistent stateにはrotate / opacityが正式なstate fieldとして存在しない
 
-追加時はそれぞれBehavior Contract差分を作り、既存effectとの競合規則を先に決めます。
+rotate の後続差分は [Motion Core Rotate Behavior Contract](./motion_rotate_contract.md) を正とします。
+opacity は別Behavior Contract差分を作成してから実装します。
+
+追加時はそれぞれ既存effectとの競合規則を先に決めます。
 
 ## 17. Composition rules
 
