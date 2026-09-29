@@ -102,11 +102,34 @@ JSON には少なくとも次を含みます。
 - export preset ID
 - subtitle render mode
 - TTS provider ID
+- Motion Core capability
+  - character multi-keyframe support
+  - supported motion properties
+  - supported easing vocabulary
+  - camera multi-keyframe support status
 - built-in plugin metadata
   - id / version / kind
   - provides
   - `params_schema`
   - capabilities
+
+Motion Core の first vertical slice 実装時は、次のように character の x / y / scale のみを公開します。未実装の rotate / opacity / camera を先行して true にしません。
+
+```json
+{
+  "motion": {
+    "version": 1,
+    "character": {
+      "multi_keyframe": true,
+      "properties": ["position.x", "position.y", "scale"],
+      "easings": ["linear", "ease_in", "ease_out", "ease_in_out"]
+    },
+    "camera": {
+      "multi_keyframe": false
+    }
+  }
+}
+```
 
 `capabilities` は外部 runtime を起動せず、package と built-in manifest から決定論的に生成します。
 ユーザー drop-in plugin を勝手に import して能力一覧へ混ぜません。
