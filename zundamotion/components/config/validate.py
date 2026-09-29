@@ -140,6 +140,11 @@ def _validate_defaults(config: Dict[str, Any]) -> None:
                 raise ValidationError(
                     f"'defaults.characters.{name}.asset_name' must be a non-empty string."
                 )
+            if "rotate" in character:
+                raise ValidationError(
+                    f"'defaults.characters.{name}.rotate' is not supported; "
+                    "rotate is line-local."
+                )
             validate_character_color_filter(
                 character.get("color_filter"),
                 f"defaults.characters.{name}.color_filter",
