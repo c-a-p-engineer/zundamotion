@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
+from zundamotion.components.video.clip.characters import build_character_overlays
 from zundamotion.components.video.clip.rotation import (
     build_rotate_expression,
     build_rotation_canvas,
@@ -143,3 +146,66 @@ def test_rotation_requested_detects_static_and_track_rotation() -> None:
             },
         }
     ) is True
+
+
+
+def test_standard_character_graph_applies_fixed_canvas_rotate(
+    tmp_path,
+) -> None:
+    image_path = tmp_path / "hero.png"
+    Image.new("RGBA", (20, 40), (0, 255, 0, 255)).save(image_path)
+    renderer = SimpleNamespace(
+        scale_flags="bicubic",
+        video_params=SimpleNamespace(width=320, height=180),
+    )
+    filter_parts: list[str] = []
+    overlay_streams: list[str] = []
+    overlay_filters: list[str] = []
+
+    placements = build_character_overlays(
+        renderer=renderer,
+        characters_config=[
+            {
+                "name": "hero",
+                "visible": True,
+                "anchor": "bottom_center",
+                "position": {"x": 0, "y": -20},
+                "scale": 1.0,
+                "rotate": 90,
+                "move": {
+                    "from": {"rotate": 0},
+                    "duration": 1.0,
+                    "easing": "linear",
+                },
+            }
+        ],
+        duration=1.2,
+        character_indices={0: 1},
+        char_effective_scale={0: 1.0},
+        filter_complex_parts=filter_parts,
+        overlay_streams=overlay_streams,
+        overlay_filters=overlay_filters,
+        use_cuda_filters=False,
+        use_opencl=False,
+        metadata={
+            0: {
+                "name": "hero",
+                "asset_name": "hero",
+                "expression": "default",
+                "image_path": image_path,
+                "source_width": 20,
+                "source_height": 40,
+                "preprocessed_flip_x": False,
+                "preprocessed_flip_y": False,
+            }
+        },
+    )
+
+    assert len(filter_parts) == 1
+    assert "pad=w=" in filter_parts[0]
+    assert "rotate=angle=" in filter_parts[0]
+    assert "fillcolor=0x00000000" in filter_parts[0]
+    assert overlay_filters and overlay_filters[0].startswith("overlay=x=")
+    assert placements["hero"]["rotate_active"] is True
+    assert placements["hero"]["rotate_expr"] != "0"
+    assert placements["hero"]["dynamic_position"] is True
