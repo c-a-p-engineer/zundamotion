@@ -15,6 +15,14 @@ from .movement import (
     build_scale_expression,
     has_scale_transition,
 )
+from .rotation import (
+    RotationCanvas,
+    build_rotate_expression,
+    build_rotation_canvas,
+    build_rotation_filter,
+    correct_rotation_position,
+    rotation_requested,
+)
 
 
 def is_horizontal_flip_enabled(char_config: Dict[str, Any]) -> bool:
@@ -153,6 +161,7 @@ async def collect_character_inputs(
         use_char_cache = (
             os.environ.get("CHAR_CACHE_DISABLE", "0") != "1"
             and not has_scale_transition(char_config.get("move"))
+            and not rotation_requested(char_config)
         )
         preprocessed_flip_x = False
         preprocessed_flip_y = False
@@ -288,6 +297,32 @@ def build_character_overlays(
             to_scale=scale,
         )
         position_dynamic = position_dynamic or scale_dynamic
+        rotate_expr, rotate_active = build_rotate_expression(
+            move_config=char_config.get("move"),
+            to_rotate=char_config.get("rotate", 0.0),
+        )
+        rotation_canvas: Optional[RotationCanvas] = None
+        if rotate_active:
+            rotation_canvas = build_rotation_canvas(
+                source_width=int(metadata.get(i, {}).get("source_width", 0)),
+                source_height=int(metadata.get(i, {}).get("source_height", 0)),
+                move_config=char_config.get("move"),
+                to_scale=scale,
+                anchor=str(anchor),
+            )
+            x_base = correct_rotation_position(
+                x_base, rotation_canvas.correction_x
+            )
+            y_base = correct_rotation_position(
+                y_base, rotation_canvas.correction_y
+            )
+            x_expr = correct_rotation_position(
+                x_expr, rotation_canvas.correction_x
+            )
+            y_expr = correct_rotation_position(
+                y_expr, rotation_canvas.correction_y
+            )
+            position_dynamic = True
 
         if enter_effect == "fade":
             fade += f",fade=t=in:st=0:d={enter_duration}:alpha=1"
@@ -369,7 +404,12 @@ def build_character_overlays(
             source_height=int(metadata.get(i, {}).get("source_height", 0)),
             anchor=str(anchor),
             scale_flags=renderer.scale_flags,
-        ) if scale_dynamic else ""
+        ) if (scale_dynamic or rotate_active) else ""
+        rotation_filter = (
+            build_rotation_filter(rotate_expr, rotation_canvas)
+            if rotate_active and rotation_canvas is not None
+            else ""
+        )
 
         overlay_label: Optional[str] = None
         flip_filters: List[str] = []
@@ -384,7 +424,13 @@ def build_character_overlays(
         flip_filter = "".join(f",{item}" for item in flip_filters)
 
         if use_cuda_filters:
-            if scale_dynamic:
+            if rotate_active:
+                filter_complex_parts.append(
+                    f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},"
+                    f"{dynamic_scale_filter},{rotation_filter},"
+                    f"hwupload_cuda[char_scaled_{i}]"
+                )
+            elif scale_dynamic:
                 filter_complex_parts.append(
                     f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},"
                     f"{dynamic_scale_filter},hwupload_cuda[char_scaled_{i}]"
@@ -402,6 +448,7 @@ def build_character_overlays(
             if (
                 os.environ.get("CHAR_CACHE_DISABLE", "0") != "1"
                 and not scale_dynamic
+                and not rotate_active
             ):
                 try:
                     filter_complex_parts.append(
@@ -417,21 +464,33 @@ def build_character_overlays(
                 except Exception:
                     overlay_label = None
             if not opencl_success:
-                scale_filter = (
-                    dynamic_scale_filter
-                    if scale_dynamic
-                    else f"scale=iw*{scale}:ih*{scale}"
-                )
-                filter_complex_parts.append(
-                    f"[{ffmpeg_index}:v]{scale_filter},format=rgba{fade}"
-                    f"{flip_filter},hwupload[char_gpu_{i}]"
-                )
+                if rotate_active:
+                    filter_complex_parts.append(
+                        f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},"
+                        f"{dynamic_scale_filter},{rotation_filter},"
+                        f"hwupload[char_gpu_{i}]"
+                    )
+                else:
+                    scale_filter = (
+                        dynamic_scale_filter
+                        if scale_dynamic
+                        else f"scale=iw*{scale}:ih*{scale}"
+                    )
+                    filter_complex_parts.append(
+                        f"[{ffmpeg_index}:v]{scale_filter},format=rgba{fade}"
+                        f"{flip_filter},hwupload[char_gpu_{i}]"
+                    )
                 overlay_label = f"[char_gpu_{i}]"
                 overlay_streams.append(overlay_label)
                 overlay_filters.append(f"overlay_opencl=x={x_expr}:y={y_expr}")
                 char_effective_scale[i] = 1.0
         else:
-            if scale_dynamic:
+            if rotate_active:
+                filter_complex_parts.append(
+                    f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},"
+                    f"{dynamic_scale_filter},{rotation_filter}[char_scaled_{i}]"
+                )
+            elif scale_dynamic:
                 filter_complex_parts.append(
                     f"[{ffmpeg_index}:v]{dynamic_scale_filter},format=rgba{fade}"
                     f"{flip_filter}[char_scaled_{i}]"
@@ -464,6 +523,9 @@ def build_character_overlays(
                 dynamic_scale=scale_dynamic,
                 source_width=int(metadata.get(i, {}).get("source_width", 0)),
                 source_height=int(metadata.get(i, {}).get("source_height", 0)),
+                rotate_expr=rotate_expr,
+                rotate_active=rotate_active,
+                rotation_canvas=rotation_canvas,
                 dynamic_position=position_dynamic,
             )
         )
@@ -487,6 +549,9 @@ def _build_face_placement(
     dynamic_scale: bool,
     source_width: int,
     source_height: int,
+    rotate_expr: str,
+    rotate_active: bool,
+    rotation_canvas: Optional[RotationCanvas],
     dynamic_position: bool,
 ) -> Dict[str, Dict[str, str]]:
     try:
@@ -577,6 +642,20 @@ def _build_face_placement(
             "source_height": source_height,
             "anchor": anchor,
             "move": char_config.get("move"),
+            "rotate_expr": rotate_expr,
+            "rotate_active": rotate_active,
+            "rotation_canvas_width": (
+                rotation_canvas.width if rotation_canvas is not None else 0
+            ),
+            "rotation_canvas_height": (
+                rotation_canvas.height if rotation_canvas is not None else 0
+            ),
+            "rotation_pad_x": (
+                rotation_canvas.pad_x if rotation_canvas is not None else 0
+            ),
+            "rotation_pad_y": (
+                rotation_canvas.pad_y if rotation_canvas is not None else 0
+            ),
             "x_num": str(int(round(x_num))),
             "y_num": str(int(round(y_num))),
             "expression": str(char_config.get("expression", char_data.get("expression", "default"))),
