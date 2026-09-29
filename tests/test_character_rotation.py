@@ -111,7 +111,7 @@ def test_rotation_filter_keeps_fixed_transparent_dimensions() -> None:
     filter_expr = build_rotation_filter("if(lt(t,0.5),0,1.0)", canvas)
 
     assert f"pad=w={canvas.width}:h={canvas.height}" in filter_expr
-    assert "rotate=angle='if(lt(t\,0.5)\,0\,1.0)'" in filter_expr
+    assert r"rotate=angle='if(lt(t\,0.5)\,0\,1.0)'" in filter_expr
     assert "ow=iw:oh=ih" in filter_expr
     assert "fillcolor=0x00000000" in filter_expr
 
