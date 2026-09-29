@@ -140,7 +140,7 @@ def test_character_fingerprint_covers_visual_state_and_source_content(
     assert digest(base) != original
 
 
-def test_motion_keyframes_are_part_of_scene_cache_identity() -> None:
+def test_motion_keyframes_are_part_of_scene_cache_identity(tmp_path: Path) -> None:
     config = {
         "defaults": {
             "characters_persist": True,
@@ -166,7 +166,7 @@ def test_motion_keyframes_are_part_of_scene_cache_identity() -> None:
     }
 
     def digest(character: dict) -> str:
-        cache = CacheManager(Path(".cache-test-motion-fingerprint"))
+        cache = CacheManager(tmp_path / "motion-cache")
         payload = _phase(config)._generate_scene_hash(_scene(character))
         return cache._generate_hash(payload)
 
