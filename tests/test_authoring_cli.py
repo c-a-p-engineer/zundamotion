@@ -39,7 +39,7 @@ def test_capabilities_document_is_machine_readable_and_stable() -> None:
         "version": 1,
         "character": {
             "multi_keyframe": True,
-            "properties": ["position.x", "position.y", "scale"],
+            "properties": ["position.x", "position.y", "scale", "rotate"],
             "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
         },
         "camera": {"multi_keyframe": False},
@@ -114,6 +114,54 @@ def test_compile_preserves_motion_keyframes_without_renderer_ir(tmp_path: Path) 
     ]
     assert "tracks" not in move
     assert "ffmpeg" not in move
+
+
+def test_compile_preserves_rotate_authoring_without_renderer_geometry(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "rotate.yaml"
+    _write_script(
+        script,
+        {
+            "meta": {"title": "rotate", "version": 3},
+            "scenes": [
+                {
+                    "id": "rotate",
+                    "lines": [
+                        {
+                            "text": "rotate",
+                            "characters": [
+                                {
+                                    "name": "copetan",
+                                    "visible": True,
+                                    "position": {"x": 0, "y": -32},
+                                    "scale": 1.0,
+                                    "rotate": 0,
+                                    "move": {
+                                        "from": {"rotate": -10},
+                                        "duration": 1.0,
+                                        "keyframes": [
+                                            {"at": 0.5, "rotate": 20}
+                                        ],
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    document = compiled_document(str(script))
+    character = document["config"]["script"]["scenes"][0]["lines"][0]["characters"][0]
+
+    assert document["format_version"] == 1
+    assert character["rotate"] == 0
+    assert character["move"]["from"]["rotate"] == -10
+    assert character["move"]["keyframes"][0]["rotate"] == 20
+    assert "rotation_canvas" not in character
+    assert "rotate_expr" not in character
 
 
 def test_validation_document_reports_stable_error_code(tmp_path: Path) -> None:
