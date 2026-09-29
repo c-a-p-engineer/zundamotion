@@ -140,6 +140,58 @@ def test_character_fingerprint_covers_visual_state_and_source_content(
     assert digest(base) != original
 
 
+def test_motion_keyframes_are_part_of_scene_cache_identity() -> None:
+    config = {
+        "defaults": {
+            "characters_persist": True,
+            "background_persist": False,
+            "characters": {},
+        },
+        "characters": {"default_scale": 1.0, "default_anchor": "bottom_center"},
+    }
+    base_character = {
+        "name": "hero",
+        "visible": True,
+        "position": {"x": 200, "y": -32},
+        "scale": 1.0,
+        "move": {
+            "from": {"x": -200, "y": -32, "scale": 0.8},
+            "duration": 1.0,
+            "easing": "linear",
+            "keyframes": [
+                {"at": 0.3, "x": -40, "easing": "ease_out"},
+                {"at": 0.7, "x": 80, "scale": 1.2},
+            ],
+        },
+    }
+
+    def digest(character: dict) -> str:
+        cache = CacheManager(Path(".cache-test-motion-fingerprint"))
+        payload = _phase(config)._generate_scene_hash(_scene(character))
+        return cache._generate_hash(payload)
+
+    original = digest(deepcopy(base_character))
+    assert digest(deepcopy(base_character)) == original
+
+    changed_at = deepcopy(base_character)
+    changed_at["move"]["keyframes"][0]["at"] = 0.35
+    assert digest(changed_at) != original
+
+    changed_value = deepcopy(base_character)
+    changed_value["move"]["keyframes"][1]["scale"] = 1.25
+    assert digest(changed_value) != original
+
+    changed_easing = deepcopy(base_character)
+    changed_easing["move"]["keyframes"][0]["easing"] = "ease_in"
+    assert digest(changed_easing) != original
+
+    changed_order = deepcopy(base_character)
+    changed_order["move"]["keyframes"] = list(
+        reversed(changed_order["move"]["keyframes"])
+    )
+    assert digest(changed_order) != original
+
+
 def test_dynamic_characters_are_not_static_scene_overlays(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     _write_character(tmp_path, "hero")
