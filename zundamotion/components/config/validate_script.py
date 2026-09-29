@@ -405,6 +405,13 @@ def _validate_character_rotate(character: Dict[str, Any], label: str) -> None:
     if not from_has_rotate and not keyframe_has_rotate:
         return
 
+    duration = move.get("duration", 0.3)
+    if not _is_finite_number(duration) or float(duration) <= 0.0:
+        raise ValidationError(
+            f"{label}.move.duration must be a finite number greater than 0 "
+            "when move animates rotate."
+        )
+
     if final_rotate is None:
         raise ValidationError(
             f"{label}.rotate is required when move animates rotate."
