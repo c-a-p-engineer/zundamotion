@@ -349,6 +349,12 @@ def _position_axis_value_expression(anchor: str, axis: str, value: float) -> str
     return x_expr if axis == "x" else y_expr
 
 
+def resolve_max_scale(move_config: Any, to_scale: float) -> float:
+    """Return the maximum scale needed by one character motion."""
+
+    return _max_scale_for_move(move_config, to_scale)
+
+
 def _max_scale_for_move(move_config: Any, to_scale: float) -> float:
     final_scale = _required_positive_float(to_scale, "character scale")
     if not isinstance(move_config, dict):
