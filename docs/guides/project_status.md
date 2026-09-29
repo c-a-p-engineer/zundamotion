@@ -1,6 +1,6 @@
 # 現在状態と次の作業
 
-更新日: 2026-09-25
+更新日: 2026-09-30
 
 このファイルは、Zundamotion の**現在状態、未完了事項、次に着手する作業**の正本です。
 AI / Codex が「今どこまで終わっているか」「次に何をするか」を確認するときは、日付付きの過去計画ではなくこのファイルを優先します。
@@ -22,6 +22,7 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 - Chatterbox は23言語、行単位の言語切替、voice cloning等へ対応していますが、remote model artifact の runtime lock、font fallback、実モデルbenchmark等は未完了です。
 - SVG character rig は v2 の source-part / joint / pivot 検証と blink / lip-sync / hair / limb motion preview まで authoring / QA 側に実装済みです。本体rendererへのruntime統合はまだ行いません。
 - product roadmap は **low-spec first / Motion over complexity / Progressive enhancement / Compiler-Orchestrator** を中長期原則とし、標準rendererは引き続き Python + FFmpeg とします。
+- Motion Core first vertical slice は character `move.keyframes` の x / y / scale と4種easingまで実装・CI検証済みです。legacy single-move互換、persistent final state、motion-aware cache identity、compiled-config v1維持、actual FFmpeg representative-frame renderを確認しています。rotate / opacity / camera は未実装のまま別契約へ分離します。
 
 ## 2. 完了した主要フェーズ
 
@@ -42,6 +43,7 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 | TTS Provider 基盤 | 完了 | 共通Provider / capability、VOICEVOX互換、Chatterbox optional provider |
 | Render Lock / provenance | 完了 | script / compiled-config / asset / runtime lock hash と `verify-lock` |
 | SVG character rig authoring v2 | 完了 | source-part / joint / pivot validation と motion preview。runtime統合は別フェーズ |
+| Motion Core first vertical slice | 完了 | character `move.keyframes` の x/y/scale、segment easing、validation/capability/cache/FFmpeg regression。PR #107 |
 
 詳細な高速化の採用・却下理由は `performance_regression_ledger.md` を正とします。
 過去の分割計画は `source_refactoring_plan.md`、2026-08-07 時点のタスク表は `current_task_plan_20260807.md` に履歴として残します。
@@ -71,20 +73,31 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 
 ### P2: 0.2 Motion Core
 
-次の表現力フェーズの最優先です。
+first vertical slice は完了しています。
 
-- move / pan / zoom の複数 keyframe
-- easing
-- generic motion track
-- position / scale / rotate / opacity
-- camera track と character motion の責務分離
-- motion preset
+完了済み:
+
+- character `move.keyframes` の複数 keyframe
+- x / y / scale property track
+- `linear` / `ease_in` / `ease_out` / `ease_in_out` のsegment easing
+- sparse waypoint validation / lowering
+- legacy `move` single-segment compatibility
 - motion-aware cache identity
-- motion capability / validation
-- representative frame / actual video QA
+- machine-readable motion capability
+- representative frame / actual FFmpeg render regression
+- persistent final `position` / `scale` semantics
 
+残り:
+
+- rotate behavior contract + implementation
+- opacity behavior contract + implementation
+- camera / world-space / screen-space behavior contract + implementation
+- background pan / zoom のmulti-keyframe化とMotion Coreへの統合評価
+- deterministic motion preset
+- generic target abstractionが必要かの再評価
+
+rotate / opacity / camera は first slice へ混ぜず、それぞれ既存effect・alpha・layer-spaceとの競合規則を先に固定します。
 最初から任意frame callbackやbrowser runtimeを導入しません。
-既存 `move` / pan / zoom を同一motion contractへ段階的に寄せます。
 
 ### P3: 0.3 Character Runtime
 
@@ -144,12 +157,14 @@ Google系など新しいcloud TTSを追加する場合も、既存 `TTSProvider`
 
 原則として次の順です。
 
-1. 0.1.x release / compiler / provider 基準線を整理する
-2. Motion Core の behavior contract を確定する
-3. multi-keyframe + easing の最小縦切りを実装する
-4. 少数の motion preset で実動画を比較する
-5. Motion Core の費用対効果を確認して Character Runtime へ進む
-6. native経路で不足する具体例が集まってから Rich Renderer を比較する
+1. 0.1.x release / compiler / provider 基準線を継続して安定化する
+2. Motion Core first slice の代表実動画を増やし、x/y/scale の基準線を維持する
+3. rotate の pivot / canvas /既存effect競合を契約化して別PRで実装する
+4. opacity の alpha / enter / leave / fade競合を契約化して別PRで実装する
+5. camera の world-space / screen-space 境界を契約化し、character motionとは別trackで実装する
+6. その後に motion preset と background pan/zoom 統合の費用対効果を確認する
+7. Motion Core の基準線を確認して Character Runtime へ進む
+8. native経路で不足する具体例が集まってから Rich Renderer を比較する
 
 ## 6. 状態更新ルール
 
