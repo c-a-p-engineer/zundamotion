@@ -147,6 +147,17 @@ def capabilities_document() -> dict[str, Any]:
             "default_provider": "voicevox",
             "provider_capabilities": provider_capabilities,
         },
+        "motion": {
+            "version": 1,
+            "character": {
+                "multi_keyframe": True,
+                "properties": ["position.x", "position.y", "scale"],
+                "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
+            },
+            "camera": {
+                "multi_keyframe": False,
+            },
+        },
         "plugins": plugins,
     }
 
