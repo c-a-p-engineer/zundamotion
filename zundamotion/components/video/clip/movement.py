@@ -70,6 +70,13 @@ def build_move_expressions(
         raise ValidationError("Character move.duration must be greater than 0.")
     easing = _resolve_easing(move_config.get("easing", "linear"))
 
+    for axis in ("x", "y"):
+        if any(axis in frame for frame in keyframes) and axis not in raw_from:
+            raise ValidationError(
+                f"Character move.from.{axis} is required when {axis} keyframes are used "
+                "without a previous character position."
+            )
+
     resolved_from = dict(to_position)
     resolved_from.update(
         {axis: raw_from[axis] for axis in ("x", "y") if axis in raw_from}
