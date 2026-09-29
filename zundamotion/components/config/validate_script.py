@@ -201,6 +201,10 @@ def _validate_line_features(line: Dict[str, Any], scene_id: str, line_idx: int) 
                 character.get("move"),
                 f"{container_id}, characters[{char_idx}].move",
             )
+            _validate_character_rotate(
+                character,
+                f"{container_id}, characters[{char_idx}]",
+            )
     reset_flag = line.get("reset_characters")
     if reset_flag is not None and not isinstance(reset_flag, bool):
         raise ValidationError(
@@ -283,6 +287,9 @@ def _validate_character_move(move: Any, label: str) -> None:
                 raise ValidationError(f"{label}.from.scale must be a number.")
             if from_scale <= 0:
                 raise ValidationError(f"{label}.from.scale must be greater than 0.")
+        from_rotate = from_position.get("rotate")
+        if from_rotate is not None and not _is_finite_number(from_rotate):
+            raise ValidationError(f"{label}.from.rotate must be a finite number.")
 
     keyframes = move.get("keyframes")
     if keyframes is None:
@@ -319,7 +326,7 @@ def _validate_character_move(move: Any, label: str) -> None:
             if float(from_scale) <= 0.0:
                 raise ValidationError(f"{label}.from.scale must be greater than 0.")
 
-    allowed_keys = {"at", "x", "y", "scale", "easing"}
+    allowed_keys = {"at", "x", "y", "scale", "rotate", "easing"}
     previous_at = 0.0
     resolved_duration = float(duration)
     for index, frame in enumerate(keyframes):
@@ -347,10 +354,10 @@ def _validate_character_move(move: Any, label: str) -> None:
             )
         previous_at = resolved_at
 
-        properties = [key for key in ("x", "y", "scale") if key in frame]
+        properties = [key for key in ("x", "y", "scale", "rotate") if key in frame]
         if not properties:
             raise ValidationError(
-                f"{frame_label} must define at least one of x, y, or scale."
+                f"{frame_label} must define at least one of x, y, scale, or rotate."
             )
         for property_name in properties:
             value = frame[property_name]
@@ -373,6 +380,38 @@ def _validate_character_move(move: Any, label: str) -> None:
             raise ValidationError(
                 f"{frame_label}.easing must be one of linear, ease_in, ease_out, ease_in_out."
             )
+
+
+def _validate_character_rotate(character: Dict[str, Any], label: str) -> None:
+    final_rotate = character.get("rotate")
+    if final_rotate is not None and not _is_finite_number(final_rotate):
+        raise ValidationError(f"{label}.rotate must be a finite number.")
+
+    move = character.get("move")
+    if not isinstance(move, dict) or move.get("enabled") is False:
+        return
+
+    raw_from = move.get("from")
+    from_has_rotate = isinstance(raw_from, dict) and "rotate" in raw_from
+    keyframes = move.get("keyframes")
+    keyframe_has_rotate = isinstance(keyframes, list) and any(
+        isinstance(frame, dict) and "rotate" in frame for frame in keyframes
+    )
+    if not from_has_rotate and not keyframe_has_rotate:
+        return
+
+    if final_rotate is None:
+        raise ValidationError(
+            f"{label}.rotate is required when move animates rotate."
+        )
+    if not from_has_rotate:
+        raise ValidationError(
+            f"{label}.move.from.rotate is required when move animates rotate."
+        )
+    if not _is_finite_number(raw_from.get("rotate")):
+        raise ValidationError(
+            f"{label}.move.from.rotate must be a finite number."
+        )
 
 
 def _is_finite_number(value: Any) -> bool:
