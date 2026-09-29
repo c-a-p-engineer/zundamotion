@@ -291,10 +291,10 @@ def test_rotate_track_keeps_bottom_center_pivot_and_clockwise_direction(
     assert abs((start_bounds[0] + start_bounds[2]) / 2.0 - 100) <= 3
     assert abs(start_bounds[3] - 120) <= 3
 
-    # +90 degrees is clockwise in FFmpeg: the former top marker moves left.
-    assert end_red[0] < 80
+    # +90 degrees is clockwise in screen coordinates: top moves to the right.
+    assert end_red[0] > 120
     assert abs(end_red[1] - 120) <= 5
-    assert abs(end_bounds[2] - 100) <= 4
+    assert abs(end_bounds[0] - 100) <= 4
     assert abs((end_bounds[1] + end_bounds[3]) / 2.0 - 120) <= 4
 
     # Fixed canvas preserves the source instead of clipping it.
