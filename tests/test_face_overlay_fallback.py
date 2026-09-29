@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from zundamotion.components.video.clip.face import apply_face_overlays
+from zundamotion.components.video.clip.rotation import build_rotate_expression
 
 
 class _StubFaceCache:
@@ -21,6 +22,7 @@ class _StubRenderer:
     def __init__(self) -> None:
         self.face_cache = _StubFaceCache()
         self.video_params = SimpleNamespace(fps=30)
+        self.scale_flags = "bicubic"
 
 
 class _RecordingColorFilterCache:
@@ -227,5 +229,74 @@ def test_apply_face_overlays_flips_fallback_face_parts_when_character_is_flipped
 
         assert len(overlay_streams) == 2
         assert sum(",hflip,vflip[" in part for part in filter_complex_parts) == 2
+
+    asyncio.run(_run())
+
+
+
+def test_apply_face_overlays_uses_same_rotate_transform_as_character(
+    monkeypatch, tmp_path: Path
+) -> None:
+    async def _run() -> None:
+        character_root = tmp_path / "assets" / "characters" / "hero" / "default"
+        mouth_dir = character_root / "mouth"
+        eyes_dir = character_root / "eyes"
+        mouth_dir.mkdir(parents=True)
+        eyes_dir.mkdir(parents=True)
+        (mouth_dir / "half.png").write_bytes(b"half")
+        (eyes_dir / "close.png").write_bytes(b"close")
+        monkeypatch.chdir(tmp_path)
+
+        move = {"from": {"rotate": 0}, "duration": 1.0, "easing": "linear"}
+        rotate_expr, active = build_rotate_expression(
+            move_config=move,
+            to_rotate=90,
+        )
+        assert active is True
+
+        filter_complex_parts: list[str] = []
+        overlay_streams: list[str] = []
+        overlay_filters: list[str] = []
+        await apply_face_overlays(
+            renderer=_StubRenderer(),
+            face_anim={
+                "target_name": "hero",
+                "mouth": [{"start": 0.0, "end": 0.3, "state": "half"}],
+                "eyes": [{"start": 0.4, "end": 0.45, "state": "close"}],
+            },
+            subtitle_line_config={
+                "characters": [{"name": "hero", "visible": True}]
+            },
+            char_overlay_placement={
+                "hero": {
+                    "x_expr": "(W-w)/2",
+                    "y_expr": "H-h/2-20",
+                    "scale_orig": "1.0",
+                    "scale_expr": "1.000000",
+                    "dynamic_scale": False,
+                    "source_width": 20,
+                    "source_height": 40,
+                    "anchor": "bottom_center",
+                    "move": move,
+                    "rotate_expr": rotate_expr,
+                    "rotate_active": True,
+                    "dynamic_position": True,
+                    "expression": "default",
+                    "asset_name": "hero",
+                }
+            },
+            duration=1.0,
+            cmd=[],
+            input_layers=[],
+            filter_complex_parts=filter_complex_parts,
+            overlay_streams=overlay_streams,
+            overlay_filters=overlay_filters,
+        )
+
+        assert len(overlay_streams) == 2
+        assert len(filter_complex_parts) == 2
+        assert all("rotate=angle=" in part for part in filter_complex_parts)
+        assert all("fillcolor=0x00000000" in part for part in filter_complex_parts)
+        assert all("overlay=x=(W-w)/2:y=H-h/2-20" in part for part in overlay_filters)
 
     asyncio.run(_run())
