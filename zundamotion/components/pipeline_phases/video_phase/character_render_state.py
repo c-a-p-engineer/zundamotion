@@ -71,8 +71,10 @@ def resolve_character_render_state(
     move_enabled = bool(move)
     if isinstance(move, dict) and move.get("enabled") is False:
         move_enabled = False
+    rotate = _number(character.get("rotate", 0.0), 0.0)
     dynamic = bool(
         move_enabled
+        or abs(rotate) > 1e-12
         or character.get("enter")
         or character.get("leave")
         or character.get("effects")
@@ -87,6 +89,7 @@ def resolve_character_render_state(
         "expression": expression,
         "visible": bool(character.get("visible", False)),
         "scale": _number(character.get("scale", defaults.get("default_scale", 1.0)), 1.0),
+        "rotate": rotate,
         "anchor": str(
             character.get("anchor", defaults.get("default_anchor", "bottom_center"))
         ).lower(),
@@ -111,6 +114,7 @@ def character_state_fingerprint(state: Dict[str, Any]) -> Dict[str, Any]:
             "expression",
             "visible",
             "scale",
+            "rotate",
             "anchor",
             "position",
             "flip_x",
