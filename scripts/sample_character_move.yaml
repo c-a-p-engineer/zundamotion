@@ -84,3 +84,23 @@ scenes:
               from: {x: -360, y: -32, scale: 0.6}
               duration: 1.0
               easing: ease_in_out
+      - text: "途中の座標や倍率を keyframes で通過し、区間ごとに easing を変えられます。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            position: {x: -40, y: -32}
+            scale: 0.9
+            move:
+              from: {x: 280, y: -32, scale: 1.05}
+              start: 0.1
+              duration: 1.2
+              easing: ease_in_out
+              keyframes:
+                - at: 0.3
+                  x: 120
+                  y: -90
+                  easing: ease_out
+                - at: 0.7
+                  x: 20
+                  scale: 1.18
+                  easing: ease_in

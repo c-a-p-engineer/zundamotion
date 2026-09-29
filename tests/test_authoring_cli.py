@@ -35,6 +35,15 @@ def test_capabilities_document_is_machine_readable_and_stable() -> None:
     assert chatterbox["supports_voice_cloning"] is True
     assert chatterbox["optional_runtime"] is True
     assert "youtube_1080p" in document["export_presets"]
+    assert document["motion"] == {
+        "version": 1,
+        "character": {
+            "multi_keyframe": True,
+            "properties": ["position.x", "position.y", "scale"],
+            "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
+        },
+        "camera": {"multi_keyframe": False},
+    }
     assert {
         "validate",
         "compile",
@@ -57,6 +66,54 @@ def test_compile_uses_render_loader_contract(tmp_path: Path) -> None:
     assert document["format_version"] == 1
     assert document["config"]["script"]["meta"]["title"] == "minimal"
     assert document["config"]["script"]["scenes"] == []
+
+
+def test_compile_preserves_motion_keyframes_without_renderer_ir(tmp_path: Path) -> None:
+    script = tmp_path / "motion.yaml"
+    _write_script(
+        script,
+        {
+            "meta": {"title": "motion", "version": 3},
+            "scenes": [
+                {
+                    "id": "motion",
+                    "lines": [
+                        {
+                            "text": "motion",
+                            "characters": [
+                                {
+                                    "name": "copetan",
+                                    "visible": True,
+                                    "position": {"x": 120, "y": -32},
+                                    "scale": 1.0,
+                                    "move": {
+                                        "from": {"x": -120, "y": -32, "scale": 0.8},
+                                        "duration": 1.0,
+                                        "easing": "ease_in_out",
+                                        "keyframes": [
+                                            {"at": 0.25, "x": -40, "easing": "ease_out"},
+                                            {"at": 0.65, "x": 40, "scale": 1.2},
+                                        ],
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    document = compiled_document(str(script))
+    move = document["config"]["script"]["scenes"][0]["lines"][0]["characters"][0]["move"]
+
+    assert document["format_version"] == 1
+    assert move["keyframes"] == [
+        {"at": 0.25, "easing": "ease_out", "x": -40},
+        {"at": 0.65, "scale": 1.2, "x": 40},
+    ]
+    assert "tracks" not in move
+    assert "ffmpeg" not in move
 
 
 def test_validation_document_reports_stable_error_code(tmp_path: Path) -> None:

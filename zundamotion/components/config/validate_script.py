@@ -1,5 +1,6 @@
 """Scene and line traversal for configuration validation."""
 
+import math
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -282,6 +283,104 @@ def _validate_character_move(move: Any, label: str) -> None:
                 raise ValidationError(f"{label}.from.scale must be a number.")
             if from_scale <= 0:
                 raise ValidationError(f"{label}.from.scale must be greater than 0.")
+
+    keyframes = move.get("keyframes")
+    if keyframes is None:
+        return
+    if not isinstance(keyframes, list):
+        raise ValidationError(f"{label}.keyframes must be a list.")
+    if not keyframes:
+        return
+
+    duration = move.get("duration", 0.3)
+    if not _is_finite_number(duration) or float(duration) <= 0.0:
+        raise ValidationError(
+            f"{label}.duration must be a finite number greater than 0 when keyframes are used."
+        )
+    start = move.get("start", 0.0)
+    if not _is_finite_number(start) or float(start) < 0.0:
+        raise ValidationError(
+            f"{label}.start must be a finite number greater than or equal to 0 when keyframes are used."
+        )
+
+    if isinstance(from_position, dict):
+        for axis in ("x", "y"):
+            value = from_position.get(axis)
+            if value is not None and not _is_finite_number(value):
+                raise ValidationError(
+                    f"{label}.from.{axis} must be a finite number when keyframes are used."
+                )
+        from_scale = from_position.get("scale")
+        if from_scale is not None:
+            if not _is_finite_number(from_scale):
+                raise ValidationError(
+                    f"{label}.from.scale must be a finite number when keyframes are used."
+                )
+            if float(from_scale) <= 0.0:
+                raise ValidationError(f"{label}.from.scale must be greater than 0.")
+
+    allowed_keys = {"at", "x", "y", "scale", "easing"}
+    previous_at = 0.0
+    resolved_duration = float(duration)
+    for index, frame in enumerate(keyframes):
+        frame_label = f"{label}.keyframes[{index}]"
+        if not isinstance(frame, dict):
+            raise ValidationError(f"{frame_label} must be a dictionary.")
+        unknown = sorted(set(frame) - allowed_keys)
+        if unknown:
+            raise ValidationError(
+                f"{frame_label} contains unsupported properties: {', '.join(unknown)}."
+            )
+        if "at" not in frame:
+            raise ValidationError(f"{frame_label}.at is required.")
+        at = frame.get("at")
+        if not _is_finite_number(at):
+            raise ValidationError(f"{frame_label}.at must be a finite number.")
+        resolved_at = float(at)
+        if not (0.0 < resolved_at < resolved_duration):
+            raise ValidationError(
+                f"{frame_label}.at must satisfy 0 < at < move.duration."
+            )
+        if index > 0 and resolved_at <= previous_at:
+            raise ValidationError(
+                f"{label}.keyframes times must be strictly increasing."
+            )
+        previous_at = resolved_at
+
+        properties = [key for key in ("x", "y", "scale") if key in frame]
+        if not properties:
+            raise ValidationError(
+                f"{frame_label} must define at least one of x, y, or scale."
+            )
+        for property_name in properties:
+            value = frame[property_name]
+            if not _is_finite_number(value):
+                raise ValidationError(
+                    f"{frame_label}.{property_name} must be a finite number."
+                )
+            if property_name == "scale" and float(value) <= 0.0:
+                raise ValidationError(
+                    f"{frame_label}.scale must be greater than 0."
+                )
+
+        frame_easing = frame.get("easing")
+        if frame_easing is not None and frame_easing not in {
+            "linear",
+            "ease_in",
+            "ease_out",
+            "ease_in_out",
+        }:
+            raise ValidationError(
+                f"{frame_label}.easing must be one of linear, ease_in, ease_out, ease_in_out."
+            )
+
+
+def _is_finite_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
 
 
 def _validate_sound_effects(sound_effects: Any, scene_id: str, line_idx: int) -> None:
