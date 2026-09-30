@@ -12,6 +12,10 @@ from zundamotion.components.video.clip.movement import (
     build_move_expressions,
     build_scale_expression,
 )
+from zundamotion.components.video.clip.opacity import (
+    build_alpha_multiplier_filter_parts,
+    build_opacity_expression,
+)
 from zundamotion.components.video.clip.rotation import (
     build_rotate_expression,
     build_rotation_canvas,
@@ -74,6 +78,13 @@ def _red_center(image: Image.Image) -> tuple[float, float]:
         sum(point[0] for point in points) / len(points),
         sum(point[1] for point in points) / len(points),
     )
+
+
+def _center_green(image: Image.Image) -> int:
+    x = image.width // 2
+    y = image.height // 2
+    _r, g, _b = image.getpixel((x, y))
+    return int(g)
 
 
 def _probe_duration(video: Path) -> float:
@@ -300,4 +311,79 @@ def test_rotate_track_keeps_bottom_center_pivot_and_clockwise_direction(
     # Fixed canvas preserves the source instead of clipping it.
     assert (end_bounds[2] - end_bounds[0]) >= 36
     assert (end_bounds[3] - end_bounds[1]) >= 17
+    assert _probe_duration(output) == pytest.approx(1.2, abs=0.08)
+
+
+
+def test_opacity_multiplies_source_alpha_and_lifecycle_fade(
+    tmp_path: Path,
+) -> None:
+    character = tmp_path / "opacity-character.png"
+    Image.new("RGBA", (20, 20), (0, 255, 0, 128)).save(character)
+
+    opacity_expr, active = build_opacity_expression(
+        move_config=None,
+        to_opacity=0.5,
+    )
+    assert active is True
+
+    parts = [
+        "[1:v]format=rgba,fade=t=in:st=0:d=1.0:alpha=1[pre]"
+    ]
+    parts.extend(
+        build_alpha_multiplier_filter_parts(
+            input_label="[pre]",
+            output_label="[char]",
+            opacity_expr=opacity_expr,
+            prefix="opacity_ffmpeg",
+        )
+    )
+    parts.append(
+        "[0:v][char]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,"
+        "format=yuv420p[v]"
+    )
+
+    output = tmp_path / "opacity.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=100x100:r=30:d=1.2",
+            "-loop",
+            "1",
+            "-framerate",
+            "30",
+            "-i",
+            str(character),
+            "-filter_complex",
+            ";".join(parts),
+            "-map",
+            "[v]",
+            "-t",
+            "1.2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    mid = _extract_frame(output, 0.50, tmp_path / "opacity-mid.png")
+    end = _extract_frame(output, 1.08, tmp_path / "opacity-end.png")
+    mid_green = _center_green(mid)
+    end_green = _center_green(end)
+
+    # source alpha ~= 0.5, opacity=0.5, fade at t=0.5 ~= 0.5
+    assert 20 <= mid_green <= 45
+    # source alpha ~= 0.5, opacity=0.5, fade completed => ~= 0.25 effective alpha
+    assert 50 <= end_green <= 80
+    assert end_green > mid_green
     assert _probe_duration(output) == pytest.approx(1.2, abs=0.08)
