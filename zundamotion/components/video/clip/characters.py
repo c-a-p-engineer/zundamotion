@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from ...utils.logger import logger
 from ..character_image_resolver import CharacterImageResolver
+from ..character_rig_materializer import rig_runtime_enabled
 from ..clip_image_input import append_looped_image_input
 from .effects import resolve_character_effects
 from .movement import (
@@ -137,7 +138,18 @@ async def collect_character_inputs(
             continue
 
         color_filter = char_config.get("color_filter")
-        if color_filter is None:
+        rig_assets = None
+        if rig_runtime_enabled(char_config):
+            rig_assets = await renderer.character_rig_materializer.materialize(
+                char_config["rig"]
+            )
+            char_image_path = rig_assets.base
+            if color_filter is not None:
+                char_image_path = await renderer.image_color_filter_cache.filter_image(
+                    char_image_path,
+                    color_filter,
+                )
+        elif color_filter is None:
             char_image_path = CharacterImageResolver.resolve_base_image(
                 str(asset_name), str(char_expression)
             )
@@ -219,6 +231,9 @@ async def collect_character_inputs(
             "source_height": source_height,
             "preprocessed_flip_x": preprocessed_flip_x,
             "preprocessed_flip_y": preprocessed_flip_y,
+            "rig_face_paths": (
+                rig_assets.face_paths() if rig_assets is not None else None
+            ),
         }
 
     return CharacterInputs(
@@ -743,6 +758,7 @@ def _build_face_placement(
             "flip_x": is_horizontal_flip_enabled(char_config),
             "flip_y": is_vertical_flip_enabled(char_config),
             "color_filter": char_config.get("color_filter"),
+            "rig_face_paths": char_data.get("rig_face_paths"),
             "dynamic_position": dynamic_position,
         }
 
