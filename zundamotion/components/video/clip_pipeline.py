@@ -112,6 +112,6 @@ async def run_clip_pipeline(
     )
     return await execute_clip_command(
         renderer=renderer, cmd=cmd, output_filename=request.output_filename,
-        output_path=output_path, started_at=started_at, force_cpu=request.force_cpu,
+        output_path=output_path, started_at=started_at, force_cpu=effective_force_cpu,
         retry_kwargs=request.retry_kwargs(graph.subtitle_png_path),
     )
