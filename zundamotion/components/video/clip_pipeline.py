@@ -11,6 +11,7 @@ from ...utils.logger import logger
 from .clip_audio_graph import append_clip_audio_graph
 from .clip_command import build_clip_command
 from .clip_executor import execute_clip_command
+from .clip.camera import camera_requested
 from .clip_filter_policy import resolve_clip_filter_policy
 from .clip_input_collection import collect_clip_inputs
 from .clip_video_graph import ClipVideoGraphRequest, build_clip_video_graph
@@ -33,6 +34,7 @@ class ClipRenderRequest:
     extra_audio_overlays: Optional[List[Dict[str, Any]]] = None
     background_effects: Optional[List[Any]] = None
     screen_effects: Optional[List[Any]] = None
+    camera_config: Optional[Dict[str, Any]] = None
     subtitle_png_path: Optional[Path] = None
     face_anim: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None
     force_cpu: bool = False
@@ -48,17 +50,25 @@ class ClipRenderRequest:
             "image_layer_overlays": self.image_layer_overlays,
             "extra_audio_overlays": self.extra_audio_overlays,
             "background_effects": self.background_effects, "screen_effects": self.screen_effects,
+            "camera_config": self.camera_config,
             "subtitle_png_path": subtitle_png_path, "face_anim": self.face_anim,
             "audio_delay": self.audio_delay,
         }
 
-    def video_graph_request(self) -> ClipVideoGraphRequest:
+    def video_graph_request(
+        self,
+        *,
+        force_cpu: Optional[bool] = None,
+    ) -> ClipVideoGraphRequest:
+        resolved_force_cpu = self.force_cpu if force_cpu is None else bool(force_cpu)
         return ClipVideoGraphRequest(
             duration=self.duration, background_config=self.background_config,
             characters_config=self.characters_config, subtitle_text=self.subtitle_text,
             subtitle_line_config=self.subtitle_line_config, insert_config=self.insert_config,
-            screen_effects=self.screen_effects, subtitle_png_path=self.subtitle_png_path,
-            face_anim=self.face_anim, audio_delay=self.audio_delay, force_cpu=self.force_cpu,
+            screen_effects=self.screen_effects, camera_config=self.camera_config,
+            subtitle_png_path=self.subtitle_png_path,
+            face_anim=self.face_anim, audio_delay=self.audio_delay,
+            force_cpu=resolved_force_cpu,
         )
 
 
@@ -76,12 +86,20 @@ async def run_clip_pipeline(
         image_layer_overlays=request.image_layer_overlays,
         extra_audio_overlays=request.extra_audio_overlays,
     )
+    effective_force_cpu = bool(
+        request.force_cpu or camera_requested(request.camera_config)
+    )
     policy = resolve_clip_filter_policy(
         renderer=renderer, inputs=inputs, background_config=request.background_config,
         insert_config=request.insert_config, subtitle_text=request.subtitle_text,
-        background_effects=request.background_effects, force_cpu=request.force_cpu,
+        background_effects=request.background_effects, force_cpu=effective_force_cpu,
     )
-    graph = await build_clip_video_graph(renderer, inputs, request.video_graph_request(), policy)
+    graph = await build_clip_video_graph(
+        renderer,
+        inputs,
+        request.video_graph_request(force_cpu=effective_force_cpu),
+        policy,
+    )
     audio_map = await append_clip_audio_graph(
         renderer=renderer, inputs=inputs, audio_path=request.audio_path,
         duration=request.duration, insert_config=request.insert_config,
@@ -90,7 +108,7 @@ async def run_clip_pipeline(
     cmd = build_clip_command(
         renderer=renderer, input_command=inputs.cmd,
         filter_complex_parts=graph.filter_complex_parts, audio_map=audio_map,
-        duration=request.duration, output_path=output_path, force_cpu=request.force_cpu,
+        duration=request.duration, output_path=output_path, force_cpu=effective_force_cpu,
     )
     return await execute_clip_command(
         renderer=renderer, cmd=cmd, output_filename=request.output_filename,
