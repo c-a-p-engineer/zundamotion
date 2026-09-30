@@ -9,6 +9,7 @@ from ...utils.logger import logger
 from ..clip_image_input import append_looped_image_input
 from .characters import is_horizontal_flip_enabled, is_vertical_flip_enabled
 from .movement import build_dynamic_scale_filter
+from ..character_rig_materializer import rig_runtime_enabled
 from .opacity import (
     build_alpha_multiplier_filter_parts,
     opacity_requested,
@@ -113,7 +114,11 @@ async def apply_face_overlays(
             for character in subtitle_line_config.get("characters") or []:
                 if character.get("name") != target_name:
                     continue
-                if rotation_requested(character) or opacity_requested(character):
+                if (
+                    rotation_requested(character)
+                    or opacity_requested(character)
+                    or rig_runtime_enabled(character)
+                ):
                     logger.warning(
                         "[FaceAnim] motion alpha/rotate target=%s requires resolved "
                         "character placement; skipping fallback face overlay",
@@ -227,11 +232,21 @@ async def apply_face_overlays(
     else:
         flip_y = bool(flip_y_value)
     color_filter = placement.get("color_filter")
-    mouth_close = _resolve_face_asset(base_dir, expression, "mouth", "close.png")
-    mouth_half = _resolve_face_asset(base_dir, expression, "mouth", "half.png")
-    mouth_open = _resolve_face_asset(base_dir, expression, "mouth", "open.png")
-    eyes_open = _resolve_face_asset(base_dir, expression, "eyes", "open.png")
-    eyes_close = _resolve_face_asset(base_dir, expression, "eyes", "close.png")
+    rig_face_paths = placement.get("rig_face_paths")
+    if isinstance(rig_face_paths, dict):
+        mouth_paths = rig_face_paths.get("mouth") or {}
+        eye_paths = rig_face_paths.get("eyes") or {}
+        mouth_close = Path(mouth_paths.get("close", ""))
+        mouth_half = Path(mouth_paths.get("half", ""))
+        mouth_open = Path(mouth_paths.get("open", ""))
+        eyes_open = Path(eye_paths.get("open", ""))
+        eyes_close = Path(eye_paths.get("close", ""))
+    else:
+        mouth_close = _resolve_face_asset(base_dir, expression, "mouth", "close.png")
+        mouth_half = _resolve_face_asset(base_dir, expression, "mouth", "half.png")
+        mouth_open = _resolve_face_asset(base_dir, expression, "mouth", "open.png")
+        eyes_open = _resolve_face_asset(base_dir, expression, "eyes", "open.png")
+        eyes_close = _resolve_face_asset(base_dir, expression, "eyes", "close.png")
 
     try:
         mouth_segments = face_anim.get("mouth") or []
