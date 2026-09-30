@@ -18,6 +18,7 @@ Issue: #102
 - [Video Direction and QA](../guides/video_direction_and_qa.md)
 - [Rotate Behavior Contract](./motion_rotate_contract.md)
 - [Opacity Behavior Contract](./motion_opacity_contract.md)
+- [Camera / Coordinate Space Contract](./motion_camera_contract.md)
 
 ## 1. Objective
 
@@ -420,25 +421,36 @@ v1では同じpropertyへ複数のMotion Core writerを暗黙合成しません�
 
 camera motion は character motion の別名ではありません。
 
-将来のcamera trackは概念上:
+camera の後続差分は [Motion Core Camera / Coordinate Space Behavior Contract](./motion_camera_contract.md) を正とします。
+
+first camera slice は:
 
 ```text
 world layers
   background
-  world-space insert
-  characters
-      ↓ camera transform
+  insert
+  image layers
+  characters + faces
+      ↓ bounded world composition (W x H)
+      ↓ camera view transform
 screen-space layers
   subtitles
   badges
   screen UI
 ```
 
-を基本とします。
+を採用します。
 
-ただし現在のlayer systemには全assetの world/screen space分類がないため、camera implementationをmulti-keyframe vertical sliceへ混ぜません。
+重要な境界:
 
-`bg:pan_zoom` を「camera」と改名するだけの変更もしません。
+- `bg:pan_zoom` はbackground-localの別owner
+- cameraは合成済みworld viewへ1回だけ適用
+- screen-space subtitle / badgeはcamera後
+- v1のworld extentはoutput viewportと同じW x H
+- viewport外で既にclipされたpixelをcameraで復元する機能はclaimしない
+- zoom-out / overscan world canvasは別契約
+
+`bg:pan_zoom` を「camera」と改名するだけの変更は行いません。
 
 ## 20. Preset semantics
 
