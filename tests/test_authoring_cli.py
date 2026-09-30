@@ -48,6 +48,15 @@ def test_capabilities_document_is_machine_readable_and_stable() -> None:
             "zoom_range": [1.0, 4.0],
             "bounded_world_viewport": True,
         },
+        "background": {
+            "pan_zoom_multi_keyframe": True,
+            "effect_types": ["bg:pan_zoom", "bg:ken_burns"],
+            "properties": ["pan.x", "pan.y", "zoom"],
+            "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
+            "zoom_range": [1.0, 4.0],
+            "focus_range": [0.0, 1.0],
+            "legacy_single_segment_compatible": True,
+        },
     }
     assert {
         "validate",
