@@ -9,6 +9,10 @@ from ...utils.logger import logger
 from ..clip_image_input import append_looped_image_input
 from .characters import is_horizontal_flip_enabled, is_vertical_flip_enabled
 from .movement import build_dynamic_scale_filter
+from .opacity import (
+    build_alpha_multiplier_filter_parts,
+    opacity_requested,
+)
 from .rotation import (
     build_rotation_canvas,
     build_rotation_filter,
@@ -109,10 +113,10 @@ async def apply_face_overlays(
             for character in subtitle_line_config.get("characters") or []:
                 if character.get("name") != target_name:
                     continue
-                if rotation_requested(character):
+                if rotation_requested(character) or opacity_requested(character):
                     logger.warning(
-                        "[FaceAnim] rotate target=%s requires resolved character placement; "
-                        "skipping fallback face overlay",
+                        "[FaceAnim] motion alpha/rotate target=%s requires resolved "
+                        "character placement; skipping fallback face overlay",
                         target_name,
                     )
                     return
@@ -176,6 +180,12 @@ async def apply_face_overlays(
     else:
         rotate_active = bool(rotate_active_raw)
     rotate_expr = str(placement.get("rotate_expr") or "0")
+    opacity_active_raw = placement.get("opacity_active", False)
+    if isinstance(opacity_active_raw, str):
+        opacity_active = opacity_active_raw.lower() in {"1", "true", "yes", "on"}
+    else:
+        opacity_active = bool(opacity_active_raw)
+    opacity_expr = str(placement.get("opacity_expr") or "1.000000")
     rotation_canvas = (
         build_rotation_canvas(
             source_width=int(placement.get("source_width", 0)),
@@ -266,6 +276,7 @@ async def apply_face_overlays(
             if (
                 dynamic_scale
                 or rotate_active
+                or opacity_active
                 or os.environ.get("FACE_CACHE_DISABLE", "0") == "1"
             ):
                 idx = _add_image_input(path)
@@ -309,6 +320,9 @@ async def apply_face_overlays(
             if flip_y:
                 flip_filters.append("vflip")
             flip_filter = "".join(f",{item}" for item in flip_filters)
+            target_label = (
+                f"{out_label}_pre_opacity" if opacity_active else out_label
+            )
             if rotate_active:
                 scale_filter = build_dynamic_scale_filter(
                     scale_expr=scale_expr,
@@ -326,7 +340,7 @@ async def apply_face_overlays(
                 )
                 filter_complex_parts.append(
                     f"[{input_index}:v]format=rgba{fade_add}{flip_filter},"
-                    f"{scale_filter},{rotation_filter}[{out_label}]"
+                    f"{scale_filter},{rotation_filter}[{target_label}]"
                 )
             else:
                 if dynamic_scale:
@@ -343,7 +357,16 @@ async def apply_face_overlays(
                     scale_filter = f"scale=iw*{scale_value}:ih*{scale_value}"
                 filter_complex_parts.append(
                     f"[{input_index}:v]format=rgba{fade_add},{scale_filter}"
-                    f"{flip_filter}[{out_label}]"
+                    f"{flip_filter}[{target_label}]"
+                )
+            if opacity_active:
+                filter_complex_parts.extend(
+                    build_alpha_multiplier_filter_parts(
+                        input_label=f"[{target_label}]",
+                        output_label=f"[{out_label}]",
+                        opacity_expr=opacity_expr,
+                        prefix=f"{out_label}_opacity",
+                    )
                 )
 
     eyes_segments = face_anim.get("eyes") or []

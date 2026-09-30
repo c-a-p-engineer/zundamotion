@@ -15,6 +15,11 @@ from .movement import (
     build_scale_expression,
     has_scale_transition,
 )
+from .opacity import (
+    build_alpha_multiplier_filter_parts,
+    build_opacity_expression,
+    opacity_requested,
+)
 from .rotation import (
     RotationCanvas,
     build_rotate_expression,
@@ -162,6 +167,7 @@ async def collect_character_inputs(
             os.environ.get("CHAR_CACHE_DISABLE", "0") != "1"
             and not has_scale_transition(char_config.get("move"))
             and not rotation_requested(char_config)
+            and not opacity_requested(char_config)
         )
         preprocessed_flip_x = False
         preprocessed_flip_y = False
@@ -301,6 +307,10 @@ def build_character_overlays(
             move_config=char_config.get("move"),
             to_rotate=char_config.get("rotate", 0.0),
         )
+        opacity_expr, opacity_active = build_opacity_expression(
+            move_config=char_config.get("move"),
+            to_opacity=char_config.get("opacity"),
+        )
         rotation_canvas: Optional[RotationCanvas] = None
         if rotate_active:
             rotation_canvas = build_rotation_canvas(
@@ -423,8 +433,54 @@ def build_character_overlays(
             flip_filters.append("vflip")
         flip_filter = "".join(f",{item}" for item in flip_filters)
 
-        if use_cuda_filters:
+        def _append_cpu_transform(output_label: str) -> None:
             if rotate_active:
+                filter_complex_parts.append(
+                    f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},"
+                    f"{dynamic_scale_filter},{rotation_filter}{output_label}"
+                )
+            elif scale_dynamic:
+                filter_complex_parts.append(
+                    f"[{ffmpeg_index}:v]{dynamic_scale_filter},format=rgba{fade}"
+                    f"{flip_filter}{output_label}"
+                )
+            elif abs(scale - 1.0) < 1e-6:
+                filter_complex_parts.append(
+                    f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter}{output_label}"
+                )
+            else:
+                filter_complex_parts.append(
+                    f"[{ffmpeg_index}:v]scale=iw*{scale}:ih*{scale}:"
+                    f"flags={renderer.scale_flags},format=rgba{fade}"
+                    f"{flip_filter}{output_label}"
+                )
+
+        def _append_opacity_chain(
+            input_label: str,
+            output_label: str,
+            prefix: str,
+        ) -> None:
+            filter_complex_parts.extend(
+                build_alpha_multiplier_filter_parts(
+                    input_label=input_label,
+                    output_label=output_label,
+                    opacity_expr=opacity_expr,
+                    prefix=prefix,
+                )
+            )
+
+        if use_cuda_filters:
+            if opacity_active:
+                _append_cpu_transform(f"[char_pre_opacity_{i}]")
+                _append_opacity_chain(
+                    f"[char_pre_opacity_{i}]",
+                    f"[char_alpha_{i}]",
+                    f"char_opacity_{i}",
+                )
+                filter_complex_parts.append(
+                    f"[char_alpha_{i}]hwupload_cuda[char_scaled_{i}]"
+                )
+            elif rotate_active:
                 filter_complex_parts.append(
                     f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},"
                     f"{dynamic_scale_filter},{rotation_filter},"
@@ -449,6 +505,7 @@ def build_character_overlays(
                 os.environ.get("CHAR_CACHE_DISABLE", "0") != "1"
                 and not scale_dynamic
                 and not rotate_active
+                and not opacity_active
             ):
                 try:
                     filter_complex_parts.append(
@@ -464,7 +521,17 @@ def build_character_overlays(
                 except Exception:
                     overlay_label = None
             if not opencl_success:
-                if rotate_active:
+                if opacity_active:
+                    _append_cpu_transform(f"[char_pre_opacity_{i}]")
+                    _append_opacity_chain(
+                        f"[char_pre_opacity_{i}]",
+                        f"[char_alpha_{i}]",
+                        f"char_opacity_{i}",
+                    )
+                    filter_complex_parts.append(
+                        f"[char_alpha_{i}]hwupload[char_gpu_{i}]"
+                    )
+                elif rotate_active:
                     filter_complex_parts.append(
                         f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},"
                         f"{dynamic_scale_filter},{rotation_filter},"
@@ -485,7 +552,14 @@ def build_character_overlays(
                 overlay_filters.append(f"overlay_opencl=x={x_expr}:y={y_expr}")
                 char_effective_scale[i] = 1.0
         else:
-            if rotate_active:
+            if opacity_active:
+                _append_cpu_transform(f"[char_pre_opacity_{i}]")
+                _append_opacity_chain(
+                    f"[char_pre_opacity_{i}]",
+                    f"[char_scaled_{i}]",
+                    f"char_opacity_{i}",
+                )
+            elif rotate_active:
                 filter_complex_parts.append(
                     f"[{ffmpeg_index}:v]format=rgba{fade}{flip_filter},"
                     f"{dynamic_scale_filter},{rotation_filter}[char_scaled_{i}]"
@@ -526,6 +600,8 @@ def build_character_overlays(
                 rotate_expr=rotate_expr,
                 rotate_active=rotate_active,
                 rotation_canvas=rotation_canvas,
+                opacity_expr=opacity_expr,
+                opacity_active=opacity_active,
                 dynamic_position=position_dynamic,
             )
         )
@@ -552,6 +628,8 @@ def _build_face_placement(
     rotate_expr: str,
     rotate_active: bool,
     rotation_canvas: Optional[RotationCanvas],
+    opacity_expr: str,
+    opacity_active: bool,
     dynamic_position: bool,
 ) -> Dict[str, Dict[str, str]]:
     try:
@@ -644,6 +722,8 @@ def _build_face_placement(
             "move": char_config.get("move"),
             "rotate_expr": rotate_expr,
             "rotate_active": rotate_active,
+            "opacity_expr": opacity_expr,
+            "opacity_active": opacity_active,
             "rotation_canvas_width": (
                 rotation_canvas.width if rotation_canvas is not None else 0
             ),

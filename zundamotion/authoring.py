@@ -151,7 +151,7 @@ def capabilities_document() -> dict[str, Any]:
             "version": 1,
             "character": {
                 "multi_keyframe": True,
-                "properties": ["position.x", "position.y", "scale", "rotate"],
+                "properties": ["position.x", "position.y", "scale", "rotate", "opacity"],
                 "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
             },
             "camera": {

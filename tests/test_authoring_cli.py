@@ -39,7 +39,7 @@ def test_capabilities_document_is_machine_readable_and_stable() -> None:
         "version": 1,
         "character": {
             "multi_keyframe": True,
-            "properties": ["position.x", "position.y", "scale", "rotate"],
+            "properties": ["position.x", "position.y", "scale", "rotate", "opacity"],
             "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
         },
         "camera": {"multi_keyframe": False},
@@ -162,6 +162,54 @@ def test_compile_preserves_rotate_authoring_without_renderer_geometry(
     assert character["move"]["keyframes"][0]["rotate"] == 20
     assert "rotation_canvas" not in character
     assert "rotate_expr" not in character
+
+
+def test_compile_preserves_opacity_authoring_without_alpha_ir(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "opacity.yaml"
+    _write_script(
+        script,
+        {
+            "meta": {"title": "opacity", "version": 3},
+            "scenes": [
+                {
+                    "id": "opacity",
+                    "lines": [
+                        {
+                            "text": "opacity",
+                            "characters": [
+                                {
+                                    "name": "copetan",
+                                    "visible": True,
+                                    "position": {"x": 0, "y": -32},
+                                    "scale": 1.0,
+                                    "opacity": 0.5,
+                                    "move": {
+                                        "from": {"opacity": 0.0},
+                                        "duration": 1.0,
+                                        "keyframes": [
+                                            {"at": 0.5, "opacity": 1.0}
+                                        ],
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    document = compiled_document(str(script))
+    character = document["config"]["script"]["scenes"][0]["lines"][0]["characters"][0]
+
+    assert document["format_version"] == 1
+    assert character["opacity"] == 0.5
+    assert character["move"]["from"]["opacity"] == 0.0
+    assert character["move"]["keyframes"][0]["opacity"] == 1.0
+    assert "opacity_expr" not in character
+    assert "alpha_filter" not in character
 
 
 def test_validation_document_reports_stable_error_code(tmp_path: Path) -> None:

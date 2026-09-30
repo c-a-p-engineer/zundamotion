@@ -145,6 +145,11 @@ def _validate_defaults(config: Dict[str, Any]) -> None:
                     f"'defaults.characters.{name}.rotate' is not supported; "
                     "rotate is line-local."
                 )
+            if "opacity" in character:
+                raise ValidationError(
+                    f"'defaults.characters.{name}.opacity' is not supported; "
+                    "opacity is line-local."
+                )
             validate_character_color_filter(
                 character.get("color_filter"),
                 f"defaults.characters.{name}.color_filter",

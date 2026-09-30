@@ -93,6 +93,8 @@ def build_motion_track(
 def build_track_expression(
     track: MotionTrack,
     value_expression: Callable[[float], str],
+    *,
+    time_variable: str = "t",
 ) -> str:
     """Lower a resolved track to a deterministic piecewise FFmpeg expression."""
 
@@ -108,11 +110,17 @@ def build_track_expression(
             left=left,
             right=right,
             value_expression=value_expression,
+            time_variable=time_variable,
         )
-        expression = f"if(lt(t,{right.time:.6f}),{segment},{expression})"
+        expression = (
+            f"if(lt({time_variable},{right.time:.6f}),{segment},{expression})"
+        )
 
     first = frames[0]
-    return f"if(lt(t,{first.time:.6f}),{value_expression(first.value)},{expression})"
+    return (
+        f"if(lt({time_variable},{first.time:.6f}),"
+        f"{value_expression(first.value)},{expression})"
+    )
 
 
 def evaluate_motion_track(track: MotionTrack, time: float) -> float:
@@ -176,12 +184,13 @@ def _segment_expression(
     left: MotionKeyframe,
     right: MotionKeyframe,
     value_expression: Callable[[float], str],
+    time_variable: str,
 ) -> str:
     duration = right.time - left.time
     if duration <= 0.0:
         raise ValidationError("Character motion keyframe times must be strictly increasing.")
 
-    progress = f"((t-{left.time:.6f})/{duration:.6f})"
+    progress = f"(({time_variable}-{left.time:.6f})/{duration:.6f})"
     eased = _eased_progress_expression(
         progress,
         right.easing_to_here or "linear",

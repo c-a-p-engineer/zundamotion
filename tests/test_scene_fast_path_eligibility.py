@@ -1,5 +1,11 @@
+from pathlib import Path
 from types import SimpleNamespace
 
+from PIL import Image
+
+from zundamotion.components.pipeline_phases.video_phase.scene_fast_path_character import (
+    SceneFastPathCharacterMixin,
+)
 from zundamotion.components.pipeline_phases.video_phase.scene_fast_path_eligibility import (
     FastPathEligibility,
     FastPathLineEligibility,
@@ -91,3 +97,30 @@ def test_cpu_short_circuit_does_not_resolve_character_assets() -> None:
         start_time_by_idx={1: 0.0},
     )
     assert result == (False, "cpu_encoder")
+
+
+
+def test_simple_fast_path_rejects_opacity_character(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "assets" / "characters" / "hero" / "default" / "base.png"
+    image_path.parent.mkdir(parents=True)
+    Image.new("RGBA", (8, 8), (0, 255, 0, 128)).save(image_path)
+    monkeypatch.chdir(tmp_path)
+
+    renderer = SceneFastPathCharacterMixin()
+    state, error = renderer._extract_simple_character_state(
+        {
+            "characters": [
+                {
+                    "name": "hero",
+                    "visible": True,
+                    "opacity": 0.5,
+                }
+            ]
+        }
+    )
+
+    assert state is None
+    assert error == "opacity_requires_standard_renderer"

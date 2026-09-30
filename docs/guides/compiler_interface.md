@@ -113,7 +113,7 @@ JSON には少なくとも次を含みます。
   - `params_schema`
   - capabilities
 
-Motion Core は実装済みpropertyだけを公開します。現在は character の x / y / scale / rotate を公開し、未実装の opacity / camera を先行して true にしません。
+Motion Core は実装済みpropertyだけを公開します。現在は character の x / y / scale / rotate / opacity を公開し、未実装の camera を先行して true にしません。
 
 ```json
 {
@@ -121,7 +121,7 @@ Motion Core は実装済みpropertyだけを公開します。現在は characte
     "version": 1,
     "character": {
       "multi_keyframe": true,
-      "properties": ["position.x", "position.y", "scale", "rotate"],
+      "properties": ["position.x", "position.y", "scale", "rotate", "opacity"],
       "easings": ["linear", "ease_in", "ease_out", "ease_in_out"]
     },
     "camera": {
