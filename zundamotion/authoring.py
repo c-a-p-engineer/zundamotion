@@ -160,6 +160,15 @@ def capabilities_document() -> dict[str, Any]:
                 "zoom_range": [1.0, 4.0],
                 "bounded_world_viewport": True,
             },
+            "background": {
+                "pan_zoom_multi_keyframe": True,
+                "effect_types": ["bg:ken_burns", "bg:pan_zoom"],
+                "properties": ["pan.x", "pan.y", "zoom"],
+                "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
+                "zoom_range": [1.0, 4.0],
+                "focus_range": [0.0, 1.0],
+                "legacy_single_segment_compatible": True,
+            },
         },
         "plugins": plugins,
     }
