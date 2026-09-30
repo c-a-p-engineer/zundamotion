@@ -14,6 +14,7 @@ from ...video.clip.movement import (
     build_move_expressions,
     build_scale_expression,
 )
+from ...video.clip.opacity import opacity_requested
 from ...video.clip.rotation import rotation_requested
 
 
@@ -51,6 +52,8 @@ class SceneFastPathCharacterMixin:
         char = dict(visible[0])
         if rotation_requested(char):
             return None, "rotate_requires_standard_renderer"
+        if opacity_requested(char):
+            return None, "opacity_requires_standard_renderer"
         if char.get("color_filter") is not None:
             return None, "color_filter_requires_standard_renderer"
         name = char.get("name")
