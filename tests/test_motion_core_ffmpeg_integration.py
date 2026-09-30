@@ -20,6 +20,9 @@ from zundamotion.components.video.clip.opacity import (
     build_alpha_multiplier_filter_parts,
     build_opacity_expression,
 )
+from zundamotion.components.video.clip.motion_preset import (
+    expand_character_motion_preset,
+)
 from zundamotion.components.video.clip.rotation import (
     build_rotate_expression,
     build_rotation_canvas,
@@ -741,3 +744,189 @@ def test_background_keyframes_move_only_background_before_camera(
     assert abs((end_red[3] - end_red[1]) - (start_red[3] - start_red[1])) <= 1
 
     assert _probe_duration(output) == pytest.approx(1.2, abs=0.08)
+
+
+
+@pytest.mark.parametrize(
+    ("preset", "peak_time", "expect_start_smaller"),
+    [
+        ("pop", 0.30, True),
+        ("emphasis", 0.23, False),
+    ],
+)
+def test_scale_motion_presets_render_expected_pulse_and_keep_duration(
+    tmp_path: Path,
+    preset: str,
+    peak_time: float,
+    expect_start_smaller: bool,
+) -> None:
+    character_path = tmp_path / f"{preset}.png"
+    Image.new("RGBA", (20, 20), (0, 255, 0, 255)).save(character_path)
+
+    expanded = expand_character_motion_preset(
+        {
+            "name": "hero",
+            "visible": True,
+            "position": {"x": 40, "y": 40},
+            "scale": 1.0,
+            "move": {"preset": preset},
+        }
+    )
+    move = expanded["move"]
+    scale_expr, dynamic = build_scale_expression(
+        move_config=move,
+        to_scale=1.0,
+    )
+    assert dynamic is True
+    scale_filter = build_dynamic_scale_filter(
+        scale_expr=scale_expr,
+        move_config=move,
+        to_scale=1.0,
+        source_width=20,
+        source_height=20,
+        anchor="top_left",
+        scale_flags="bicubic",
+    )
+
+    output = tmp_path / f"{preset}.mp4"
+    filter_complex = (
+        f"[1:v]{scale_filter}[char];"
+        "[0:v][char]overlay=x=40:y=40:shortest=1,format=yuv420p[v]"
+    )
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=120x100:r=30:d=0.8",
+            "-loop",
+            "1",
+            "-framerate",
+            "30",
+            "-i",
+            str(character_path),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[v]",
+            "-t",
+            "0.8",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    start = _green_bounds(
+        _extract_frame(output, 0.03, tmp_path / f"{preset}-start.png")
+    )
+    peak = _green_bounds(
+        _extract_frame(output, peak_time, tmp_path / f"{preset}-peak.png")
+    )
+    end = _green_bounds(
+        _extract_frame(output, 0.72, tmp_path / f"{preset}-end.png")
+    )
+    start_width = start[2] - start[0]
+    peak_width = peak[2] - peak[0]
+    end_width = end[2] - end[0]
+
+    if expect_start_smaller:
+        assert start_width < end_width
+    else:
+        assert abs(start_width - end_width) <= 3
+    assert peak_width > end_width
+    assert 18 <= end_width <= 23
+    assert _probe_duration(output) == pytest.approx(0.8, abs=0.08)
+
+
+def test_bounce_motion_preset_moves_y_and_keeps_duration(
+    tmp_path: Path,
+) -> None:
+    character_path = tmp_path / "bounce.png"
+    Image.new("RGBA", (20, 20), (0, 255, 0, 255)).save(character_path)
+
+    expanded = expand_character_motion_preset(
+        {
+            "name": "hero",
+            "visible": True,
+            "position": {"x": 40, "y": 60},
+            "scale": 1.0,
+            "move": {"preset": "bounce"},
+        }
+    )
+    move = expanded["move"]
+    x_expr, y_expr, dynamic = build_move_expressions(
+        move_config=move,
+        anchor="top_left",
+        from_position=None,
+        to_position={"x": 40, "y": 60},
+        to_x_expr="40",
+        to_y_expr="60",
+    )
+    assert dynamic is True
+
+    output = tmp_path / "bounce.mp4"
+    escaped_x = x_expr.replace(",", "\\,")
+    escaped_y = y_expr.replace(",", "\\,")
+    filter_complex = (
+        f"[0:v][1:v]overlay=x={escaped_x}:y={escaped_y}:shortest=1,"
+        "format=yuv420p[v]"
+    )
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=120x120:r=30:d=0.9",
+            "-loop",
+            "1",
+            "-framerate",
+            "30",
+            "-i",
+            str(character_path),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[v]",
+            "-t",
+            "0.9",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    start = _green_bounds(
+        _extract_frame(output, 0.03, tmp_path / "bounce-start.png")
+    )
+    high = _green_bounds(
+        _extract_frame(output, 0.22, tmp_path / "bounce-high.png")
+    )
+    low = _green_bounds(
+        _extract_frame(output, 0.42, tmp_path / "bounce-low.png")
+    )
+    end = _green_bounds(
+        _extract_frame(output, 0.82, tmp_path / "bounce-end.png")
+    )
+
+    assert abs(start[1] - 60) <= 3
+    assert high[1] < 30
+    assert low[1] > 62
+    assert abs(end[1] - 60) <= 3
+    assert _probe_duration(output) == pytest.approx(0.9, abs=0.08)
