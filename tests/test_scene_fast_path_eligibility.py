@@ -132,3 +132,10 @@ def test_fast_path_rejects_camera_line() -> None:
     facts = _facts(lines=(_line(has_camera=True),))
 
     assert evaluate_fast_path_eligibility(facts) == (False, "camera:1")
+
+
+
+def test_fast_path_eligibility_rejects_camera_line() -> None:
+    facts = _facts(lines=(_line(has_camera=True),))
+
+    assert evaluate_fast_path_eligibility(facts) == (False, "camera:1")
