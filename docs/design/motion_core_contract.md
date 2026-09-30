@@ -17,6 +17,7 @@ Issue: #102
 - [FFmpeg Filter Mapping](./ffmpeg_filter_mapping.md)
 - [Video Direction and QA](../guides/video_direction_and_qa.md)
 - [Rotate Behavior Contract](./motion_rotate_contract.md)
+- [Opacity Behavior Contract](./motion_opacity_contract.md)
 
 ## 1. Objective
 
@@ -138,7 +139,7 @@ MotionPlan
 | `position.y` | px, finite number | 実装対象 | anchorからのoffset |
 | `scale` | finite number > 0 | 実装対象 | uniform scale |
 | `rotate` | degree, finite number | 後続sliceで実装済み | line-local、anchor pivot、fixed transparent canvas。詳細は rotate contract |
-| `opacity` | 0.0〜1.0 | model対象 / 実装後続 | alpha path |
+| `opacity` | 0.0〜1.0 | 後続契約定義済み / runtime未実装 | source alpha × motion opacity × lifecycle fade。詳細は opacity contract |
 
 任意文字列式を新しいmulti-keyframe値として許可しません。
 
@@ -374,7 +375,7 @@ Motion Coreはcharacter stateとmotion commandを分離します。
 - 現在のcharacter persistent stateにはrotate / opacityが正式なstate fieldとして存在しない
 
 rotate の後続差分は [Motion Core Rotate Behavior Contract](./motion_rotate_contract.md) を正とし、#108 / PR #112 で実装済みです。
-opacity は別Behavior Contract差分を作成してから実装します。
+opacity の後続差分は [Motion Core Opacity Behavior Contract](./motion_opacity_contract.md) を正とし、runtime実装前に source alpha / lifecycle fade / face overlay の合成規則を固定します。
 
 既存effectとの競合規則は property ごとに先に決めます。
 
