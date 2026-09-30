@@ -46,6 +46,9 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 | Motion Core first vertical slice | 完了 | character `move.keyframes` の x/y/scale、segment easing、validation/capability/cache/FFmpeg regression。PR #107 |
 | Motion Core rotate | 完了 | line-local rotate track、anchor pivot、fixed canvas、face追従、actual FFmpeg regression。#108 / PR #111 / PR #112 |
 | Motion Core opacity | 完了 | line-local opacity track、source alpha保持、fade乗算、face追従、actual FFmpeg alpha regression。#109 / PR #113 / PR #114 |
+| Motion Core camera | 完了 | bounded W×H camera、world/screen-space分離、focus.x/focus.y/zoom track。#110 / PR #115 / PR #116 |
+| Motion Core background pan/zoom | 完了 | legacy互換 + strict multi-keyframe pan.x/pan.y/zoom。#117 / PR #118 / PR #119 |
+| Motion Core preset | 完了 | pop / bounce / emphasis の決定論的lowering、cache/compile/face/FFmpeg regression。#120 / PR #122 |
 | Motion Core camera | 完了 | line-local focus.x/focus.y/zoom track、bounded world viewport、world/screen分離、CPU fallback、actual FFmpeg regression。#110 / PR #115 / PR #116 |
 | Motion Core background pan/zoom | 完了 | legacy単一区間互換 + strict keyframes、background-local owner、renderer fps、camera順序、actual FFmpeg regression。#117 / PR #118 / PR #119 |
 
@@ -94,10 +97,10 @@ first vertical slice は完了しています。
 - line-local opacity semantics、source alpha保持、lifecycle fade乗算、face overlay追従
 - line-local camera semantics、focus.x/focus.y/zoom track、bounded W×H viewport、world/screen-space分離
 - background-local pan.x/pan.y/zoom multi-keyframe、legacy no-keyframe compatibility、strict keyframe validation
+- deterministic character motion preset（pop / bounce / emphasis）、既存MotionTrackへのpure lowering、compiled-config v1 authoring保持
 
 残り:
 
-- deterministic character motion preset runtime実装（#120 contract確定済み。first sliceは pop / bounce / emphasis）
 - generic public target abstraction は現時点で採用見送り。owner間のpublic contract共通化が実益を持つ条件が揃った場合だけ再評価
 
 camera は background / insert / image layer / character / face をworld-spaceとしてまとめてview transformし、subtitle / badgeはscreen-spaceに残します。first sliceはoverscan / zoom-out / camera rotationを持ちません。rotate は既存overlay rotateを別ownerのまま維持し、opacity は foreground overlay opacity/blink と別target ownerのまま維持しています。
@@ -163,10 +166,9 @@ Google系など新しいcloud TTSを追加する場合も、既存 `TTSProvider`
 
 1. 0.1.x release / compiler / provider 基準線を継続して安定化する
 2. Motion Core x/y/scale/rotate/opacity/camera/background pan-zoom の代表実動画を増やし、native基準線を維持する
-3. 確定済みpreset contractに従い、character moveへ pop / bounce / emphasis を決定論的にloweringする
-4. presetを含むMotion Core基準線を確認して Character Runtime へ進む
-5. generic public target abstraction は再検討条件が成立した時だけ再評価する
-6. native経路で不足する具体例が集まってから Rich Renderer を比較する
+3. presetを含むMotion Core基準線を代表実動画で継続確認し、Character Runtime へ進む
+4. generic public target abstraction は再検討条件が成立した時だけ再評価する
+5. native経路で不足する具体例が集まってから Rich Renderer を比較する
 
 ## 6. 状態更新ルール
 

@@ -14,6 +14,7 @@ from .validate_badges import (
 )
 from .validate_layers import _validate_image_layers
 from .validate_motion_background import validate_background_motion_effects
+from .validate_motion_preset import validate_character_motion_preset
 from .validate_overlays import _validate_fg_overlays
 from .validate_common import validate_character_color_filter
 
@@ -217,6 +218,10 @@ def _validate_line_features(line: Dict[str, Any], scene_id: str, line_idx: int) 
             validate_character_color_filter(
                 character.get("color_filter"),
                 f"{container_id}, characters[{char_idx}].color_filter",
+            )
+            validate_character_motion_preset(
+                character,
+                f"{container_id}, characters[{char_idx}]",
             )
             _validate_character_move(
                 character.get("move"),

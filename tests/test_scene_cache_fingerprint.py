@@ -204,6 +204,7 @@ def test_dynamic_characters_are_not_static_scene_overlays(tmp_path: Path, monkey
     dynamic_variants = [
         {**base, "move": {"to": {"x": 10}}},
         {**base, "move": {"to": {"scale": 1.2}}},
+        {**base, "scale": 1.0, "move": {"preset": "pop"}},
         {**base, "enter": "fade"},
         {**base, "leave": "slide_left"},
         {**base, "effects": [{"type": "shake"}]},
@@ -263,3 +264,51 @@ def test_static_opacity_is_not_baked_into_scene_base(
         {"name": "hero", "visible": True, "opacity": 0.5},
         {},
     ) is None
+
+
+
+def test_motion_preset_parameters_are_part_of_scene_cache_identity(
+    tmp_path: Path,
+) -> None:
+    config = {
+        "defaults": {
+            "characters_persist": False,
+            "background_persist": False,
+            "characters": {},
+        },
+        "characters": {
+            "default_scale": 1.0,
+            "default_anchor": "bottom_center",
+        },
+    }
+    base = {
+        "name": "hero",
+        "visible": True,
+        "position": {"x": 0, "y": -32},
+        "scale": 1.0,
+        "move": {
+            "preset": "pop",
+            "duration": 0.45,
+            "intensity": 1.0,
+        },
+    }
+    cache = CacheManager(tmp_path / "preset-cache")
+
+    def digest(character: dict) -> str:
+        payload = _phase(config)._generate_scene_hash(_scene(character))
+        return cache._generate_hash(payload)
+
+    original = digest(deepcopy(base))
+    assert digest(deepcopy(base)) == original
+
+    changed_intensity = deepcopy(base)
+    changed_intensity["move"]["intensity"] = 1.2
+    assert digest(changed_intensity) != original
+
+    changed_duration = deepcopy(base)
+    changed_duration["move"]["duration"] = 0.6
+    assert digest(changed_duration) != original
+
+    changed_preset = deepcopy(base)
+    changed_preset["move"]["preset"] = "emphasis"
+    assert digest(changed_preset) != original

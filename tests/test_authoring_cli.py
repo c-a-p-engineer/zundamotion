@@ -41,6 +41,12 @@ def test_capabilities_document_is_machine_readable_and_stable() -> None:
             "multi_keyframe": True,
             "properties": ["position.x", "position.y", "scale", "rotate", "opacity"],
             "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
+            "presets": ["bounce", "emphasis", "pop"],
+            "preset_parameters": {
+                "start_min": 0.0,
+                "intensity_range": [0.0, 2.0],
+                "max_presets_per_move": 1,
+            },
         },
         "camera": {
             "multi_keyframe": True,
@@ -283,6 +289,59 @@ def test_compile_preserves_camera_authoring_without_renderer_ir(
     assert "zoompan" not in camera
     assert "cpu_fallback" not in camera
     assert "tracks" not in camera
+
+
+def test_compile_preserves_motion_preset_without_synthetic_keyframes(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "motion-preset.yaml"
+    _write_script(
+        script,
+        {
+            "meta": {"title": "motion preset", "version": 3},
+            "scenes": [
+                {
+                    "id": "preset",
+                    "lines": [
+                        {
+                            "text": "preset",
+                            "characters": [
+                                {
+                                    "name": "copetan",
+                                    "visible": True,
+                                    "position": {"x": 0, "y": -32},
+                                    "scale": 1.0,
+                                    "move": {
+                                        "preset": "pop",
+                                        "start": 0.1,
+                                        "duration": 0.45,
+                                        "intensity": 1.25,
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    document = compiled_document(str(script))
+    move = document["config"]["script"]["scenes"][0]["lines"][0][
+        "characters"
+    ][0]["move"]
+
+    assert document["format_version"] == 1
+    assert move == {
+        "preset": "pop",
+        "start": 0.1,
+        "duration": 0.45,
+        "intensity": 1.25,
+    }
+    assert "from" not in move
+    assert "keyframes" not in move
+    assert "easing" not in move
+    assert "tracks" not in move
 
 
 def test_compile_preserves_background_pan_zoom_keyframes_without_renderer_ir(

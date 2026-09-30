@@ -3,6 +3,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from zundamotion.components.video.clip.face import apply_face_overlays
+from zundamotion.components.video.clip.motion_preset import (
+    expand_character_motion_preset,
+)
+from zundamotion.components.video.clip.movement import build_scale_expression
 from zundamotion.components.video.clip.rotation import build_rotate_expression
 
 
@@ -366,5 +370,79 @@ def test_apply_face_overlays_uses_same_opacity_track_as_character(
         assert sum("geq=lum=" in part for part in filter_complex_parts) == 2
         assert sum("fade=t=in:st=0:d=0.4:alpha=1" in part for part in filter_complex_parts) == 2
         assert all("overlay=x=10:y=20" in part for part in overlay_filters)
+
+    asyncio.run(_run())
+
+
+
+def test_apply_face_overlays_follows_expanded_pop_scale_track(
+    monkeypatch, tmp_path: Path
+) -> None:
+    async def _run() -> None:
+        character_root = tmp_path / "assets" / "characters" / "hero" / "default"
+        mouth_dir = character_root / "mouth"
+        mouth_dir.mkdir(parents=True)
+        (mouth_dir / "half.png").write_bytes(b"half")
+        monkeypatch.chdir(tmp_path)
+
+        expanded = expand_character_motion_preset(
+            {
+                "name": "hero",
+                "visible": True,
+                "position": {"x": 0, "y": -20},
+                "scale": 1.0,
+                "move": {"preset": "pop", "duration": 0.5},
+            }
+        )
+        move = expanded["move"]
+        scale_expr, scale_dynamic = build_scale_expression(
+            move_config=move,
+            to_scale=1.0,
+        )
+        assert scale_dynamic is True
+
+        filter_complex_parts: list[str] = []
+        overlay_filters: list[str] = []
+        await apply_face_overlays(
+            renderer=_StubRenderer(),
+            face_anim={
+                "target_name": "hero",
+                "mouth": [{"start": 0.0, "end": 0.3, "state": "half"}],
+                "eyes": [],
+            },
+            subtitle_line_config={
+                "characters": [{"name": "hero", "visible": True}]
+            },
+            char_overlay_placement={
+                "hero": {
+                    "x_expr": "(W-w)/2",
+                    "y_expr": "H-h-20",
+                    "scale_orig": "1.0",
+                    "scale_expr": scale_expr,
+                    "dynamic_scale": True,
+                    "source_width": 20,
+                    "source_height": 40,
+                    "anchor": "bottom_center",
+                    "move": move,
+                    "rotate_expr": "0",
+                    "rotate_active": False,
+                    "opacity_expr": "1.000000",
+                    "opacity_active": False,
+                    "dynamic_position": True,
+                    "expression": "default",
+                    "asset_name": "hero",
+                }
+            },
+            duration=0.8,
+            cmd=[],
+            input_layers=[],
+            filter_complex_parts=filter_complex_parts,
+            overlay_streams=[],
+            overlay_filters=overlay_filters,
+        )
+
+        assert any("scale=w='iw*(" in part for part in filter_complex_parts)
+        assert any("1.080000" in part for part in filter_complex_parts)
+        assert any("overlay=x=(W-w)/2:y=H-h-20" in item for item in overlay_filters)
 
     asyncio.run(_run())

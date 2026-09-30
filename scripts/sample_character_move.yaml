@@ -135,3 +135,30 @@ scenes:
                 - at: 0.45
                   opacity: 1.0
                   easing: ease_out
+      - text: "pop preset は小さい状態から少し大きく跳ねて、元の大きさへ戻ります。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            position: {x: -120, y: -32}
+            scale: 0.9
+            move:
+              preset: pop
+              intensity: 1.0
+      - text: "bounce preset は最終位置を変えず、一度だけ上下に跳ねます。"
+        speaker_name: "engy"
+        characters:
+          - name: "engy"
+            position: {x: 120, y: -32}
+            scale: 0.9
+            move:
+              preset: bounce
+              intensity: 1.0
+      - text: "emphasis preset はその場で一時的に拡大して強調します。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            position: {x: 0, y: -32}
+            scale: 0.9
+            move:
+              preset: emphasis
+              intensity: 1.0

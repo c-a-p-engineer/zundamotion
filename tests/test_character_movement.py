@@ -160,6 +160,44 @@ def test_character_tracker_fills_move_from_and_does_not_persist_move() -> None:
 
 
 
+def test_character_tracker_does_not_infer_from_for_motion_preset() -> None:
+    tracker = CharacterTracker(1920, 1080)
+    tracker.apply(
+        [
+            {
+                "name": "copetan",
+                "visible": True,
+                "position": {"x": -120, "y": -32},
+                "scale": 0.7,
+            }
+        ]
+    )
+    tracker.snapshot()
+
+    tracker.apply(
+        [
+            {
+                "name": "copetan",
+                "visible": True,
+                "position": {"x": 120, "y": -32},
+                "scale": 1.0,
+                "move": {
+                    "preset": "pop",
+                    "duration": 0.45,
+                    "intensity": 1.0,
+                },
+            }
+        ]
+    )
+    moving = tracker.snapshot()[0]
+
+    assert moving["move"] == {
+        "preset": "pop",
+        "duration": 0.45,
+        "intensity": 1.0,
+    }
+
+
 def test_motion_track_sparse_waypoints_and_segment_easing() -> None:
     x_track = build_motion_track(
         property_name="x",

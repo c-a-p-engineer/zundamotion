@@ -373,6 +373,32 @@ lines:
 - 現在の multi-keyframe 対象は character の x / y / scale / rotate / opacity です。camera / background pan・zoom はこの `move.keyframes` には含まれません。
 - `characters_persist: true` で同一シーン内の直前状態がある場合は、x / y / scale の `move.from` を省略できます。座標や倍率が変わる場合、および scale keyframe がある場合は直前値を開始状態として使います。rotate / opacity は永続化しないため、それぞれの `move.from` 値を省略しません。
 
+### Character motion preset
+
+短い定型モーションは、explicit `move.from` / `move.keyframes` の代わりに `move.preset` で指定できます。preset は内部で同じ MotionTrack へ決定論的に展開され、clip duration は延長しません。
+
+```yaml
+characters:
+  - name: copetan
+    position: {x: 0, y: -32}
+    scale: 0.8
+    move:
+      preset: pop
+      start: 0.10
+      duration: 0.45
+      intensity: 1.0
+```
+
+- 対応presetは `pop` / `bounce` / `emphasis`。
+- `start >= 0`、`duration > 0`、`intensity` は 0.0〜2.0。intensity は clamp しません。
+- duration省略時は `pop=0.45s`、`bounce=0.60s`、`emphasis=0.50s`。
+- `pop`: 小さいscaleからovershootして最終scaleへsettle。characterの最終 `scale` を明示します。
+- `emphasis`: 最終scaleから一時的に拡大して戻る。characterの最終 `scale` を明示します。
+- `bounce`: 最終yから上へ跳ね、少し下へovershootして戻る。characterの `position.y` を明示します。
+- preset使用時は `move.from` / `move.keyframes` / `move.easing` と併用できません。
+- `move.enabled: false` ならpreset motionは発生しません。
+- preset自体やsynthetic keyframeは次lineへpersistしません。最終position/scaleの既存state semanticsだけを維持します。
+
 複数 keyframe の例:
 
 ```yaml

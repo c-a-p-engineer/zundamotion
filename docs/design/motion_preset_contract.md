@@ -415,7 +415,7 @@ format versionは1のままです。
 
 ## 18. Capability
 
-runtime + tests完了後だけ `motion.character` capabilityへpreset情報をadditiveに追加します。
+runtime + tests完了後、`motion.character` capabilityへpreset情報をadditiveに追加します。#120 / PR #122 で実装・検証済みです。
 
 候補:
 
@@ -437,7 +437,7 @@ runtime + tests完了後だけ `motion.character` capabilityへpreset情報をad
 }
 ```
 
-contract PRではまだ公開しません。
+runtime検証後に公開済みです。
 
 generic target capabilityは追加しません。
 
@@ -530,3 +530,19 @@ Do not change:
 7. synthetic keyframes are renderer-internal and not exposed by compiled-config.
 8. generic public target abstraction is not implemented now.
 9. generic target is reconsidered only when concrete cross-owner duplication/use cases appear.
+
+
+## 25. Implementation status
+
+#120 / PR #122 で first slice を実装済みです。
+
+- pure preset expansion helper
+- strict preset validation
+- clip input collection前の一回だけのexpansion
+- request / retry authoring config非破壊
+- face overlay追従
+- active presetのscene-base / simple fast-path除外
+- authoring preset configによるcache identity
+- compiled-config v1でsynthetic keyframe非公開
+- pop / bounce / emphasis のactual FFmpeg representative-frame regression
+- duration / reproducibility / Performance Smoke基準線

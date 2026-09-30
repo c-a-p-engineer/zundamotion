@@ -148,7 +148,7 @@ camera target は別target trackとして `focus.x` / `focus.y` / `zoom` を実�
 
 background-local `bg:pan_zoom` / `bg:ken_burns` は既存effect ownerを維持したままmulti-keyframe統合済みです。[Background Pan/Zoom Integration Contract](./motion_background_pan_zoom_contract.md) を正とし、legacy no-keyframe pathを置換せず、keyframes存在時だけstrict MotionTrack pathを使います。
 
-deterministic motion preset は character `move` の糖衣構文として [Deterministic Preset Contract](./motion_preset_contract.md) を正とします。first sliceは `pop` / `bounce` / `emphasis` を既存MotionTrackへloweringします。character / camera / background は lifecycle・座標系・legacy互換が異なるため、generic public `motion.targets[]` abstraction は現時点では導入しません。
+deterministic motion preset は character `move` の糖衣構文として [Deterministic Preset Contract](./motion_preset_contract.md) を正とし、#120 / PR #122 で `pop` / `bounce` / `emphasis` の既存MotionTrackへの決定論的loweringまで実装済みです。character / camera / background は lifecycle・座標系・legacy互換が異なるため、generic public `motion.targets[]` abstraction は現時点では導入しません。
 
 任意文字列式を新しいmulti-keyframe値として許可しません。
 
