@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
+from .clip.camera import append_camera_transform
 from .clip.characters import build_character_overlays
 from .clip.effects import resolve_screen_effects
 from .clip.face import apply_face_overlays
@@ -38,6 +39,7 @@ class ClipVideoGraphRequest:
     subtitle_line_config: Optional[Dict[str, Any]]
     insert_config: Optional[Dict[str, Any]]
     screen_effects: Optional[List[Any]]
+    camera_config: Optional[Dict[str, Any]]
     subtitle_png_path: Optional[Path]
     face_anim: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]
     audio_delay: float
@@ -127,6 +129,14 @@ async def build_clip_video_graph(
     current = append_overlay_chain(
         renderer=renderer, background_label=bg_label, current_label=current,
         streams=streams, filters=filters, force_cpu=request.force_cpu, parts=parts,
+    )
+    current = append_camera_transform(
+        camera_config=request.camera_config,
+        input_label=current,
+        width=renderer.video_params.width,
+        height=renderer.video_params.height,
+        fps=renderer.video_params.fps,
+        parts=parts,
     )
     current, subtitle_png, subtitle_snippet = await append_subtitle_overlay(
         renderer=renderer, inputs=inputs, subtitle_text=request.subtitle_text,
