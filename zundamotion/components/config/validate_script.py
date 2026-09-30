@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from ...exceptions import ValidationError
 from ...utils.filter_presets import AUDIO_FILTER_PRESETS, VIDEO_FILTER_PRESETS
 from .validate_background import _validate_background_options
+from .validate_background_motion import validate_background_motion_effects
 from .validate_badges import (
     _validate_badge,
     _validate_badge_definitions_list,
@@ -193,6 +194,10 @@ def _validate_line_features(line: Dict[str, Any], scene_id: str, line_idx: int) 
     _validate_line_badges(line.get("badges"), container_id)
     _validate_image_layers(line, container_id)
     _validate_camera(line.get("camera"), f"{container_id}, camera")
+    validate_background_motion_effects(
+        line.get("background_effects"),
+        f"{container_id}, background_effects",
+    )
     characters = line.get("characters")
     if characters is not None:
         if not isinstance(characters, list):
