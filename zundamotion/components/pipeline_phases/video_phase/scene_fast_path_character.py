@@ -15,6 +15,7 @@ from ...video.clip.movement import (
     build_scale_expression,
 )
 from ...video.clip.opacity import opacity_requested
+from ...video.character_rig_materializer import rig_runtime_enabled
 from ...video.clip.rotation import rotation_requested
 
 
@@ -61,6 +62,8 @@ class SceneFastPathCharacterMixin:
             return None, "rotate_requires_standard_renderer"
         if opacity_requested(char):
             return None, "opacity_requires_standard_renderer"
+        if rig_runtime_enabled(char):
+            return None, "svg_rig_requires_standard_renderer"
         if char.get("color_filter") is not None:
             return None, "color_filter_requires_standard_renderer"
         name = char.get("name")
