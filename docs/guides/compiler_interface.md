@@ -113,7 +113,7 @@ JSON には少なくとも次を含みます。
   - `params_schema`
   - capabilities
 
-Motion Core は実装済みpropertyだけを公開します。現在は character の x / y / scale / rotate / opacity を公開し、未実装の camera を先行して true にしません。
+Motion Core は実装済みpropertyだけを公開します。現在は character の x / y / scale / rotate / opacity と、独立した line-level camera の focus.x / focus.y / zoom を公開します。
 
 ```json
 {
@@ -125,7 +125,10 @@ Motion Core は実装済みpropertyだけを公開します。現在は characte
       "easings": ["linear", "ease_in", "ease_out", "ease_in_out"]
     },
     "camera": {
-      "multi_keyframe": false
+      "multi_keyframe": true,
+      "properties": ["focus.x", "focus.y", "zoom"],
+      "zoom_range": [1.0, 4.0],
+      "bounded_world_viewport": true
     }
   }
 }
