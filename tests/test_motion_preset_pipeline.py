@@ -4,6 +4,8 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from zundamotion.components.video import clip_pipeline
 from zundamotion.components.video.clip_pipeline import (
     ClipRenderRequest,
@@ -78,8 +80,8 @@ def test_clip_pipeline_expands_motion_preset_before_inputs_and_graph(
     graph_character = observed["graph_characters"][0]
 
     assert collect_character == graph_character
-    assert collect_character["move"]["from"]["scale"] == 0.82
-    assert collect_character["move"]["keyframes"][0]["scale"] == 1.08
+    assert collect_character["move"]["from"]["scale"] == pytest.approx(0.82)
+    assert collect_character["move"]["keyframes"][0]["scale"] == pytest.approx(1.08)
     assert "preset" not in collect_character["move"]
 
     # The caller-owned request and retry contract keep authoring fields.
