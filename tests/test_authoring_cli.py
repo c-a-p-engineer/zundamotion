@@ -42,7 +42,12 @@ def test_capabilities_document_is_machine_readable_and_stable() -> None:
             "properties": ["position.x", "position.y", "scale", "rotate", "opacity"],
             "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
         },
-        "camera": {"multi_keyframe": False},
+        "camera": {
+            "multi_keyframe": True,
+            "properties": ["focus.x", "focus.y", "zoom"],
+            "zoom_range": [1.0, 4.0],
+            "bounded_world_viewport": True,
+        },
     }
     assert {
         "validate",
@@ -210,6 +215,65 @@ def test_compile_preserves_opacity_authoring_without_alpha_ir(
     assert character["move"]["keyframes"][0]["opacity"] == 1.0
     assert "opacity_expr" not in character
     assert "alpha_filter" not in character
+
+
+def test_compile_preserves_camera_authoring_without_renderer_ir(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "camera.yaml"
+    _write_script(
+        script,
+        {
+            "meta": {"title": "camera", "version": 3},
+            "scenes": [
+                {
+                    "id": "camera",
+                    "lines": [
+                        {
+                            "text": "camera",
+                            "camera": {
+                                "focus": {"x": 0.7, "y": 0.45},
+                                "zoom": 1.4,
+                                "move": {
+                                    "from": {
+                                        "focus": {"x": 0.5},
+                                        "zoom": 1.0,
+                                    },
+                                    "duration": 1.0,
+                                    "keyframes": [
+                                        {
+                                            "at": 0.5,
+                                            "focus": {"x": 0.62},
+                                            "zoom": 1.2,
+                                        }
+                                    ],
+                                },
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    document = compiled_document(str(script))
+    camera = document["config"]["script"]["scenes"][0]["lines"][0]["camera"]
+
+    assert document["format_version"] == 1
+    assert camera["focus"] == {"x": 0.7, "y": 0.45}
+    assert camera["zoom"] == 1.4
+    assert camera["move"]["from"] == {
+        "focus": {"x": 0.5},
+        "zoom": 1.0,
+    }
+    assert camera["move"]["keyframes"][0] == {
+        "at": 0.5,
+        "focus": {"x": 0.62},
+        "zoom": 1.2,
+    }
+    assert "zoompan" not in camera
+    assert "cpu_fallback" not in camera
+    assert "tracks" not in camera
 
 
 def test_validation_document_reports_stable_error_code(tmp_path: Path) -> None:
