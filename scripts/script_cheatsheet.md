@@ -402,6 +402,42 @@ characters:
           opacity: 0.65
           easing: ease_in_out
 ```
+### Camera Motion Core
+
+`camera` は line-local の view transform です。character の `move` とは別trackで、合成済みworldを1回だけ動かします。
+
+```yaml
+camera:
+  focus: {x: 0.65, y: 0.45}
+  zoom: 1.35
+  move:
+    from:
+      focus: {x: 0.50}
+      zoom: 1.00
+    start: 0.10
+    duration: 1.20
+    easing: ease_in_out
+    keyframes:
+      - at: 0.40
+        zoom: 1.18
+        easing: ease_out
+      - at: 0.85
+        focus: {x: 0.65}
+        zoom: 1.30
+        easing: ease_in
+```
+
+- `focus.x` / `focus.y` は 0.0〜1.0、`zoom` は 1.0〜4.0。範囲外を clamp しません。
+- `camera.move.keyframes` は `focus` / `zoom` の sparse waypoint で、`at` / easing の規則は character Motion Core と同じです。
+- 実際に動かすpropertyだけ `move.from` の開始値が必要です。例のように focus.x だけ動かす場合、focus.y の開始値は不要です。
+- camera は background / insert / image layer / character / face を合成した後に適用します。subtitle / badge は screen-space のためcameraでは動きません。
+- `bg:pan_zoom` / `bg:ken_burns` はbackgroundだけのeffectで、cameraとは別ownerです。
+- first slice のworldは出力サイズ W×H に固定されています。zoom-out（1.0未満）、offscreen recovery、overscan、camera rotationは未対応です。
+- `camera` は次のlineへ永続化されず、global defaults / scene scopeには置けません。
+- camera fieldが無い既存scriptにはcamera filterを追加せず、従来のGPU/CPU pathとcache identityを維持します。
+
+サンプル台本: [`sample_camera_motion.yaml`](./sample_camera_motion.yaml)
+
 - `expression` は `assets/characters/<name>/<expression>/` の差分素材に対応。
 - `asset_name` を指定すると、`name` は別名のまま `assets/characters/<asset_name>/` の素材を共有できます。色違いキャラクターを独立して同時表示するときに使います。
 - `flip_x: true` で立ち絵、口パク、目パチ差分をまとめて左右反転できます。右向き素材を左向きにしたい時に使います。
