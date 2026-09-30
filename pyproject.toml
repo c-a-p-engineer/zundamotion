@@ -27,8 +27,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["build>=1", "pytest>=7"]
+dev = ["build>=1", "pytest>=7", "CairoSVG==2.9.1"]
 chatterbox = ["chatterbox-tts==0.1.7", "soundfile==0.14.0"]
+rig = ["CairoSVG==2.9.1"]
 
 [project.scripts]
 zundamotion = "zundamotion.cli:cli"
