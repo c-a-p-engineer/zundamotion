@@ -21,6 +21,23 @@
 - 懸念: worker 増加が VOICEVOX Engine の負荷・失敗率・総時間に対して常に有利とは限りません。
 - 完了条件: 同一 runtime / YAML で AudioPhase、total elapsed、VOICEVOX failure、timeline order、出力同等性を比較し、既定値の判断を記録すること。
 
+## Generic public motion target abstraction の採用見送り
+
+- 状態: 採用見送り（再検討条件あり）
+- 現状: character / camera / background は内部の MotionTrack helper を部分的に共有していますが、public contract は異なります。
+- 不採用理由:
+  1. character は persistent position/scale と line-local rotate/opacity を持ち、face overlay追従も必要です。
+  2. camera は bounded world viewport と world/screen-space 境界を所有し、line-localです。
+  3. background pan/zoom は background-local effect ownerで、legacy no-keyframe clamp/fallback互換を持ちます。
+  4. 現時点でこれらを `motion.targets[]` のような共通public DSLへ押し込んでも、利用者・実装双方の複雑性を減らしません。
+- 再検討条件:
+  1. 2つ以上のownerが同一public target/property/lifecycle schemaを必要とする。
+  2. owner-specific adapter間でvalidation/loweringの実質的重複が増える。
+  3. Character Runtimeがstable rig subtarget IDを導入し、target referenceが利用者価値を持つ。
+  4. AI authoringがowner-specific capabilityだけでは安全にtargetを選択できない実例が蓄積する。
+- 現在の代替方針: owner-specific authoring/capabilityを維持し、共通化は内部のpure MotionTrack helperまでに留めます。
+- 詳細: `design/motion_preset_contract.md`
+
 ## 歌唱機能 (`song`) の採用見送り
 
 - 状態: 採用見送り
