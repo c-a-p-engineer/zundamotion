@@ -51,7 +51,11 @@ class SceneFastPathCharacterMixin:
             return None, "multiple_visible_characters"
         char = dict(visible[0])
         move = char.get("move")
-        if isinstance(move, dict) and "preset" in move:
+        if (
+            isinstance(move, dict)
+            and "preset" in move
+            and move.get("enabled") is not False
+        ):
             return None, "motion_preset_requires_standard_renderer"
         if rotation_requested(char):
             return None, "rotate_requires_standard_renderer"
