@@ -41,6 +41,12 @@ def test_capabilities_document_is_machine_readable_and_stable() -> None:
             "multi_keyframe": True,
             "properties": ["position.x", "position.y", "scale", "rotate", "opacity"],
             "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
+            "presets": ["bounce", "emphasis", "pop"],
+            "preset_parameters": {
+                "start_min": 0.0,
+                "intensity_range": [0.0, 2.0],
+                "max_presets_per_move": 1,
+            },
         },
         "camera": {
             "multi_keyframe": True,
