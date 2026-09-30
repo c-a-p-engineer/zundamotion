@@ -53,6 +53,7 @@ def test_clip_pipeline_expands_motion_preset_before_inputs_and_graph(
         return []
 
     async def _execute(**kwargs):
+        observed["retry_characters"] = kwargs["retry_kwargs"]["characters_config"]
         return kwargs["output_path"]
 
     monkeypatch.setattr(clip_pipeline, "collect_clip_inputs", _collect)
@@ -81,7 +82,9 @@ def test_clip_pipeline_expands_motion_preset_before_inputs_and_graph(
     assert collect_character["move"]["keyframes"][0]["scale"] == 1.08
     assert "preset" not in collect_character["move"]
 
-    # The caller-owned authoring config remains untouched.
+    # The caller-owned request and retry contract keep authoring fields.
+    assert request.characters_config[0] is authoring_character
+    assert observed["retry_characters"][0] is authoring_character
     assert authoring_character["move"] == {
         "preset": "pop",
         "duration": 0.5,
