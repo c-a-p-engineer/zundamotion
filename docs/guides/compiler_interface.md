@@ -107,13 +107,14 @@ JSON には少なくとも次を含みます。
   - supported motion properties
   - supported easing vocabulary
   - camera multi-keyframe support status
+  - background pan/zoom multi-keyframe support status
 - built-in plugin metadata
   - id / version / kind
   - provides
   - `params_schema`
   - capabilities
 
-Motion Core は実装済みpropertyだけを公開します。現在は character の x / y / scale / rotate / opacity と、独立した line-level camera の focus.x / focus.y / zoom を公開します。
+Motion Core は実装済みpropertyだけを公開します。現在は character の x / y / scale / rotate / opacity、独立した line-level camera の focus.x / focus.y / zoom、background-local pan/zoom の pan.x / pan.y / zoom を公開します。
 
 ```json
 {
@@ -129,6 +130,15 @@ Motion Core は実装済みpropertyだけを公開します。現在は characte
       "properties": ["focus.x", "focus.y", "zoom"],
       "zoom_range": [1.0, 4.0],
       "bounded_world_viewport": true
+    },
+    "background": {
+      "pan_zoom_multi_keyframe": true,
+      "effect_types": ["bg:pan_zoom", "bg:ken_burns"],
+      "properties": ["pan.x", "pan.y", "zoom"],
+      "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
+      "zoom_range": [1.0, 4.0],
+      "focus_range": [0.0, 1.0],
+      "legacy_single_segment_compatible": true
     }
   }
 }

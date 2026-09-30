@@ -63,6 +63,7 @@ def _append_background_effects(
     snippet = resolve_background_effects(
         effects=policy.background_effects, input_label=label, duration=duration,
         width=renderer.video_params.width, height=renderer.video_params.height,
+        fps=renderer.video_params.fps,
         id_prefix="bg",
     )
     if snippet:

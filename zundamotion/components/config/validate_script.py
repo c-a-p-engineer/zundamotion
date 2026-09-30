@@ -13,6 +13,7 @@ from .validate_badges import (
     _validate_badge_update,
 )
 from .validate_layers import _validate_image_layers
+from .validate_motion_background import validate_background_motion_effects
 from .validate_overlays import _validate_fg_overlays
 from .validate_common import validate_character_color_filter
 
@@ -192,6 +193,10 @@ def _validate_line_features(line: Dict[str, Any], scene_id: str, line_idx: int) 
     _validate_badge(line, container_id)
     _validate_line_badges(line.get("badges"), container_id)
     _validate_image_layers(line, container_id)
+    validate_background_motion_effects(
+        line.get("background_effects"),
+        f"{container_id}, background_effects",
+    )
     _validate_camera(line.get("camera"), f"{container_id}, camera")
     characters = line.get("characters")
     if characters is not None:

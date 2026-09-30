@@ -34,6 +34,7 @@ Zundamotion に同梱されている YAML 台本サンプルを用途別に整�
 | [`sample_char_shake.yaml`](../scripts/sample_char_shake.yaml) | `char:shake_char` の挙動 | デフォルト値とカスタム値の比較 |
 | [`sample_char_sway.yaml`](../scripts/sample_char_sway.yaml) | `char:sway_char` の挙動 | オフセット調整と `char:bob_char` 併用 |
 | [`sample_bg_shake.yaml`](../scripts/sample_bg_shake.yaml) | 背景のみの揺れ | `bg:shake_bg` の `offset`/`padding` チューニング |
+| [`sample_background_pan_zoom_motion.yaml`](../scripts/sample_background_pan_zoom_motion.yaml) | 背景パン・ズーム Motion Core | TTS不要の wait 行で strict multi-keyframe と legacy single-segment 互換を比較 |
 | [`sample_text_bounce.yaml`](../scripts/sample_text_bounce.yaml) | 字幕バウンド演出 | `text:bounce_text` の振幅差分 |
 | [`sample_vertical.yaml`](../scripts/sample_vertical.yaml) | 縦長キャンバスの背景フィット | `background_fit` と `fill_color` の組み合わせ |
 | [`copetan_all_expressions.yaml`](../scripts/copetan_all_expressions.yaml) | Copetan の表情一覧 | `characters_persist` + 表情差分と口パク設定 |
@@ -52,7 +53,7 @@ Zundamotion に同梱されている YAML 台本サンプルを用途別に整�
 | [テキストバッジ (`badge`)](../scripts/script_cheatsheet.md#テキストバッジ-badge) | [`sample_badge.yaml`](../scripts/sample_badge.yaml) |
 | [台本の再利用 (`include` / `vars`)](../scripts/script_cheatsheet.md#台本の再利用-include--vars) | [`sample_include_vars.yaml`](../scripts/sample_include_vars.yaml) |
 | [画面全体エフェクト (`screen_effects`)](../scripts/script_cheatsheet.md#画面全体エフェクト-screen_effects) | [`sample_screen_shake.yaml`](../scripts/sample_screen_shake.yaml) |
-| [背景エフェクト (`background_effects`)](../scripts/script_cheatsheet.md#背景エフェクト-background_effects) | [`sample_bg_shake.yaml`](../scripts/sample_bg_shake.yaml) |
+| [背景エフェクト (`background_effects`)](../scripts/script_cheatsheet.md#背景エフェクト-background_effects) | [`sample_bg_shake.yaml`](../scripts/sample_bg_shake.yaml), [`sample_background_pan_zoom_motion.yaml`](../scripts/sample_background_pan_zoom_motion.yaml) |
 | [画像レイヤー (`image_layers`)](../scripts/script_cheatsheet.md#画像レイヤー-image_layers) | [`sample_image_layers.yaml`](../scripts/sample_image_layers.yaml), [`sample.yaml`](../scripts/sample.yaml) |
 | [前景オーバーレイ (`fg_overlays`)](../scripts/script_cheatsheet.md#前景オーバーレイ-fg_overlays) | [`sample.yaml`](../scripts/sample.yaml), [`sample_effects.yaml`](../scripts/sample_effects.yaml), [`sample_overlay_static_image_effect.yaml`](../scripts/sample_overlay_static_image_effect.yaml), [`sample_overlay_blink.yaml`](../scripts/sample_overlay_blink.yaml), [`sample_registry_smoke.yaml`](../scripts/sample_registry_smoke.yaml), [`sample_user_overlay_plugin.yaml`](../scripts/sample_user_overlay_plugin.yaml) |
 | [BGM と音声チューニング](../scripts/script_cheatsheet.md#bgm-と音声チューニング) | [`sample.yaml`](../scripts/sample.yaml), [`sample_chatterbox_multilingual.yaml`](../scripts/sample_chatterbox_multilingual.yaml) |

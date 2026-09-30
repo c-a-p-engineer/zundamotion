@@ -6,6 +6,11 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from zundamotion.utils.logger import logger
 
+from ..background_motion import (
+    build_background_pan_zoom_motion_filter,
+    has_background_motion_keyframes,
+)
+
 
 @dataclass
 class FilterSnippet:
@@ -108,6 +113,7 @@ def resolve_background_effects(
     duration: float,
     width: int,
     height: int,
+    fps: Optional[float] = None,
     id_prefix: str = "bg",
 ) -> Optional[FilterSnippet]:
     """Resolve background-specific effects applied before overlay composition."""
@@ -144,6 +150,7 @@ def resolve_background_effects(
                 height=height,
                 index=idx,
                 id_prefix=id_prefix,
+                output_fps=fps,
             )
         else:
             logger.debug("[Effects] Unsupported background effect type: %s", effect_type)
@@ -511,9 +518,28 @@ def _resolve_background_pan_zoom(
     height: int,
     index: int,
     id_prefix: str,
+    output_fps: Optional[float] = None,
 ) -> Optional[FilterSnippet]:
     """Apply a Ken Burns style pan/zoom to the prepared background stream."""
 
+    if has_background_motion_keyframes(effect):
+        filter_text, label = build_background_pan_zoom_motion_filter(
+            effect,
+            input_label=input_label,
+            width=width,
+            height=height,
+            index=index,
+            id_prefix=id_prefix,
+            output_fps=output_fps,
+        )
+        return FilterSnippet(
+            filter_chain=[filter_text],
+            overlay_kwargs={},
+            dynamic=True,
+            output_label=label,
+        )
+
+    # Legacy no-keyframe path: keep existing clamp/fallback/output semantics.
     zoom_start, zoom_end = _extract_zoom_range(effect)
     pan_start_x, pan_start_y, pan_end_x, pan_end_y = _extract_pan_range(effect)
     if (
