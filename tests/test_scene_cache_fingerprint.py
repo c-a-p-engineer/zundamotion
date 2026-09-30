@@ -138,6 +138,15 @@ def test_character_fingerprint_covers_visual_state_and_source_content(
     assert digest({**base, "z": 2}) != original
     assert digest({**base, "rotate": 10}) != original
     assert digest({**base, "opacity": 0.5}) != original
+    assert digest(
+        {
+            **base,
+            "rig": {
+                "path": "assets/characters/hero/character.svg",
+                "raster_width": 832,
+            },
+        }
+    ) != original
 
     Image.new("RGBA", (5, 4), "green").save(source)
     assert digest(base) != original
@@ -312,3 +321,26 @@ def test_motion_preset_parameters_are_part_of_scene_cache_identity(
     changed_preset = deepcopy(base)
     changed_preset["move"]["preset"] = "emphasis"
     assert digest(changed_preset) != original
+
+
+
+def test_enabled_svg_rig_is_not_baked_into_scene_base(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _write_character(tmp_path, "hero")
+    character = {
+        "name": "hero",
+        "visible": True,
+        "rig": {
+            "path": "assets/characters/hero/character.svg",
+            "raster_width": 100,
+        },
+    }
+
+    state = resolve_character_render_state(character)
+
+    assert state["rig"] == character["rig"]
+    assert state["dynamic"] is True
+    assert static_character_entry(character, {}) is None
