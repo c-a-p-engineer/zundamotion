@@ -12,7 +12,8 @@
 | キャラクタースケール補間 | 実装済み | `move.from.scale` から最終 scale へ補間 | `clip/movement.py`, `test_character_movement.py` |
 | キャラクター回転 | 実装済み | line-local `rotate` と `move.from.rotate` / `move.keyframes[].rotate`。degree指定、anchor pivot、fixed transparent canvas。overlay plugin の rotate は別owner | `clip/rotation.py`, `clip/characters.py`, `test_character_rotation.py`, `test_motion_core_ffmpeg_integration.py` |
 | キャラクター透明度 | 実装済み | line-local `opacity` と `move.from.opacity` / `move.keyframes[].opacity`。0〜1、source alpha保持、enter/leave fadeと乗算、face差分へ継承 | `clip/opacity.py`, `clip/characters.py`, `clip/face.py`, `test_character_opacity.py`, `test_motion_core_ffmpeg_integration.py` |
-| 複数キーフレーム | 一部実装 | character `move.keyframes` の x/y/scale/rotate/opacity と segment easing に対応。background pan/zoom、camera は未対応 | `clip/motion_track.py`, `clip/movement.py`, `clip/rotation.py`, `clip/opacity.py`, `test_motion_core_ffmpeg_integration.py` |
+| カメラ view track | 実装済み | line-level `camera.focus` / `zoom` / multi-keyframe。bounded W×H world viewport、world合成後・subtitle前、camera clipはCPU filter path | `clip/camera.py`, `clip_video_graph.py`, `test_camera_motion.py`, `test_motion_core_ffmpeg_integration.py` |
+| 複数キーフレーム | 一部実装 | character x/y/scale/rotate/opacity と独立camera focus.x/focus.y/zoomに対応。background pan/zoom のmulti-keyframe統合は未対応 | `clip/motion_track.py`, `clip/movement.py`, `clip/rotation.py`, `clip/opacity.py`, `clip/camera.py`, `test_motion_core_ffmpeg_integration.py` |
 | クロマキー | 実装済み | `fg_overlays.mode: chroma`、key color/similarity/blend | `overlays.py`, `validate_overlays.py` |
 | blend mode | 実装済み | `screen` / `add` / `multiply` / `lighten` | `overlays.py`, `validate_overlays.py`, `sample_registry_smoke.yaml` |
 | image layers | 実装済み | show/hide、複数 layer、fade | `scene_preparation.py`, `test_script_loader.py` |
