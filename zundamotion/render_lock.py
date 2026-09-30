@@ -11,6 +11,7 @@ from typing import Any, Iterable, Iterator
 
 from . import __version__
 from .authoring import compiled_document
+from .components.video.character_rig_resources import resolve_character_rig_resources
 
 RENDER_LOCK_FORMAT = "zundamotion.render-lock"
 RENDER_LOCK_FORMAT_VERSION = 1
@@ -33,6 +34,7 @@ def create_render_lock(script_path: str, *, project_root: Path | None = None) ->
         compiled = compiled_document(str(script_file))
     compiled_bytes = _canonical_json_bytes(compiled)
     assets = _collect_existing_files(compiled["config"], root=root)
+    assets.update(_collect_rig_referenced_files(compiled["config"], root=root))
 
     runtime_lock = _runtime_lock_entry(root)
     return {
@@ -182,6 +184,36 @@ def _collect_existing_files(value: Any, *, root: Path) -> dict[str, str]:
         label = _path_label(candidate, root)
         found[label] = _sha256_file(candidate)
     return found
+
+
+def _collect_rig_referenced_files(value: Any, *, root: Path) -> dict[str, str]:
+    found: dict[str, str] = {}
+    for rig in _iter_rig_configs(value):
+        if rig.get("enabled", True) is False:
+            continue
+        path_value = rig.get("path")
+        if not isinstance(path_value, str) or not path_value.strip():
+            continue
+        source = (root / path_value).resolve()
+        for resource in resolve_character_rig_resources(
+            source,
+            project_root=root,
+        ):
+            found[_path_label(resource, root)] = _sha256_file(resource)
+    return found
+
+
+def _iter_rig_configs(value: Any) -> Iterable[dict[str, Any]]:
+    if isinstance(value, dict):
+        rig = value.get("rig")
+        if isinstance(rig, dict):
+            yield rig
+        for item in value.values():
+            yield from _iter_rig_configs(item)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _iter_rig_configs(item)
 
 
 def _iter_strings(value: Any) -> Iterable[str]:
