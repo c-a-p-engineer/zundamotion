@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from zundamotion.cache import CacheManager
@@ -136,6 +137,7 @@ def test_character_fingerprint_covers_visual_state_and_source_content(
     assert digest({**base, "color_filter": {"hue": 10}}) != original
     assert digest({**base, "z": 2}) != original
     assert digest({**base, "rotate": 10}) != original
+    assert digest({**base, "opacity": 0.5}) != original
 
     Image.new("RGBA", (5, 4), "green").save(source)
     assert digest(base) != original
@@ -239,5 +241,25 @@ def test_nonzero_static_rotate_is_not_baked_into_scene_base(
     assert state["dynamic"] is True
     assert static_character_entry(
         {"name": "hero", "visible": True, "rotate": 15},
+        {},
+    ) is None
+
+
+
+def test_static_opacity_is_not_baked_into_scene_base(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _write_character(tmp_path, "hero")
+
+    state = resolve_character_render_state(
+        {"name": "hero", "visible": True, "opacity": 0.5}
+    )
+
+    assert state["opacity"] == pytest.approx(0.5)
+    assert state["dynamic"] is True
+    assert static_character_entry(
+        {"name": "hero", "visible": True, "opacity": 0.5},
         {},
     ) is None
