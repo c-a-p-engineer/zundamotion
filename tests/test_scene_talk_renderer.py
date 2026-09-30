@@ -98,6 +98,10 @@ def _context() -> SceneLineContext:
     line_config = {
         "screen_effects": ["flash"],
         "background_effects": ["zoom"],
+        "camera": {
+            "focus": {"x": 0.6, "y": 0.5},
+            "zoom": 1.2,
+        },
         "subtitle": {"font_size": 64},
     }
     return SceneLineContext(
@@ -209,6 +213,7 @@ def test_talk_cache_payload_preserves_legacy_fields(tmp_path: Path) -> None:
         "blink_close_frames": 2,
         "screen_effects": ["flash"],
         "background_effects": ["zoom"],
+        "camera": context.line_config["camera"],
         "background_layout": context.background_layout,
         "video_filter": "grayscale",
     }
@@ -248,6 +253,7 @@ def test_talk_render_uses_cache_creator_and_resolved_plan(tmp_path: Path) -> Non
         "extra_audio_overlays": [{"src": "sfx.wav"}],
         "background_effects": ["zoom"],
         "screen_effects": ["flash"],
+        "camera_config": context.line_config["camera"],
         "face_anim": list(plan.face_animations),
         "audio_delay": 0.2,
         "_force_cpu": True,
