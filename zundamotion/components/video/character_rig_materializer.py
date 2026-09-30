@@ -14,13 +14,16 @@ import xml.etree.ElementTree as ET
 from ...cache import CacheManager
 from ...exceptions import ValidationError
 from ..config.validate_character_rig import resolve_character_rig_path
-from .character_rig_validation import local_name, validate as validate_rig_file
+from .character_rig_validation import validate as validate_rig_file
+from .character_rig_resources import (
+    parse_character_rig_svg,
+    resolve_character_rig_resources,
+    rewrite_character_rig_resource_hrefs,
+)
 
 
 _MATERIALIZER_VERSION = 1
 _STATE_MAPPING_VERSION = 1
-_XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
-
 _EYE_STATES = {
     "open": "eyes-open",
     "close": "eyes-closed",
@@ -79,8 +82,11 @@ class CharacterRigMaterializer:
             )
 
         source_text = source_path.read_text(encoding="utf-8")
-        root = _safe_parse_svg(source_text)
-        referenced_assets = _resolve_local_resources(root, source_path)
+        root = parse_character_rig_svg(source_text)
+        referenced_assets = resolve_character_rig_resources(
+            source_path,
+            root=root,
+        )
         width = _resolve_raster_width(root, rig_config.get("raster_width"))
 
         source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
@@ -185,54 +191,6 @@ def rig_runtime_enabled(character: Mapping[str, Any]) -> bool:
     return isinstance(rig, Mapping) and rig.get("enabled", True) is not False
 
 
-def _safe_parse_svg(source_text: str) -> ET.Element:
-    upper = source_text.upper()
-    if "<!DOCTYPE" in upper or "<!ENTITY" in upper:
-        raise ValidationError("Character rig SVG must not contain DOCTYPE or ENTITY.")
-    try:
-        root = ET.fromstring(source_text)
-    except ET.ParseError as exc:
-        raise ValidationError(f"Character rig SVG cannot be parsed: {exc}") from exc
-    if local_name(root.tag) != "svg":
-        raise ValidationError("Character rig root element must be <svg>.")
-    if any(local_name(elem.tag).lower() == "script" for elem in root.iter()):
-        raise ValidationError("Character rig SVG must not contain <script>.")
-    return root
-
-
-def _resolve_local_resources(root: ET.Element, source_path: Path) -> list[Path]:
-    project_root = Path.cwd().resolve()
-    source_dir = source_path.parent.resolve()
-    resolved: list[Path] = []
-
-    for elem in root.iter():
-        if local_name(elem.tag) != "image":
-            continue
-        href = elem.get("href") or elem.get(_XLINK_HREF)
-        if not href or href.startswith("data:"):
-            continue
-        lowered = href.strip().lower()
-        if re.match(r"^[a-z][a-z0-9+.-]*:", lowered):
-            raise ValidationError(
-                f"Character rig image resource '{href}' must be local or embedded."
-            )
-
-        resource = (source_dir / href).resolve()
-        try:
-            resource.relative_to(project_root)
-        except ValueError as exc:
-            raise ValidationError(
-                f"Character rig image resource '{href}' escapes the project directory."
-            ) from exc
-        if not resource.exists() or not resource.is_file():
-            raise ValidationError(
-                f"Character rig image resource '{href}' does not exist."
-            )
-        resolved.append(resource)
-
-    return sorted(set(resolved), key=lambda item: item.as_posix())
-
-
 def _resolve_raster_width(root: ET.Element, requested: Any) -> int:
     if requested is not None:
         width = int(requested)
@@ -277,8 +235,8 @@ def _render_variant(
     variant: str,
     selected_state: str | None,
 ) -> None:
-    root = _safe_parse_svg(source_text)
-    _rewrite_local_resource_hrefs(root, source_path)
+    root = parse_character_rig_svg(source_text)
+    rewrite_character_rig_resource_hrefs(root, source_path)
 
     if variant == "base":
         _set_base_face_state(root)
@@ -302,18 +260,6 @@ def _render_variant(
         output_width=raster_width,
         unsafe=False,
     )
-
-
-def _rewrite_local_resource_hrefs(root: ET.Element, source_path: Path) -> None:
-    source_dir = source_path.parent.resolve()
-    for elem in root.iter():
-        if local_name(elem.tag) != "image":
-            continue
-        key = "href" if elem.get("href") is not None else _XLINK_HREF
-        href = elem.get(key)
-        if not href or href.startswith("data:"):
-            continue
-        elem.set(key, (source_dir / href).resolve().as_uri())
 
 
 def _set_base_face_state(root: ET.Element) -> None:
