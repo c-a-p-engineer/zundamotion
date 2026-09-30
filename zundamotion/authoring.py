@@ -155,7 +155,10 @@ def capabilities_document() -> dict[str, Any]:
                 "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
             },
             "camera": {
-                "multi_keyframe": False,
+                "multi_keyframe": True,
+                "properties": ["focus.x", "focus.y", "zoom"],
+                "zoom_range": [1.0, 4.0],
+                "bounded_world_viewport": True,
             },
         },
         "plugins": plugins,
