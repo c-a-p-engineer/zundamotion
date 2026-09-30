@@ -108,7 +108,16 @@ camera は background / insert / image layer / character / face をworld-space�
 
 ### P3: 0.3 Character Runtime
 
-Motion Core の基準線を確認してから着手します。
+Motion Core first baseline は完了し、#123 で Character Runtime first slice の契約化へ着手しています。
+
+first slice:
+
+- validated SVG rig を deterministic PNG asset set へmaterialize/cache
+- existing PNG character / blink / lip-sync timelineへ接続
+- CairoSVGはmaterialization時だけ使用し、per-frame SVG rendererは導入しない
+- PNG pathは既定のまま維持
+
+後続候補:
 
 - SVG rig / rig config の runtime model
 - blink / lip-sync
@@ -166,9 +175,10 @@ Google系など新しいcloud TTSを追加する場合も、既存 `TTSProvider`
 
 1. 0.1.x release / compiler / provider 基準線を継続して安定化する
 2. Motion Core x/y/scale/rotate/opacity/camera/background pan-zoom の代表実動画を増やし、native基準線を維持する
-3. presetを含むMotion Core基準線を代表実動画で継続確認し、Character Runtime へ進む
-4. generic public target abstraction は再検討条件が成立した時だけ再評価する
-5. native経路で不足する具体例が集まってから Rich Renderer を比較する
+3. #123 の materialized SVG rig first slice を contract → runtime の順で実装する
+4. first slice検証後、continuous body/head/hair/limb motion の費用対効果を評価する
+5. generic public target abstraction は再検討条件が成立した時だけ再評価する
+6. native経路で不足する具体例が集まってから Rich Renderer を比較する
 
 ## 6. 状態更新ルール
 
