@@ -312,3 +312,32 @@ def test_character_tracker_uses_previous_scale_for_keyframe_loop() -> None:
 
     assert moving["move"]["from"]["scale"] == pytest.approx(1.0)
     assert moving["scale"] == pytest.approx(1.0)
+
+
+
+def test_character_tracker_does_not_persist_rotate() -> None:
+    tracker = CharacterTracker(1920, 1080)
+    tracker.apply(
+        [
+            {
+                "name": "copetan",
+                "visible": True,
+                "position": {"x": 0, "y": -32},
+                "scale": 1.0,
+                "rotate": 15,
+                "move": {
+                    "from": {"rotate": -10},
+                    "duration": 0.8,
+                },
+            }
+        ]
+    )
+
+    current = tracker.snapshot()[0]
+    assert current["rotate"] == 15
+    assert current["move"]["from"]["rotate"] == -10
+
+    tracker.apply([{"name": "copetan", "visible": True}])
+    next_line = tracker.snapshot()[0]
+    assert "rotate" not in next_line
+    assert "move" not in next_line

@@ -242,10 +242,10 @@ def _build_legacy_move_expressions(
             "Character move.from is required when no previous character position is available."
         )
     if not any(axis in raw_from for axis in ("x", "y")):
-        if "scale" in raw_from:
+        if "scale" in raw_from or "rotate" in raw_from:
             return to_x_expr, to_y_expr, False
         raise ValidationError(
-            "Character move.from must define x, y, or scale when no previous "
+            "Character move.from must define x, y, scale, or rotate when no previous "
             "character state is available."
         )
 
@@ -347,6 +347,12 @@ def _position_axis_value_expression(anchor: str, axis: str, value: float) -> str
         f"{y_value:.12g}",
     )
     return x_expr if axis == "x" else y_expr
+
+
+def resolve_max_scale(move_config: Any, to_scale: float) -> float:
+    """Return the maximum scale needed by one character motion."""
+
+    return _max_scale_for_move(move_config, to_scale)
 
 
 def _max_scale_for_move(move_config: Any, to_scale: float) -> float:

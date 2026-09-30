@@ -135,6 +135,7 @@ def test_character_fingerprint_covers_visual_state_and_source_content(
     assert digest({**base, "flip_y": True}) != original
     assert digest({**base, "color_filter": {"hue": 10}}) != original
     assert digest({**base, "z": 2}) != original
+    assert digest({**base, "rotate": 10}) != original
 
     Image.new("RGBA", (5, 4), "green").save(source)
     assert digest(base) != original
@@ -220,3 +221,23 @@ def test_color_filter_is_normalized_in_resolved_state() -> None:
         }
     )
     assert first["color_filter"] == second["color_filter"]
+
+
+
+def test_nonzero_static_rotate_is_not_baked_into_scene_base(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _write_character(tmp_path, "hero")
+
+    state = resolve_character_render_state(
+        {"name": "hero", "visible": True, "rotate": 15}
+    )
+
+    assert state["rotate"] == 15
+    assert state["dynamic"] is True
+    assert static_character_entry(
+        {"name": "hero", "visible": True, "rotate": 15},
+        {},
+    ) is None

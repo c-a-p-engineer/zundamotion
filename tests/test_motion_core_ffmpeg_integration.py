@@ -12,6 +12,12 @@ from zundamotion.components.video.clip.movement import (
     build_move_expressions,
     build_scale_expression,
 )
+from zundamotion.components.video.clip.rotation import (
+    build_rotate_expression,
+    build_rotation_canvas,
+    build_rotation_filter,
+    correct_rotation_position,
+)
 
 
 pytestmark = pytest.mark.skipif(
@@ -53,6 +59,21 @@ def _green_bounds(image: Image.Image) -> tuple[int, int, int, int]:
                 ys.append(y)
     assert xs and ys
     return min(xs), min(ys), max(xs) + 1, max(ys) + 1
+
+
+def _red_center(image: Image.Image) -> tuple[float, float]:
+    pixels = image.load()
+    points: list[tuple[int, int]] = []
+    for y in range(image.height):
+        for x in range(image.width):
+            r, g, b = pixels[x, y]
+            if r > 150 and r > g * 1.4 and r > b * 1.4:
+                points.append((x, y))
+    assert points
+    return (
+        sum(point[0] for point in points) / len(points),
+        sum(point[1] for point in points) / len(points),
+    )
 
 
 def _probe_duration(video: Path) -> float:
@@ -170,4 +191,113 @@ def test_multi_keyframe_motion_renders_position_scale_and_keeps_duration(
     assert abs(start[1] - 50) <= 2
     assert abs(peak[1] - 50) <= 2
     assert abs(end[1] - 50) <= 2
+    assert _probe_duration(output) == pytest.approx(1.2, abs=0.08)
+
+
+
+def test_rotate_track_keeps_bottom_center_pivot_and_clockwise_direction(
+    tmp_path: Path,
+) -> None:
+    character = tmp_path / "rotate-character.png"
+    source = Image.new("RGBA", (20, 40), (0, 255, 0, 255))
+    for y in range(0, 6):
+        for x in range(7, 13):
+            source.putpixel((x, y), (255, 0, 0, 255))
+    source.save(character)
+
+    move = {
+        "from": {"rotate": 0},
+        "duration": 1.0,
+        "easing": "linear",
+        "keyframes": [{"at": 0.5, "rotate": 45}],
+    }
+    rotate_expr, rotate_active = build_rotate_expression(
+        move_config=move,
+        to_rotate=90,
+    )
+    assert rotate_active is True
+    scale_expr, _ = build_scale_expression(
+        move_config=move,
+        to_scale=1.0,
+    )
+    scale_filter = build_dynamic_scale_filter(
+        scale_expr=scale_expr,
+        move_config=move,
+        to_scale=1.0,
+        source_width=20,
+        source_height=40,
+        anchor="bottom_center",
+        scale_flags="bicubic",
+    )
+    canvas = build_rotation_canvas(
+        source_width=20,
+        source_height=40,
+        move_config=move,
+        to_scale=1.0,
+        anchor="bottom_center",
+    )
+    rotation_filter = build_rotation_filter(rotate_expr, canvas)
+    x_expr = correct_rotation_position("(W-w)/2", canvas.correction_x)
+    y_expr = correct_rotation_position("H-h-40", canvas.correction_y)
+    escaped_x = x_expr.replace(",", "\\,")
+    escaped_y = y_expr.replace(",", "\\,")
+
+    output = tmp_path / "rotate.mp4"
+    filter_complex = (
+        f"[1:v]{scale_filter},{rotation_filter}[char];"
+        f"[0:v][char]overlay=x={escaped_x}:y={escaped_y}:shortest=1,"
+        "format=yuv420p[v]"
+    )
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=200x160:r=30:d=1.2",
+            "-loop",
+            "1",
+            "-framerate",
+            "30",
+            "-i",
+            str(character),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[v]",
+            "-t",
+            "1.2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    start_image = _extract_frame(output, 0.03, tmp_path / "rotate-start.png")
+    end_image = _extract_frame(output, 1.08, tmp_path / "rotate-end.png")
+    start_bounds = _green_bounds(start_image)
+    end_bounds = _green_bounds(end_image)
+    start_red = _red_center(start_image)
+    end_red = _red_center(end_image)
+
+    # Pivot world coordinate is (100, 120): source grows upward before rotation.
+    assert abs((start_bounds[0] + start_bounds[2]) / 2.0 - 100) <= 3
+    assert abs(start_bounds[3] - 120) <= 3
+
+    # +90 degrees is clockwise in screen coordinates: top moves to the right.
+    assert end_red[0] > 120
+    assert abs(end_red[1] - 120) <= 5
+    assert abs(end_bounds[0] - 100) <= 4
+    assert abs((end_bounds[1] + end_bounds[3]) / 2.0 - 120) <= 4
+
+    # Fixed canvas preserves the source instead of clipping it.
+    assert (end_bounds[2] - end_bounds[0]) >= 36
+    assert (end_bounds[3] - end_bounds[1]) >= 17
     assert _probe_duration(output) == pytest.approx(1.2, abs=0.08)

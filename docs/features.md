@@ -10,8 +10,8 @@
 | 背景パン・ズーム / Ken Burns | 実装済み | `bg:pan_zoom` / `bg:ken_burns` の単一区間補間 | `clip/effects/resolve.py`, `test_background_pan_zoom_effect.py` |
 | キャラクター位置移動 | 実装済み | `move.from` から行の最終位置へ x/y を補間 | `clip/movement.py`, `test_character_movement.py` |
 | キャラクタースケール補間 | 実装済み | `move.from.scale` から最終 scale へ補間 | `clip/movement.py`, `test_character_movement.py` |
-| キャラクター回転 | 一部実装 | overlay effect の `rotate` は対応。`move` と統合した回転補間は未対応 | `overlay_effects.py`, `test_overlay_effects_registry.py` |
-| 複数キーフレーム | 一部実装 | character `move.keyframes` の x/y/scale と segment easing に対応。background pan/zoom、rotate、opacity、camera は未対応 | `clip/motion_track.py`, `clip/movement.py`, `test_motion_core_ffmpeg_integration.py` |
+| キャラクター回転 | 実装済み | line-local `rotate` と `move.from.rotate` / `move.keyframes[].rotate`。degree指定、anchor pivot、fixed transparent canvas。overlay plugin の rotate は別owner | `clip/rotation.py`, `clip/characters.py`, `test_character_rotation.py`, `test_motion_core_ffmpeg_integration.py` |
+| 複数キーフレーム | 一部実装 | character `move.keyframes` の x/y/scale/rotate と segment easing に対応。background pan/zoom、opacity、camera は未対応 | `clip/motion_track.py`, `clip/movement.py`, `clip/rotation.py`, `test_motion_core_ffmpeg_integration.py` |
 | クロマキー | 実装済み | `fg_overlays.mode: chroma`、key color/similarity/blend | `overlays.py`, `validate_overlays.py` |
 | blend mode | 実装済み | `screen` / `add` / `multiply` / `lighten` | `overlays.py`, `validate_overlays.py`, `sample_registry_smoke.yaml` |
 | image layers | 実装済み | show/hide、複数 layer、fade | `scene_preparation.py`, `test_script_loader.py` |

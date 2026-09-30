@@ -121,6 +121,7 @@ class CharacterTracker:
         for name, st in list(self._states.items()):
             snap.append(st.copy())
             st.pop("move", None)
+            st.pop("rotate", None)
             st.pop("enter", None)
             st.pop("enter_duration", None)
             if st.pop("leave", None) is not None:

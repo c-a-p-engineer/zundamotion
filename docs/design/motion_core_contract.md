@@ -137,7 +137,7 @@ MotionPlan
 | `position.x` | px, finite number | 実装対象 | anchorからのoffset |
 | `position.y` | px, finite number | 実装対象 | anchorからのoffset |
 | `scale` | finite number > 0 | 実装対象 | uniform scale |
-| `rotate` | degree, finite number | model対象 / 実装後続 | canvas size / pivot設計が必要 |
+| `rotate` | degree, finite number | 後続sliceで実装済み | line-local、anchor pivot、fixed transparent canvas。詳細は rotate contract |
 | `opacity` | 0.0〜1.0 | model対象 / 実装後続 | alpha path |
 
 任意文字列式を新しいmulti-keyframe値として許可しません。
@@ -373,10 +373,10 @@ Motion Coreはcharacter stateとmotion commandを分離します。
 - opacityはfade / enter / leaveとの合成順序を決める必要がある
 - 現在のcharacter persistent stateにはrotate / opacityが正式なstate fieldとして存在しない
 
-rotate の後続差分は [Motion Core Rotate Behavior Contract](./motion_rotate_contract.md) を正とします。
+rotate の後続差分は [Motion Core Rotate Behavior Contract](./motion_rotate_contract.md) を正とし、#108 / PR #112 で実装済みです。
 opacity は別Behavior Contract差分を作成してから実装します。
 
-追加時はそれぞれ既存effectとの競合規則を先に決めます。
+既存effectとの競合規則は property ごとに先に決めます。
 
 ## 17. Composition rules
 
@@ -600,6 +600,8 @@ keyframes:
 - preset
 - generic public `motion` DSL
 - effects migration
+
+この一覧は first vertical slice の境界を記録するものです。rotate は後続sliceとして [rotate contract](./motion_rotate_contract.md) に基づき実装済みです。
 
 ## 26. Acceptance mapping
 

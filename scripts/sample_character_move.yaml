@@ -104,3 +104,19 @@ scenes:
                   x: 20
                   scale: 1.18
                   easing: ease_in
+      - text: "回転は anchor を支点にし、角度は次の行へ残しません。"
+        speaker_name: "copetan"
+        characters:
+          - name: "copetan"
+            rotate: 0
+            move:
+              from: {rotate: -8}
+              duration: 1.0
+              easing: ease_in_out
+              keyframes:
+                - at: 0.35
+                  rotate: 12
+                  easing: ease_out
+                - at: 0.7
+                  rotate: -4
+                  easing: ease_in
