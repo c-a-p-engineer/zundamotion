@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from ...exceptions import ValidationError
 from ..video.character_rig_validation import validate as validate_rig_file
+from ..video.character_rig_resources import resolve_character_rig_resources
 
 _ALLOWED_RIG_KEYS = {"enabled", "path", "raster_width"}
 _MAX_RASTER_WIDTH = 4096
@@ -55,6 +56,7 @@ def validate_character_rig_config(value: Any, label: str) -> None:
         errors = result.get("errors") or []
         detail = "; ".join(str(item) for item in errors) or "unknown rig error"
         raise ValidationError(f"{label}.path is not a valid SVG character rig: {detail}")
+    resolve_character_rig_resources(resolved)
 
 
 
