@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -117,94 +118,98 @@ def test_disabled_rig_does_not_require_path() -> None:
     assert rig_runtime_enabled({}) is False
 
 
-@pytest.mark.asyncio
-async def test_materializer_builds_face_compatible_png_assets_and_reuses_cache(
+def test_materializer_builds_face_compatible_png_assets_and_reuses_cache(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    monkeypatch.chdir(tmp_path)
-    rig_path = _write_rig(tmp_path)
-    cache = _Cache(tmp_path / "cache")
-    cache.root.mkdir(parents=True)
-    materializer = CharacterRigMaterializer(cache)  # type: ignore[arg-type]
+    async def _run() -> None:
+        monkeypatch.chdir(tmp_path)
+        rig_path = _write_rig(tmp_path)
+        cache = _Cache(tmp_path / "cache")
+        cache.root.mkdir(parents=True)
+        materializer = CharacterRigMaterializer(cache)  # type: ignore[arg-type]
 
-    assets = await materializer.materialize(
-        {
-            "path": "assets/characters/hero/character.svg",
-            "raster_width": 100,
-        }
-    )
-    first_creations = cache.creations
+        assets = await materializer.materialize(
+            {
+                "path": "assets/characters/hero/character.svg",
+                "raster_width": 100,
+            }
+        )
+        first_creations = cache.creations
 
-    assert assets.base.exists()
-    assert set(assets.eyes) == {"open", "close"}
-    assert set(assets.mouth) == {"close", "half", "open"}
-    assert first_creations == 6
+        assert assets.base.exists()
+        assert set(assets.eyes) == {"open", "close"}
+        assert set(assets.mouth) == {"close", "half", "open"}
+        assert first_creations == 6
 
-    base = Image.open(assets.base).convert("RGBA")
-    eye_close = Image.open(assets.eyes["close"]).convert("RGBA")
-    mouth_open = Image.open(assets.mouth["open"]).convert("RGBA")
+        base = Image.open(assets.base).convert("RGBA")
+        eye_close = Image.open(assets.eyes["close"]).convert("RGBA")
+        mouth_open = Image.open(assets.mouth["open"]).convert("RGBA")
 
-    # Base contains neutral body/open-eye state.
-    assert base.getpixel((25, 70))[1] > 200
-    assert base.getpixel((38, 21))[2] > 200
+        assert base.getpixel((25, 70))[1] > 200
+        assert base.getpixel((38, 21))[2] > 200
+        assert eye_close.size == base.size == (100, 100)
+        assert eye_close.getpixel((25, 70))[3] == 0
+        assert eye_close.getpixel((38, 22))[0] > 200
+        assert mouth_open.getpixel((50, 32))[0] > 200
+        assert mouth_open.getpixel((25, 70))[3] == 0
 
-    # Face overlays keep the full canvas but isolate only the requested state.
-    assert eye_close.size == base.size == (100, 100)
-    assert eye_close.getpixel((25, 70))[3] == 0
-    assert eye_close.getpixel((38, 22))[0] > 200
-    assert mouth_open.getpixel((50, 32))[0] > 200
-    assert mouth_open.getpixel((25, 70))[3] == 0
+        again = await materializer.materialize(
+            {
+                "path": "assets/characters/hero/character.svg",
+                "raster_width": 100,
+            }
+        )
+        assert cache.creations == first_creations
+        assert again.base == assets.base
 
-    again = await materializer.materialize(
-        {
-            "path": "assets/characters/hero/character.svg",
-            "raster_width": 100,
-        }
-    )
-    assert cache.creations == first_creations
-    assert again.base == assets.base
+        rig_path.write_text(
+            RIG_SVG.replace("#00ff00", "#008800"),
+            encoding="utf-8",
+        )
+        changed = await materializer.materialize(
+            {
+                "path": "assets/characters/hero/character.svg",
+                "raster_width": 100,
+            }
+        )
+        assert cache.creations == first_creations + 6
+        assert changed.base != assets.base
 
-    rig_path.write_text(RIG_SVG.replace("#00ff00", "#008800"), encoding="utf-8")
-    changed = await materializer.materialize(
-        {
-            "path": "assets/characters/hero/character.svg",
-            "raster_width": 100,
-        }
-    )
-    assert cache.creations == first_creations + 6
-    assert changed.base != assets.base
+    asyncio.run(_run())
 
 
-@pytest.mark.asyncio
-async def test_materializer_rejects_network_and_project_escape_resources(
+def test_materializer_rejects_network_and_project_escape_resources(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    monkeypatch.chdir(tmp_path)
-    cache = _Cache(tmp_path / "cache")
-    cache.root.mkdir(parents=True)
-    materializer = CharacterRigMaterializer(cache)  # type: ignore[arg-type]
+    async def _run() -> None:
+        monkeypatch.chdir(tmp_path)
+        cache = _Cache(tmp_path / "cache")
+        cache.root.mkdir(parents=True)
+        materializer = CharacterRigMaterializer(cache)  # type: ignore[arg-type]
 
-    remote = RIG_SVG.replace(
-        '<g id="body"><rect',
-        '<g id="body"><image href="https://example.com/a.png"/><rect',
-    )
-    _write_rig(tmp_path, remote)
-    with pytest.raises(ValidationError, match="must be local or embedded"):
-        await materializer.materialize(
-            {"path": "assets/characters/hero/character.svg"}
+        remote = RIG_SVG.replace(
+            '<g id="body"><rect',
+            '<g id="body"><image href="https://example.com/a.png"/><rect',
         )
+        _write_rig(tmp_path, remote)
+        with pytest.raises(ValidationError, match="must be local or embedded"):
+            await materializer.materialize(
+                {"path": "assets/characters/hero/character.svg"}
+            )
 
-    escaped = RIG_SVG.replace(
-        '<g id="body"><rect',
-        '<g id="body"><image href="../../../../../outside.png"/><rect',
-    )
-    _write_rig(tmp_path, escaped)
-    with pytest.raises(ValidationError, match="escapes the project"):
-        await materializer.materialize(
-            {"path": "assets/characters/hero/character.svg"}
+        escaped = RIG_SVG.replace(
+            '<g id="body"><rect',
+            '<g id="body"><image href="../../../../../outside.png"/><rect',
         )
+        _write_rig(tmp_path, escaped)
+        with pytest.raises(ValidationError, match="escapes the project"):
+            await materializer.materialize(
+                {"path": "assets/characters/hero/character.svg"}
+            )
+
+    asyncio.run(_run())
 
 
 def test_materializer_module_does_not_eager_import_cairosvg() -> None:
