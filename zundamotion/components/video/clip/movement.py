@@ -242,10 +242,10 @@ def _build_legacy_move_expressions(
             "Character move.from is required when no previous character position is available."
         )
     if not any(axis in raw_from for axis in ("x", "y")):
-        if "scale" in raw_from or "rotate" in raw_from:
+        if "scale" in raw_from or "rotate" in raw_from or "opacity" in raw_from:
             return to_x_expr, to_y_expr, False
         raise ValidationError(
-            "Character move.from must define x, y, scale, or rotate when no previous "
+            "Character move.from must define x, y, scale, rotate, or opacity when no previous "
             "character state is available."
         )
 
