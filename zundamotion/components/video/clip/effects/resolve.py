@@ -6,6 +6,11 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from zundamotion.utils.logger import logger
 
+from ..background_motion import (
+    build_background_pan_zoom_expressions,
+    has_background_motion_keyframes,
+)
+
 
 @dataclass
 class FilterSnippet:
@@ -108,6 +113,7 @@ def resolve_background_effects(
     duration: float,
     width: int,
     height: int,
+    output_fps: float | None = None,
     id_prefix: str = "bg",
 ) -> Optional[FilterSnippet]:
     """Resolve background-specific effects applied before overlay composition."""
@@ -134,6 +140,7 @@ def resolve_background_effects(
                 height=height,
                 index=idx,
                 id_prefix=id_prefix,
+                output_fps=output_fps,
             )
         elif effect_type in {"bg:pan_zoom", "bg:ken_burns"}:
             snippet = _resolve_background_pan_zoom(
@@ -511,8 +518,33 @@ def _resolve_background_pan_zoom(
     height: int,
     index: int,
     id_prefix: str,
+    output_fps: float | None,
 ) -> Optional[FilterSnippet]:
     """Apply a Ken Burns style pan/zoom to the prepared background stream."""
+
+    if has_background_motion_keyframes(effect):
+        expressions = build_background_pan_zoom_expressions(
+            effect,
+            output_fps=float(output_fps if output_fps is not None else 30.0),
+        )
+        label = f"[{id_prefix}_pan_zoom_{index}]"
+        x_expr = f"(iw-iw/zoom)*({expressions.pan_x})"
+        y_expr = f"(ih-ih/zoom)*({expressions.pan_y})"
+        filter_text = (
+            f"{input_label}zoompan="
+            f"z='{_escape_zoompan_expr(expressions.zoom)}':"
+            f"x='{_escape_zoompan_expr(x_expr)}':"
+            f"y='{_escape_zoompan_expr(y_expr)}':"
+            "d=1:"
+            f"s={width}x{height}:"
+            f"fps={expressions.fps:.3f}{label}"
+        )
+        return FilterSnippet(
+            filter_chain=[filter_text],
+            overlay_kwargs={},
+            dynamic=True,
+            output_label=label,
+        )
 
     zoom_start, zoom_end = _extract_zoom_range(effect)
     pan_start_x, pan_start_y, pan_end_x, pan_end_y = _extract_pan_range(effect)
