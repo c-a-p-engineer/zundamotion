@@ -423,7 +423,7 @@ v1では同じpropertyへ複数のMotion Core writerを暗黙合成しません�
 
 camera motion は character motion の別名ではありません。
 
-camera の後続差分は [Motion Core Camera / Coordinate Space Behavior Contract](./motion_camera_contract.md) を正とします。
+camera の後続差分は [Motion Core Camera / Coordinate Space Behavior Contract](./motion_camera_contract.md) を正とし、#110 / PR #115 / PR #116 で bounded W×H camera runtime まで実装・CI検証済みです。
 
 first camera slice は:
 
