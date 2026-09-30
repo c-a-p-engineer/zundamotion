@@ -19,6 +19,7 @@ Issue: #102
 - [Rotate Behavior Contract](./motion_rotate_contract.md)
 - [Opacity Behavior Contract](./motion_opacity_contract.md)
 - [Camera / Coordinate Space Contract](./motion_camera_contract.md)
+- [Background Pan/Zoom Integration Contract](./motion_background_pan_zoom_contract.md)
 
 ## 1. Objective
 
@@ -143,6 +144,8 @@ MotionPlan
 | `opacity` | 0.0〜1.0 | 後続sliceで実装済み | source alpha × motion opacity × lifecycle fade、line-local。詳細は opacity contract |
 
 camera target は別target trackとして `focus.x` / `focus.y` / `zoom` を実装済みです。character property tableへ混在させず、[Camera / Coordinate Space Contract](./motion_camera_contract.md) の bounded W×H viewport と layer-space規則を正とします。
+
+background-local `bg:pan_zoom` / `bg:ken_burns` は既存effect ownerを維持します。multi-keyframe統合は [Background Pan/Zoom Integration Contract](./motion_background_pan_zoom_contract.md) を正とし、legacy no-keyframe pathを置換せず、keyframes存在時だけstrict MotionTrack pathを追加します。
 
 任意文字列式を新しいmulti-keyframe値として許可しません。
 
