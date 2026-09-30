@@ -48,6 +48,17 @@ def validate_character_rig_config(value: Any, label: str) -> None:
     if path_value is None:
         raise ValidationError(f"{label}.path is required when rig is enabled.")
 
+    resolved = resolve_character_rig_path(path_value, label)
+
+    result = validate_rig_file(resolved)
+    if not result.get("valid"):
+        errors = result.get("errors") or []
+        detail = "; ".join(str(item) for item in errors) or "unknown rig error"
+        raise ValidationError(f"{label}.path is not a valid SVG character rig: {detail}")
+
+
+
+def resolve_character_rig_path(path_value: str, label: str = "character.rig") -> Path:
     path = Path(path_value)
     if path.is_absolute():
         raise ValidationError(f"{label}.path must be project-relative.")
@@ -66,9 +77,4 @@ def validate_character_rig_config(value: Any, label: str) -> None:
         raise ValidationError(f"{label}.path '{path_value}' does not exist.")
     if not resolved.is_file():
         raise ValidationError(f"{label}.path '{path_value}' is not a file.")
-
-    result = validate_rig_file(resolved)
-    if not result.get("valid"):
-        errors = result.get("errors") or []
-        detail = "; ".join(str(item) for item in errors) or "unknown rig error"
-        raise ValidationError(f"{label}.path is not a valid SVG character rig: {detail}")
+    return resolved
