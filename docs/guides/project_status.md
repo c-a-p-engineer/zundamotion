@@ -22,7 +22,7 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 - Chatterbox は23言語、行単位の言語切替、voice cloning等へ対応していますが、remote model artifact の runtime lock、font fallback、実モデルbenchmark等は未完了です。
 - SVG character rig は v2 の source-part / joint / pivot 検証と blink / lip-sync / hair / limb motion preview まで authoring / QA 側に実装済みです。本体rendererへのruntime統合はまだ行いません。
 - product roadmap は **low-spec first / Motion over complexity / Progressive enhancement / Compiler-Orchestrator** を中長期原則とし、標準rendererは引き続き Python + FFmpeg とします。
-- Motion Core は character `move.keyframes` の x / y / scale / rotate / opacity まで実装・CI検証済みです。rotate は degree・anchor pivot・fixed transparent canvas、opacity は source alpha × motion opacity × lifecycle fade、face overlay追従を契約化しています。camera は未実装のまま別契約へ分離します。
+- Motion Core は character `move.keyframes` の x / y / scale / rotate / opacity と、独立line-level camera の focus.x / focus.y / zoom まで実装・CI検証済みです。camera は bounded W×H world viewport に対してworld合成後・subtitle前に1回だけ適用し、screen-space subtitle/badgeを固定します。
 
 ## 2. 完了した主要フェーズ
 
@@ -46,6 +46,7 @@ AI / Codex が「今どこまで終わっているか」「次に何をするか
 | Motion Core first vertical slice | 完了 | character `move.keyframes` の x/y/scale、segment easing、validation/capability/cache/FFmpeg regression。PR #107 |
 | Motion Core rotate | 完了 | line-local rotate track、anchor pivot、fixed canvas、face追従、actual FFmpeg regression。#108 / PR #111 / PR #112 |
 | Motion Core opacity | 完了 | line-local opacity track、source alpha保持、fade乗算、face追従、actual FFmpeg alpha regression。#109 / PR #113 / PR #114 |
+| Motion Core camera | 完了 | line-local focus.x/focus.y/zoom track、bounded world viewport、world/screen分離、CPU fallback、actual FFmpeg regression。#110 / PR #115 / PR #116 |
 
 詳細な高速化の採用・却下理由は `performance_regression_ledger.md` を正とします。
 過去の分割計画は `source_refactoring_plan.md`、2026-08-07 時点のタスク表は `current_task_plan_20260807.md` に履歴として残します。
@@ -90,15 +91,15 @@ first vertical slice は完了しています。
 - persistent final `position` / `scale` semantics
 - line-local rotate semantics、anchor pivot、fixed transparent rotation canvas、face overlay追従
 - line-local opacity semantics、source alpha保持、lifecycle fade乗算、face overlay追従
+- line-local camera semantics、focus.x/focus.y/zoom track、bounded W×H viewport、world/screen-space分離
 
 残り:
 
-- camera / world-space / screen-space behavior contract + implementation
 - background pan / zoom のmulti-keyframe化とMotion Coreへの統合評価
 - deterministic motion preset
 - generic target abstractionが必要かの再評価
 
-camera は world-space / screen-space の競合規則を先に固定してから実装します。rotate は既存overlay rotateを別ownerのまま維持し、opacity は foreground overlay opacity/blink と別target ownerのまま維持しています。
+camera は background / insert / image layer / character / face をworld-spaceとしてまとめてview transformし、subtitle / badgeはscreen-spaceに残します。first sliceはoverscan / zoom-out / camera rotationを持ちません。rotate は既存overlay rotateを別ownerのまま維持し、opacity は foreground overlay opacity/blink と別target ownerのまま維持しています。
 最初から任意frame callbackやbrowser runtimeを導入しません。
 
 ### P3: 0.3 Character Runtime
@@ -160,9 +161,9 @@ Google系など新しいcloud TTSを追加する場合も、既存 `TTSProvider`
 原則として次の順です。
 
 1. 0.1.x release / compiler / provider 基準線を継続して安定化する
-2. Motion Core x/y/scale/rotate/opacity の代表実動画を増やし、native基準線を維持する
-3. camera の world-space / screen-space 境界を契約化し、character motionとは別trackで実装する
-4. その後に motion preset と background pan/zoom 統合の費用対効果を確認する
+2. Motion Core x/y/scale/rotate/opacity/camera の代表実動画を増やし、native基準線を維持する
+3. background pan/zoom のmulti-keyframe化と Motion Core 統合の費用対効果を確認する
+4. deterministic motion preset と generic target abstraction の必要性を再評価する
 5. Motion Core の基準線を確認して Character Runtime へ進む
 6. native経路で不足する具体例が集まってから Rich Renderer を比較する
 

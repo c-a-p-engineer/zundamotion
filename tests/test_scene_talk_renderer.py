@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -98,6 +99,10 @@ def _context() -> SceneLineContext:
     line_config = {
         "screen_effects": ["flash"],
         "background_effects": ["zoom"],
+        "camera": {
+            "focus": {"x": 0.6, "y": 0.5},
+            "zoom": 1.2,
+        },
         "subtitle": {"font_size": 64},
     }
     return SceneLineContext(
@@ -209,6 +214,7 @@ def test_talk_cache_payload_preserves_legacy_fields(tmp_path: Path) -> None:
         "blink_close_frames": 2,
         "screen_effects": ["flash"],
         "background_effects": ["zoom"],
+        "camera": context.line_config["camera"],
         "background_layout": context.background_layout,
         "video_filter": "grayscale",
     }
@@ -248,6 +254,7 @@ def test_talk_render_uses_cache_creator_and_resolved_plan(tmp_path: Path) -> Non
         "extra_audio_overlays": [{"src": "sfx.wav"}],
         "background_effects": ["zoom"],
         "screen_effects": ["flash"],
+        "camera_config": context.line_config["camera"],
         "face_anim": list(plan.face_animations),
         "audio_delay": 0.2,
         "_force_cpu": True,
@@ -288,3 +295,21 @@ def test_failed_talk_render_raises_pipeline_error(tmp_path: Path) -> None:
                 static_insert_in_base=False,
             )
         )
+
+
+
+def test_talk_cache_omits_camera_when_line_has_no_camera(tmp_path: Path) -> None:
+    subject = _Subject(tmp_path)
+    context = _context()
+    line_config = dict(context.line_config)
+    line_config.pop("camera", None)
+    context = replace(context, line_config=line_config)
+
+    payload = subject._build_talk_cache_data(
+        context=context,
+        plan=_plan(),
+        static_character_keys=set(),
+        static_insert_in_base=False,
+    )
+
+    assert "camera" not in payload

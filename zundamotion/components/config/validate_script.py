@@ -86,6 +86,11 @@ def _resolve_scene_lines(scene_id: str, scene: Dict[str, Any]) -> List[Dict[str,
 
 
 def _validate_scene_settings(config: Dict[str, Any], scene: Dict[str, Any], scene_id: str) -> None:
+    if "camera" in scene:
+        raise ValidationError(
+            f"Scene '{scene_id}' camera is not supported at scene scope; "
+            "camera is line-local."
+        )
     character_defaults = scene.get("character_defaults")
     if character_defaults is not None:
         if not isinstance(character_defaults, dict):
@@ -187,6 +192,7 @@ def _validate_line_features(line: Dict[str, Any], scene_id: str, line_idx: int) 
     _validate_badge(line, container_id)
     _validate_line_badges(line.get("badges"), container_id)
     _validate_image_layers(line, container_id)
+    _validate_camera(line.get("camera"), f"{container_id}, camera")
     characters = line.get("characters")
     if characters is not None:
         if not isinstance(characters, list):
@@ -224,6 +230,221 @@ def _validate_line_features(line: Dict[str, Any], scene_id: str, line_idx: int) 
         raise ValidationError(
             f"Line at scene '{scene_id}', index {line_idx} reset_characters must be a boolean."
         )
+
+
+def _validate_camera(camera: Any, label: str) -> None:
+    if camera is None:
+        return
+    if not isinstance(camera, dict):
+        raise ValidationError(f"{label} must be a dictionary.")
+
+    unknown = sorted(set(camera) - {"focus", "zoom", "move"})
+    if unknown:
+        raise ValidationError(
+            f"{label} contains unsupported properties: {', '.join(unknown)}."
+        )
+
+    focus = camera.get("focus")
+    if not isinstance(focus, dict):
+        raise ValidationError(f"{label}.focus must be a dictionary.")
+    if set(focus) - {"x", "y"}:
+        unknown_focus = sorted(set(focus) - {"x", "y"})
+        raise ValidationError(
+            f"{label}.focus contains unsupported properties: "
+            + ", ".join(unknown_focus)
+            + "."
+        )
+    for axis in ("x", "y"):
+        if axis not in focus:
+            raise ValidationError(f"{label}.focus.{axis} is required.")
+        _validate_camera_focus_value(focus[axis], f"{label}.focus.{axis}")
+
+    if "zoom" not in camera:
+        raise ValidationError(f"{label}.zoom is required.")
+    _validate_camera_zoom_value(camera.get("zoom"), f"{label}.zoom")
+
+    move = camera.get("move")
+    if move is None:
+        return
+    if not isinstance(move, dict):
+        raise ValidationError(f"{label}.move must be a dictionary.")
+    unknown_move = sorted(
+        set(move) - {"enabled", "from", "start", "duration", "easing", "keyframes"}
+    )
+    if unknown_move:
+        raise ValidationError(
+            f"{label}.move contains unsupported properties: "
+            + ", ".join(unknown_move)
+            + "."
+        )
+    enabled = move.get("enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        raise ValidationError(f"{label}.move.enabled must be a boolean.")
+
+    start = move.get("start", 0.0)
+    if not _is_finite_number(start) or float(start) < 0.0:
+        raise ValidationError(
+            f"{label}.move.start must be a finite number greater than or equal to 0."
+        )
+    easing = move.get("easing", "linear")
+    if easing not in {"linear", "ease_in", "ease_out", "ease_in_out"}:
+        raise ValidationError(
+            f"{label}.move.easing must be one of linear, ease_in, ease_out, ease_in_out."
+        )
+
+    raw_from = move.get("from")
+    if raw_from is not None and not isinstance(raw_from, dict):
+        raise ValidationError(f"{label}.move.from must be a dictionary.")
+    from_props: set[str] = set()
+    if isinstance(raw_from, dict):
+        unknown_from = sorted(set(raw_from) - {"focus", "zoom"})
+        if unknown_from:
+            raise ValidationError(
+                f"{label}.move.from contains unsupported properties: "
+                + ", ".join(unknown_from)
+                + "."
+            )
+        if "focus" in raw_from:
+            from_focus = raw_from["focus"]
+            if not isinstance(from_focus, dict):
+                raise ValidationError(
+                    f"{label}.move.from.focus must be a dictionary."
+                )
+            unknown_focus = sorted(set(from_focus) - {"x", "y"})
+            if unknown_focus:
+                raise ValidationError(
+                    f"{label}.move.from.focus contains unsupported properties: "
+                    + ", ".join(unknown_focus)
+                    + "."
+                )
+            for axis in ("x", "y"):
+                if axis in from_focus:
+                    _validate_camera_focus_value(
+                        from_focus[axis],
+                        f"{label}.move.from.focus.{axis}",
+                    )
+                    from_props.add(f"focus.{axis}")
+        if "zoom" in raw_from:
+            _validate_camera_zoom_value(
+                raw_from["zoom"],
+                f"{label}.move.from.zoom",
+            )
+            from_props.add("zoom")
+
+    keyframes = move.get("keyframes")
+    waypoint_props: set[str] = set()
+    if keyframes is not None:
+        if not isinstance(keyframes, list):
+            raise ValidationError(f"{label}.move.keyframes must be a list.")
+        previous_at = 0.0
+        duration_for_range = move.get("duration", 0.3)
+        if not _is_finite_number(duration_for_range) or float(duration_for_range) <= 0.0:
+            raise ValidationError(
+                f"{label}.move.duration must be a finite number greater than 0 "
+                "when keyframes are used."
+            )
+        resolved_duration = float(duration_for_range)
+        for index, frame in enumerate(keyframes):
+            frame_label = f"{label}.move.keyframes[{index}]"
+            if not isinstance(frame, dict):
+                raise ValidationError(f"{frame_label} must be a dictionary.")
+            unknown_frame = sorted(set(frame) - {"at", "focus", "zoom", "easing"})
+            if unknown_frame:
+                raise ValidationError(
+                    f"{frame_label} contains unsupported properties: "
+                    + ", ".join(unknown_frame)
+                    + "."
+                )
+            if "at" not in frame:
+                raise ValidationError(f"{frame_label}.at is required.")
+            at = frame.get("at")
+            if not _is_finite_number(at):
+                raise ValidationError(f"{frame_label}.at must be a finite number.")
+            resolved_at = float(at)
+            if not (0.0 < resolved_at < resolved_duration):
+                raise ValidationError(
+                    f"{frame_label}.at must satisfy 0 < at < camera.move.duration."
+                )
+            if index > 0 and resolved_at <= previous_at:
+                raise ValidationError(
+                    f"{label}.move.keyframes times must be strictly increasing."
+                )
+            previous_at = resolved_at
+
+            frame_has_property = False
+            if "focus" in frame:
+                frame_focus = frame["focus"]
+                if not isinstance(frame_focus, dict):
+                    raise ValidationError(
+                        f"{frame_label}.focus must be a dictionary."
+                    )
+                unknown_focus = sorted(set(frame_focus) - {"x", "y"})
+                if unknown_focus:
+                    raise ValidationError(
+                        f"{frame_label}.focus contains unsupported properties: "
+                        + ", ".join(unknown_focus)
+                        + "."
+                    )
+                for axis in ("x", "y"):
+                    if axis in frame_focus:
+                        _validate_camera_focus_value(
+                            frame_focus[axis],
+                            f"{frame_label}.focus.{axis}",
+                        )
+                        waypoint_props.add(f"focus.{axis}")
+                        frame_has_property = True
+            if "zoom" in frame:
+                _validate_camera_zoom_value(
+                    frame["zoom"],
+                    f"{frame_label}.zoom",
+                )
+                waypoint_props.add("zoom")
+                frame_has_property = True
+            if not frame_has_property:
+                raise ValidationError(
+                    f"{frame_label} must define focus or zoom."
+                )
+
+            frame_easing = frame.get("easing")
+            if frame_easing is not None and frame_easing not in {
+                "linear",
+                "ease_in",
+                "ease_out",
+                "ease_in_out",
+            }:
+                raise ValidationError(
+                    f"{frame_label}.easing must be one of "
+                    "linear, ease_in, ease_out, ease_in_out."
+                )
+
+    animated_props = from_props | waypoint_props
+    if animated_props:
+        duration = move.get("duration", 0.3)
+        if not _is_finite_number(duration) or float(duration) <= 0.0:
+            raise ValidationError(
+                f"{label}.move.duration must be a finite number greater than 0."
+            )
+    missing_starts = sorted(waypoint_props - from_props)
+    if missing_starts:
+        raise ValidationError(
+            f"{label}.move.from is missing start values for: "
+            + ", ".join(missing_starts)
+            + "."
+        )
+
+
+def _validate_camera_focus_value(value: Any, label: str) -> None:
+    if not _is_finite_number(value):
+        raise ValidationError(f"{label} must be a finite number.")
+    if not 0.0 <= float(value) <= 1.0:
+        raise ValidationError(f"{label} must be between 0.0 and 1.0.")
+
+
+def _validate_camera_zoom_value(value: Any, label: str) -> None:
+    if not _is_finite_number(value):
+        raise ValidationError(f"{label} must be a finite number.")
+    if not 1.0 <= float(value) <= 4.0:
+        raise ValidationError(f"{label} must be between 1.0 and 4.0.")
 
 
 def _validate_line_badges(badges: Any, container_id: str) -> None:

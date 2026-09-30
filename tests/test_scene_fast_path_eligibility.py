@@ -21,6 +21,7 @@ def _line(**overrides) -> FastPathLineEligibility:
         "has_complex_media": False,
         "has_voice_layers": False,
         "has_effects": False,
+        "has_camera": False,
         "has_video_filter": False,
         "background_fit": "stretch",
         "has_background": True,
@@ -124,3 +125,17 @@ def test_simple_fast_path_rejects_opacity_character(
 
     assert state is None
     assert error == "opacity_requires_standard_renderer"
+
+
+
+def test_fast_path_rejects_camera_line() -> None:
+    facts = _facts(lines=(_line(has_camera=True),))
+
+    assert evaluate_fast_path_eligibility(facts) == (False, "camera:1")
+
+
+
+def test_fast_path_eligibility_rejects_camera_line() -> None:
+    facts = _facts(lines=(_line(has_camera=True),))
+
+    assert evaluate_fast_path_eligibility(facts) == (False, "camera:1")

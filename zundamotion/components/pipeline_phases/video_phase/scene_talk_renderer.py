@@ -68,7 +68,7 @@ class SceneTalkRendererMixin:
             "voice_config": self.config.get("voice", {}),
         }
         animation_meta = plan.animation_meta
-        return {
+        payload = {
             "type": "talk",
             "clip_render_version": "20260330_face_overlay_args_v2",
             "audio_cache_key": self.cache_manager._generate_hash(
@@ -105,6 +105,10 @@ class SceneTalkRendererMixin:
             "background_layout": context.background_layout,
             "video_filter": context.background_config.get("video_filter"),
         }
+        camera = context.line_config.get("camera")
+        if camera is not None:
+            payload["camera"] = camera
+        return payload
 
     async def _render_talk_line(
         self,
@@ -142,6 +146,7 @@ class SceneTalkRendererMixin:
                     "background_effects"
                 ),
                 screen_effects=context.line_config.get("screen_effects"),
+                camera_config=context.line_config.get("camera"),
                 face_anim=list(plan.face_animations),
                 audio_delay=context.pre_duration,
                 _force_cpu=bool(context.image_layer_overlays),

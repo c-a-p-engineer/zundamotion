@@ -120,6 +120,7 @@ class WaitClipRuntimeMixin:
             extra_audio_overlays=extra_audio_overlays,
             background_effects=line_config.get("background_effects"),
             screen_effects=line_config.get("screen_effects"),
+            camera_config=line_config.get("camera"),
             audio_delay=0.0,
         )
         if clip_path is None:

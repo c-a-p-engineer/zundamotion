@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from zundamotion.components.video.clip.camera import append_camera_transform
 from zundamotion.components.video.clip.movement import (
     build_dynamic_scale_filter,
     build_move_expressions,
@@ -59,6 +60,20 @@ def _green_bounds(image: Image.Image) -> tuple[int, int, int, int]:
         for x in range(image.width):
             r, g, b = pixels[x, y]
             if g > 160 and g > r * 1.5 and g > b * 1.5:
+                xs.append(x)
+                ys.append(y)
+    assert xs and ys
+    return min(xs), min(ys), max(xs) + 1, max(ys) + 1
+
+
+def _red_bounds(image: Image.Image) -> tuple[int, int, int, int]:
+    pixels = image.load()
+    xs: list[int] = []
+    ys: list[int] = []
+    for y in range(image.height):
+        for x in range(image.width):
+            r, g, b = pixels[x, y]
+            if r > 150 and r > g * 1.4 and r > b * 1.4:
                 xs.append(x)
                 ys.append(y)
     assert xs and ys
@@ -386,4 +401,211 @@ def test_opacity_multiplies_source_alpha_and_lifecycle_fade(
     # source alpha ~= 0.5, opacity=0.5, fade completed => ~= 0.25 effective alpha
     assert 50 <= end_green <= 80
     assert end_green > mid_green
+    assert _probe_duration(output) == pytest.approx(1.2, abs=0.08)
+
+
+
+def test_camera_moves_world_but_keeps_screen_overlay_fixed(
+    tmp_path: Path,
+) -> None:
+    world = tmp_path / "camera-world.png"
+    world_image = Image.new("RGBA", (120, 80), (0, 0, 0, 255))
+    for y in range(30, 50):
+        for x in range(10, 30):
+            world_image.putpixel((x, y), (0, 255, 0, 255))
+    world_image.save(world)
+
+    marker = tmp_path / "screen-marker.png"
+    Image.new("RGBA", (10, 10), (255, 0, 0, 255)).save(marker)
+
+    camera = {
+        "focus": {"x": 0.25, "y": 0.5},
+        "zoom": 2.0,
+        "move": {
+            "from": {
+                "focus": {"x": 0.5},
+                "zoom": 1.0,
+            },
+            "duration": 1.0,
+            "easing": "linear",
+            "keyframes": [
+                {"at": 0.5, "zoom": 1.5, "easing": "ease_out"},
+            ],
+        },
+    }
+    parts: list[str] = []
+    camera_label = append_camera_transform(
+        camera_config=camera,
+        input_label="[0:v]",
+        width=120,
+        height=80,
+        fps=30,
+        parts=parts,
+    )
+    parts.append(
+        f"{camera_label}[1:v]overlay=x=105:y=5:shortest=1,"
+        "format=yuv420p[v]"
+    )
+
+    output = tmp_path / "camera.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-loop",
+            "1",
+            "-framerate",
+            "30",
+            "-i",
+            str(world),
+            "-loop",
+            "1",
+            "-framerate",
+            "30",
+            "-i",
+            str(marker),
+            "-filter_complex",
+            ";".join(parts),
+            "-map",
+            "[v]",
+            "-t",
+            "1.2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    start = _extract_frame(output, 0.05, tmp_path / "camera-start.png")
+    end = _extract_frame(output, 1.08, tmp_path / "camera-end.png")
+    start_green = _green_bounds(start)
+    end_green = _green_bounds(end)
+    start_red = _red_center(start)
+    end_red = _red_center(end)
+
+    start_green_width = start_green[2] - start_green[0]
+    start_green_height = start_green[3] - start_green[1]
+    end_green_width = end_green[2] - end_green[0]
+    end_green_height = end_green[3] - end_green[1]
+
+    assert 16 <= start_green_width <= 24
+    assert 16 <= start_green_height <= 24
+    assert end_green_width > start_green_width
+    assert end_green_height >= 35
+    assert end_green[0] < start_green[0]
+
+    # Red marker is composed after camera and remains screen-fixed.
+    assert start_red[0] == pytest.approx(end_red[0], abs=1.0)
+    assert start_red[1] == pytest.approx(end_red[1], abs=1.0)
+    assert start_red[0] >= 108
+    assert start_red[1] <= 11
+
+    assert _probe_duration(output) == pytest.approx(1.2, abs=0.08)
+
+
+
+def test_camera_moves_world_but_keeps_screen_layer_fixed_and_duration(
+    tmp_path: Path,
+) -> None:
+    world_marker = tmp_path / "camera-world.png"
+    screen_marker = tmp_path / "camera-screen.png"
+    Image.new("RGBA", (20, 20), (0, 255, 0, 255)).save(world_marker)
+    Image.new("RGBA", (12, 12), (255, 0, 0, 255)).save(screen_marker)
+
+    camera = {
+        "focus": {"x": 0.75, "y": 0.5},
+        "zoom": 2.0,
+        "move": {
+            "from": {
+                "focus": {"x": 0.5},
+                "zoom": 1.0,
+            },
+            "duration": 1.0,
+            "easing": "linear",
+        },
+    }
+    parts = [
+        "[0:v][1:v]overlay=x=100:y=50[world]",
+    ]
+    camera_label = append_camera_transform(
+        camera_config=camera,
+        input_label="[world]",
+        width=160,
+        height=120,
+        fps=30,
+        parts=parts,
+    )
+    assert camera_label == "[camera_view]"
+    parts.append(
+        f"{camera_label}[2:v]overlay=x=8:y=8:shortest=1,"
+        "format=yuv420p[v]"
+    )
+
+    output = tmp_path / "camera.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=160x120:r=30:d=1.2",
+            "-loop",
+            "1",
+            "-framerate",
+            "30",
+            "-i",
+            str(world_marker),
+            "-loop",
+            "1",
+            "-framerate",
+            "30",
+            "-i",
+            str(screen_marker),
+            "-filter_complex",
+            ";".join(parts),
+            "-map",
+            "[v]",
+            "-t",
+            "1.2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    start_image = _extract_frame(output, 0.03, tmp_path / "camera-start.png")
+    end_image = _extract_frame(output, 1.08, tmp_path / "camera-end.png")
+    start_green = _green_bounds(start_image)
+    end_green = _green_bounds(end_image)
+    start_red = _red_bounds(start_image)
+    end_red = _red_bounds(end_image)
+
+    start_green_width = start_green[2] - start_green[0]
+    end_green_width = end_green[2] - end_green[0]
+
+    assert 18 <= start_green_width <= 23
+    assert end_green_width >= 36
+    assert end_green[0] < start_green[0]
+
+    # Screen-space marker is composited after camera and must remain invariant.
+    assert abs(start_red[0] - 8) <= 2
+    assert abs(start_red[1] - 8) <= 2
+    assert abs(end_red[0] - start_red[0]) <= 1
+    assert abs(end_red[1] - start_red[1]) <= 1
+    assert abs((end_red[2] - end_red[0]) - (start_red[2] - start_red[0])) <= 1
+    assert abs((end_red[3] - end_red[1]) - (start_red[3] - start_red[1])) <= 1
+
     assert _probe_duration(output) == pytest.approx(1.2, abs=0.08)

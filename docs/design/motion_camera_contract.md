@@ -5,7 +5,7 @@
 Issue: #110
 前提: PR #107 x/y/scale、PR #112 rotate、PR #114 opacity
 
-この文書は camera motion を実装する前に、world-space / screen-space、既存 background pan/zoom、viewport clipping、A/V timing の境界を固定します。
+この文書は camera motion の world-space / screen-space、既存 background pan/zoom、viewport clipping、A/V timing の正規契約です。first bounded-camera runtime は #110 / PR #116 で実装・CI検証済みです。
 
 関連:
 
@@ -573,7 +573,7 @@ renderer-native:
 
 は公開しません。
 
-runtime implementationとtests完了後だけ capabilityを:
+runtime implementationとtests完了後の現在の capability は:
 
 ```json
 {
@@ -601,7 +601,7 @@ runtime implementationとtests完了後だけ capabilityを:
 
 へ更新します。
 
-contract PRだけではcamera capabilityをtrueにしません。
+PR #116 の runtime / FFmpeg / build / reproducibility 検証後に camera capability を true にしています。
 
 ## 29. Acceptance mapping
 
@@ -692,4 +692,4 @@ v1 cameraは次を採用します。
 9. `bg:pan_zoom` はbackground-localの別owner
 10. cameraはline-local、persistしない
 11. camera clipだけCPU fallback可能
-12. capabilityはruntime検証後だけ公開する
+12. capabilityはruntime検証後にのみ公開し、現在は検証済みの bounded camera capability を公開する

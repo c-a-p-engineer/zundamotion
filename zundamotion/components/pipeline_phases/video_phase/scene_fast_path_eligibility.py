@@ -20,6 +20,7 @@ class FastPathLineEligibility:
     has_complex_media: bool
     has_voice_layers: bool
     has_effects: bool
+    has_camera: bool
     has_video_filter: bool
     background_fit: str
     has_background: bool
@@ -63,6 +64,8 @@ def evaluate_fast_path_eligibility(facts: FastPathEligibility) -> tuple[bool, st
             return False, f"voice_layers:{line.index}"
         if line.has_effects:
             return False, f"effects:{line.index}"
+        if line.has_camera:
+            return False, f"camera:{line.index}"
         if line.has_video_filter:
             return False, f"video_filter:{line.index}"
         if line.background_fit != BACKGROUND_FIT_STRETCH:
@@ -145,6 +148,7 @@ class SceneFastPathEligibilityMixin:
                     has_effects=bool(
                         line.get("screen_effects") or line.get("background_effects")
                     ),
+                    has_camera=bool(line_config.get("camera")),
                     has_video_filter=bool(
                         line.get("video_filter") or self.scene.get("video_filter")
                     ),
