@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -294,3 +295,21 @@ def test_failed_talk_render_raises_pipeline_error(tmp_path: Path) -> None:
                 static_insert_in_base=False,
             )
         )
+
+
+
+def test_talk_cache_omits_camera_when_line_has_no_camera(tmp_path: Path) -> None:
+    subject = _Subject(tmp_path)
+    context = _context()
+    line_config = dict(context.line_config)
+    line_config.pop("camera", None)
+    context = replace(context, line_config=line_config)
+
+    payload = subject._build_talk_cache_data(
+        context=context,
+        plan=_plan(),
+        static_character_keys=set(),
+        static_insert_in_base=False,
+    )
+
+    assert "camera" not in payload
