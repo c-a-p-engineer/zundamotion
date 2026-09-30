@@ -359,17 +359,19 @@ lines:
 
 - `characters_persist: true` を `defaults` に設定すると、同シーン内で立ち絵状態が自動的に引き継がれ、差分のみ記述すればよくなります。
 - `enter_duration` / `leave_duration` と `enter` / `leave` を組み合わせると立ち絵のスライドイン・アウトが可能。
-- `move` を指定すると、発話行または `wait` 行のクリップ内で `move.from` から `position` / `scale` / line-local `rotate` へ補間できます。`position` と `scale` は移動後の永続可能な最終状態、`rotate` はその行だけの最終回転角です。
+- `move` を指定すると、発話行または `wait` 行のクリップ内で `move.from` から `position` / `scale` / line-local `rotate` / `opacity` へ補間できます。`position` と `scale` は永続可能な最終状態、`rotate` と `opacity` はその行だけの最終値です。
 - その場で拡縮する場合は `move.from: {scale: 0.6}`、移動と同時に拡縮する場合は `move.from: {x: -420, y: -32, scale: 0.6}` のように指定します。
 - `move.duration` は秒数、`move.start` はクリップ開始からの遅延秒数、`move.easing` は `linear` / `ease_in` / `ease_out` / `ease_in_out` を指定できます。
 - 複数地点を通る場合は `move.keyframes` を使います。`at` は `move.start` からの相対秒で、`0 < at < move.duration`、入力順で strictly increasing である必要があります。自動ソートは行いません。
-- 各 keyframe は `x` / `y` / `scale` / `rotate` のうち必要な項目だけを書けます。省略した property にはその時刻の keyframe を人工的に追加せず、property ごとに独立した track として補間します。
-- keyframe の `easing` は「直前の同じ property の keyframe から、その keyframe へ到達する segment」に適用します。省略時と最後の keyframe から最終 `position` / `scale` / `rotate` までは `move.easing` を使います。
-- `move.keyframes` を使う x / y / scale / rotate は finite number のみです。legacy の単一区間 `move.from.x/y` で許容している文字列表現は、multi-keyframe では使用できません。
+- 各 keyframe は `x` / `y` / `scale` / `rotate` / `opacity` のうち必要な項目だけを書けます。省略した property にはその時刻の keyframe を人工的に追加せず、property ごとに独立した track として補間します。
+- keyframe の `easing` は「直前の同じ property の keyframe から、その keyframe へ到達する segment」に適用します。省略時と最後の keyframe から最終 `position` / `scale` / `rotate` / `opacity` までは `move.easing` を使います。
+- `move.keyframes` を使う x / y / scale / rotate / opacity は finite number のみです。legacy の単一区間 `move.from.x/y` で許容している文字列表現は、multi-keyframe では使用できません。
 - `rotate` の単位は degree、正値は時計回りです。pivot は character の `anchor` と同じで、350→10 のような角度に shortest-path 補正は行いません。短い時計回り20度を意図する場合は 350→370 のように記述します。
 - rotate animation では最終 `rotate` と `move.from.rotate` を明示します。`rotate` は `characters_persist: true` でも次行へ永続化されず、global `defaults.characters` / scene `character_defaults` には置けません。
-- 現在の multi-keyframe 対象は character の x / y / scale / rotate です。opacity / camera / background pan・zoom はこの `move.keyframes` には含まれません。
-- `characters_persist: true` で同一シーン内の直前状態がある場合は、x / y / scale の `move.from` を省略できます。座標や倍率が変わる場合、および scale keyframe がある場合は直前値を開始状態として使います。rotate は永続化しないため `move.from.rotate` を省略しません。
+- `opacity` は 0.0〜1.0 で、範囲外を clamp しません。source PNG の alpha を置き換えず乗算し、`enter: fade` / `leave: fade` と同時指定した場合は source alpha × opacity × fade として合成します。
+- opacity animation では最終 `opacity` と `move.from.opacity` を明示します。`opacity` も次行へ永続化されず、global / scene character defaults には置けません。
+- 現在の multi-keyframe 対象は character の x / y / scale / rotate / opacity です。camera / background pan・zoom はこの `move.keyframes` には含まれません。
+- `characters_persist: true` で同一シーン内の直前状態がある場合は、x / y / scale の `move.from` を省略できます。座標や倍率が変わる場合、および scale keyframe がある場合は直前値を開始状態として使います。rotate / opacity は永続化しないため、それぞれの `move.from` 値を省略しません。
 
 複数 keyframe の例:
 
@@ -379,8 +381,9 @@ characters:
     position: {x: 240, y: -32}
     scale: 0.82
     rotate: 0
+    opacity: 0.8
     move:
-      from: {x: -420, y: -32, scale: 0.60, rotate: -8}
+      from: {x: -420, y: -32, scale: 0.60, rotate: -8, opacity: 0.3}
       start: 0.2
       duration: 1.0
       easing: ease_in_out
@@ -389,12 +392,14 @@ characters:
           x: -180
           y: -70
           rotate: 12
+          opacity: 1.0
           easing: ease_out
         - at: 0.65
           x: 40
           y: -20
           scale: 0.90
           rotate: -4
+          opacity: 0.65
           easing: ease_in_out
 ```
 - `expression` は `assets/characters/<name>/<expression>/` の差分素材に対応。
