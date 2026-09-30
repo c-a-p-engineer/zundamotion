@@ -667,7 +667,35 @@ lines:
 
 - `background_effects` はシーン合成前の背景ストリームに適用され、立ち絵や字幕の座標には影響しません。
 - `bg:shake_bg`: `pad`→`crop` チェーンで背景のみを平行移動します。`amplitude`, `freq`, `easing`, `offset`, `padding` が指定でき、サンプルは [`sample_bg_shake.yaml`](./sample_bg_shake.yaml) を参照してください。
-- `bg:pan_zoom` / `bg:ken_burns`: 背景のみをパン/ズームします。`zoom.from` / `zoom.to` と `pan.from` / `pan.to` を 0.0〜1.0 のフォーカス位置で指定します。
+- `bg:pan_zoom` / `bg:ken_burns`: 背景のみをパン/ズームします。従来の `zoom.from` / `zoom.to` と `pan.from` / `pan.to` は1区間linearの互換pathとして維持されます。
+- 複数keyframeを使う場合だけ `start` / `duration` / `easing` / `keyframes` を追加します。`keyframes` があるpathはstrict validationされ、zoom=1.0〜4.0、pan x/y=0.0〜1.0です。範囲外をclampしません。
+
+```yaml
+lines:
+  - wait: 1.4
+    background_effects:
+      - type: bg:pan_zoom
+        zoom: {from: 1.0, to: 1.45}
+        pan:
+          from: {x: 0.30, y: 0.50}
+          to: {x: 0.70, y: 0.45}
+        start: 0.10
+        duration: 1.10
+        easing: ease_in_out
+        keyframes:
+          - at: 0.35
+            zoom: 1.15
+            easing: ease_out
+          - at: 0.75
+            pan: {x: 0.58}
+            zoom: 1.32
+```
+
+- `keyframes[].at` はeffect `start` からの相対秒で、0 < at < duration、入力順でstrictly increasingです。
+- waypointはsparseです。`pan.x` だけ、`zoom` だけのkeyframeを混在できます。
+- background pan/zoomは背景だけに適用され、insert / image layer / character / face は動かしません。その後段のline-level `camera` は合成済みworld全体を動かします。
+- multi-keyframe時に `fps` を省略するとrenderer出力fpsを使います。explicit `fps` は1〜120をstrict validationします。
+- サンプル: [`sample_background_pan_zoom_motion.yaml`](./sample_background_pan_zoom_motion.yaml)。
 
 ## 画像レイヤー (`image_layers`)
 
