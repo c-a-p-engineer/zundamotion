@@ -95,7 +95,7 @@ first vertical slice は完了しています。
 
 残り:
 
-- background pan / zoom のmulti-keyframe化とMotion Coreへの統合評価
+- background pan / zoom のmulti-keyframe runtime実装（integration contract確定済み。legacy no-keyframe互換を維持し、keyframes時だけstrict MotionTrack）
 - deterministic motion preset
 - generic target abstractionが必要かの再評価
 
@@ -162,7 +162,7 @@ Google系など新しいcloud TTSを追加する場合も、既存 `TTSProvider`
 
 1. 0.1.x release / compiler / provider 基準線を継続して安定化する
 2. Motion Core x/y/scale/rotate/opacity/camera の代表実動画を増やし、native基準線を維持する
-3. background pan/zoom のmulti-keyframe化と Motion Core 統合の費用対効果を確認する
+3. 確定済みintegration contractに従い、background pan/zoom multi-keyframeをlegacy互換pathと分離して実装する
 4. deterministic motion preset と generic target abstraction の必要性を再評価する
 5. Motion Core の基準線を確認して Character Runtime へ進む
 6. native経路で不足する具体例が集まってから Rich Renderer を比較する
