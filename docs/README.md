@@ -46,6 +46,7 @@ YAML 台本を扱う場合だけ [`../scripts/script_cheatsheet.md`](../scripts/
 - [`design/motion_camera_contract.md`](./design/motion_camera_contract.md): bounded world viewport camera と world/screen-space 境界契約
 - [`design/motion_background_pan_zoom_contract.md`](./design/motion_background_pan_zoom_contract.md): legacy互換を維持した background pan/zoom multi-keyframe統合契約
 - [`design/motion_preset_contract.md`](./design/motion_preset_contract.md): deterministic character motion preset と generic target見送り契約
+- [`design/character_runtime_materialized_svg_contract.md`](./design/character_runtime_materialized_svg_contract.md): SVG rigを決定論的PNGへmaterializeし既存face runtimeへ接続するCharacter Runtime first-slice契約
 - [`design/parser_and_builder.md`](./design/parser_and_builder.md): YAML → IR / filter graph の設計
 - [`design/ffmpeg_filter_mapping.md`](./design/ffmpeg_filter_mapping.md): FFmpeg filter 対応表
 - [`design/effects_extensibility_plan.md`](./design/effects_extensibility_plan.md): effect 拡張方針
