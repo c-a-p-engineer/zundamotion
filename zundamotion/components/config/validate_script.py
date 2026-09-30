@@ -17,6 +17,7 @@ from .validate_motion_background import validate_background_motion_effects
 from .validate_motion_preset import validate_character_motion_preset
 from .validate_overlays import _validate_fg_overlays
 from .validate_common import validate_character_color_filter
+from .validate_character_rig import validate_character_rig_config
 
 
 def _line_from_item(scene_id: str, item: Dict[str, Any], idx: int) -> Dict[str, Any] | None:
@@ -115,6 +116,10 @@ def _validate_scene_settings(config: Dict[str, Any], scene: Dict[str, Any], scen
             validate_character_color_filter(
                 value.get("color_filter"),
                 f"scene '{scene_id}' character_defaults.{name}.color_filter",
+            )
+            validate_character_rig_config(
+                value.get("rig"),
+                f"scene '{scene_id}' character_defaults.{name}.rig",
             )
     background_cfg = scene.get("background")
     if background_cfg is not None:
@@ -218,6 +223,10 @@ def _validate_line_features(line: Dict[str, Any], scene_id: str, line_idx: int) 
             validate_character_color_filter(
                 character.get("color_filter"),
                 f"{container_id}, characters[{char_idx}].color_filter",
+            )
+            validate_character_rig_config(
+                character.get("rig"),
+                f"{container_id}, characters[{char_idx}].rig",
             )
             validate_character_motion_preset(
                 character,
