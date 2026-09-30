@@ -106,6 +106,7 @@ JSON には少なくとも次を含みます。
   - character multi-keyframe support
   - supported motion properties
   - supported easing vocabulary
+  - supported deterministic character presets
   - camera multi-keyframe support status
   - background pan/zoom multi-keyframe support status
 - built-in plugin metadata
@@ -123,7 +124,13 @@ Motion Core は実装済みpropertyだけを公開します。現在は characte
     "character": {
       "multi_keyframe": true,
       "properties": ["position.x", "position.y", "scale", "rotate", "opacity"],
-      "easings": ["linear", "ease_in", "ease_out", "ease_in_out"]
+      "easings": ["linear", "ease_in", "ease_out", "ease_in_out"],
+      "presets": ["bounce", "emphasis", "pop"],
+      "preset_parameters": {
+        "start_min": 0.0,
+        "intensity_range": [0.0, 2.0],
+        "max_presets_per_move": 1
+      }
     },
     "camera": {
       "multi_keyframe": true,
