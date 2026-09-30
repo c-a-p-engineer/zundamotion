@@ -102,6 +102,7 @@ class SceneTalkRendererMixin:
             "background_effects": context.line_config.get(
                 "background_effects"
             ),
+            "camera": context.line_config.get("camera"),
             "background_layout": context.background_layout,
             "video_filter": context.background_config.get("video_filter"),
         }
@@ -142,6 +143,7 @@ class SceneTalkRendererMixin:
                     "background_effects"
                 ),
                 screen_effects=context.line_config.get("screen_effects"),
+                camera_config=context.line_config.get("camera"),
                 face_anim=list(plan.face_animations),
                 audio_delay=context.pre_duration,
                 _force_cpu=bool(context.image_layer_overlays),
