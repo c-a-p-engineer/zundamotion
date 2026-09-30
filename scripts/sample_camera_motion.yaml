@@ -1,0 +1,37 @@
+meta:
+  title: "カメラモーションサンプル"
+  version: 1
+
+video:
+  fps: 30
+
+scenes:
+  - id: camera_motion_showcase
+    bg: "assets/bg/room.png"
+    lines:
+      - text: "カメラは合成済みのワールド全体を拡大して、注目位置を移動できます。"
+        speaker_id: 3
+        camera:
+          focus: {x: 0.65, y: 0.45}
+          zoom: 1.35
+          move:
+            from:
+              focus: {x: 0.50}
+              zoom: 1.00
+            start: 0.10
+            duration: 1.20
+            easing: ease_in_out
+            keyframes:
+              - at: 0.40
+                zoom: 1.18
+                easing: ease_out
+              - at: 0.85
+                focus: {x: 0.65}
+                zoom: 1.30
+                easing: ease_in
+
+      - text: "字幕はスクリーン座標なので、カメラが動いても位置と大きさは変わりません。"
+        speaker_id: 3
+        camera:
+          focus: {x: 0.35, y: 0.50}
+          zoom: 1.50
