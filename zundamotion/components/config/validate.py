@@ -14,6 +14,7 @@ from .validate_badges import (
     _validate_badge_definitions_list,
     _validate_badge_update,
 )
+from .validate_character_rig import validate_character_rig_config
 from .validate_common import (
     ANCHOR_CHOICES,
     BACKGROUND_FIT_CHOICES,
@@ -157,6 +158,10 @@ def _validate_defaults(config: Dict[str, Any]) -> None:
             validate_character_color_filter(
                 character.get("color_filter"),
                 f"defaults.characters.{name}.color_filter",
+            )
+            validate_character_rig_config(
+                character.get("rig"),
+                f"defaults.characters.{name}.rig",
             )
 
 
