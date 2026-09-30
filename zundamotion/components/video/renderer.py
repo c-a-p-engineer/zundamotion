@@ -26,6 +26,7 @@ from ..subtitles import SubtitleGenerator
 from .clip_renderer import render_clip as render_clip_task
 from .badge_overlay_cache import BadgeOverlayCache
 from .character_image_resolver import CharacterImageResolver
+from .character_rig_materializer import CharacterRigMaterializer
 from .image_color_filter_cache import ImageColorFilterCache
 from .scene_renderer import (
     render_scene_base as render_scene_base_task,
@@ -91,6 +92,7 @@ class VideoRenderer(OverlayMixin):
         self.badge_cache = BadgeOverlayCache(self.cache_manager)
         self.image_color_filter_cache = ImageColorFilterCache(self.cache_manager)
         self.character_image_resolver = CharacterImageResolver(self.image_color_filter_cache)
+        self.character_rig_materializer = CharacterRigMaterializer(self.cache_manager)
         # Face overlay preprocessor/cache
         self.face_cache = FaceOverlayCache(self.cache_manager)
         # Path usage counters for diagnostics
