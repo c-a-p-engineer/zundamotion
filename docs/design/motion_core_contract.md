@@ -118,7 +118,7 @@ MotionPlan
 
 - character
 - object / overlay
-- camera（将来）
+- camera（後続sliceで実装済み）
 
 同一targetの識別子はrender中に安定していなければなりません。
 
@@ -128,7 +128,7 @@ MotionPlan
 - `camera`: world-spaceを観測するview transform
 - `screen`: 字幕・badge等の画面固定要素
 
-0.2最初の縦切りは character/object motion を実装対象とし、cameraは意味境界だけ先に固定します。
+0.2最初の縦切りは character/object motion から開始し、後続sliceで camera の bounded world viewport と world/screen-space 境界まで実装済みです。詳細は camera contract を正とします。
 
 ## 6. Property model
 
@@ -141,6 +141,8 @@ MotionPlan
 | `scale` | finite number > 0 | 実装対象 | uniform scale |
 | `rotate` | degree, finite number | 後続sliceで実装済み | line-local、anchor pivot、fixed transparent canvas。詳細は rotate contract |
 | `opacity` | 0.0〜1.0 | 後続sliceで実装済み | source alpha × motion opacity × lifecycle fade、line-local。詳細は opacity contract |
+
+camera target は別target trackとして `focus.x` / `focus.y` / `zoom` を実装済みです。character property tableへ混在させず、[Camera / Coordinate Space Contract](./motion_camera_contract.md) の bounded W×H viewport と layer-space規則を正とします。
 
 任意文字列式を新しいmulti-keyframe値として許可しません。
 
