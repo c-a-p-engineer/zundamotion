@@ -83,6 +83,14 @@ def _validate_strict_effect(effect: dict[str, Any], label: str) -> None:
             maximum=120.0,
         )
 
+    for alias in ("from", "to"):
+        if alias in effect:
+            _number_in_range(
+                effect.get(alias),
+                f"{label}.{alias}",
+                minimum=1.0,
+                maximum=4.0,
+            )
     _validate_zoom(effect.get("zoom"), effect, f"{label}.zoom")
 
     pan_value = effect.get("pan")
