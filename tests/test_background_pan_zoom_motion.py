@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from zundamotion.cache import CacheManager
 from zundamotion.components.config.validate_motion_background import (
     validate_background_motion_effects,
 )
@@ -179,3 +180,30 @@ def test_invalid_legacy_values_are_not_hardened_by_new_validator() -> None:
         ],
         "line.background_effects",
     )
+
+
+
+def test_background_keyframes_change_cache_identity(tmp_path) -> None:
+    cache = CacheManager(tmp_path / "cache")
+    first = {
+        "background_effects": [
+            _effect(
+                keyframes=[
+                    {"at": 0.3, "zoom": 1.15},
+                    {"at": 0.8, "pan": {"x": 0.6}, "zoom": 1.3},
+                ]
+            )
+        ]
+    }
+    changed = {
+        "background_effects": [
+            _effect(
+                keyframes=[
+                    {"at": 0.35, "zoom": 1.15},
+                    {"at": 0.8, "pan": {"x": 0.6}, "zoom": 1.3},
+                ]
+            )
+        ]
+    }
+
+    assert cache._generate_hash(first) != cache._generate_hash(changed)
