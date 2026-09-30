@@ -139,3 +139,23 @@ def test_fast_path_eligibility_rejects_camera_line() -> None:
     facts = _facts(lines=(_line(has_camera=True),))
 
     assert evaluate_fast_path_eligibility(facts) == (False, "camera:1")
+
+
+
+def test_simple_fast_path_rejects_motion_preset_character() -> None:
+    renderer = SceneFastPathCharacterMixin()
+    state, error = renderer._extract_simple_character_state(
+        {
+            "characters": [
+                {
+                    "name": "hero",
+                    "visible": True,
+                    "scale": 1.0,
+                    "move": {"preset": "pop"},
+                }
+            ]
+        }
+    )
+
+    assert state is None
+    assert error == "motion_preset_requires_standard_renderer"
