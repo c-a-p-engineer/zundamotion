@@ -300,3 +300,71 @@ def test_apply_face_overlays_uses_same_rotate_transform_as_character(
         assert all("overlay=x=(W-w)/2:y=H-h/2-20" in part for part in overlay_filters)
 
     asyncio.run(_run())
+
+
+
+def test_apply_face_overlays_uses_same_opacity_track_as_character(
+    monkeypatch, tmp_path: Path
+) -> None:
+    async def _run() -> None:
+        character_root = tmp_path / "assets" / "characters" / "hero" / "default"
+        mouth_dir = character_root / "mouth"
+        eyes_dir = character_root / "eyes"
+        mouth_dir.mkdir(parents=True)
+        eyes_dir.mkdir(parents=True)
+        (mouth_dir / "half.png").write_bytes(b"half")
+        (eyes_dir / "close.png").write_bytes(b"close")
+        monkeypatch.chdir(tmp_path)
+
+        filter_complex_parts: list[str] = []
+        overlay_streams: list[str] = []
+        overlay_filters: list[str] = []
+        await apply_face_overlays(
+            renderer=_StubRenderer(),
+            face_anim={
+                "target_name": "hero",
+                "mouth": [{"start": 0.0, "end": 0.3, "state": "half"}],
+                "eyes": [{"start": 0.4, "end": 0.45, "state": "close"}],
+            },
+            subtitle_line_config={
+                "characters": [{"name": "hero", "visible": True}]
+            },
+            char_overlay_placement={
+                "hero": {
+                    "x_expr": "10",
+                    "y_expr": "20",
+                    "scale_orig": "1.0",
+                    "scale_expr": "1.000000",
+                    "dynamic_scale": False,
+                    "source_width": 20,
+                    "source_height": 40,
+                    "anchor": "bottom_center",
+                    "move": {
+                        "from": {"opacity": 0.0},
+                        "duration": 1.0,
+                    },
+                    "rotate_expr": "0",
+                    "rotate_active": False,
+                    "opacity_expr": "if(lt(T,1.000000),0.500000,1.000000)",
+                    "opacity_active": True,
+                    "dynamic_position": False,
+                    "expression": "default",
+                    "asset_name": "hero",
+                    "fade": ",fade=t=in:st=0:d=0.4:alpha=1",
+                }
+            },
+            duration=1.0,
+            cmd=[],
+            input_layers=[],
+            filter_complex_parts=filter_complex_parts,
+            overlay_streams=overlay_streams,
+            overlay_filters=overlay_filters,
+        )
+
+        assert len(overlay_streams) == 2
+        assert sum("alphaextract" in part for part in filter_complex_parts) == 2
+        assert sum("geq=lum=" in part for part in filter_complex_parts) == 2
+        assert sum("fade=t=in:st=0:d=0.4:alpha=1" in part for part in filter_complex_parts) == 2
+        assert all("overlay=x=10:y=20" in part for part in overlay_filters)
+
+    asyncio.run(_run())
