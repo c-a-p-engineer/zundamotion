@@ -8,6 +8,9 @@ import pytest
 from PIL import Image
 
 from zundamotion.components.video.clip.camera import append_camera_transform
+from zundamotion.components.video.clip.effects.resolve import (
+    resolve_background_effects,
+)
 from zundamotion.components.video.clip.movement import (
     build_dynamic_scale_filter,
     build_move_expressions,
@@ -603,6 +606,135 @@ def test_camera_moves_world_but_keeps_screen_layer_fixed_and_duration(
     # Screen-space marker is composited after camera and must remain invariant.
     assert abs(start_red[0] - 8) <= 2
     assert abs(start_red[1] - 8) <= 2
+    assert abs(end_red[0] - start_red[0]) <= 1
+    assert abs(end_red[1] - start_red[1]) <= 1
+    assert abs((end_red[2] - end_red[0]) - (start_red[2] - start_red[0])) <= 1
+    assert abs((end_red[3] - end_red[1]) - (start_red[3] - start_red[1])) <= 1
+
+    assert _probe_duration(output) == pytest.approx(1.2, abs=0.08)
+
+
+
+def test_background_keyframes_move_only_background_before_camera(
+    tmp_path: Path,
+) -> None:
+    background = tmp_path / "background-motion.png"
+    bg = Image.new("RGBA", (160, 120), (0, 0, 0, 255))
+    for y in range(48, 68):
+        for x in range(105, 125):
+            bg.putpixel((x, y), (0, 255, 0, 255))
+    bg.save(background)
+
+    world_marker = tmp_path / "background-world-marker.png"
+    Image.new("RGBA", (12, 12), (255, 0, 0, 255)).save(world_marker)
+
+    snippet = resolve_background_effects(
+        effects=[
+            {
+                "type": "bg:pan_zoom",
+                "zoom": {"from": 1.0, "to": 1.6},
+                "pan": {
+                    "from": {"x": 0.5, "y": 0.5},
+                    "to": {"x": 0.65, "y": 0.5},
+                },
+                "duration": 1.0,
+                "easing": "ease_in_out",
+                "keyframes": [
+                    {
+                        "at": 0.45,
+                        "zoom": 1.25,
+                        "easing": "ease_out",
+                    },
+                    {
+                        "at": 0.75,
+                        "pan": {"x": 0.58},
+                        "zoom": 1.45,
+                    },
+                ],
+            }
+        ],
+        input_label="[0:v]",
+        duration=1.2,
+        width=160,
+        height=120,
+        fps=30,
+    )
+    assert snippet is not None
+    assert snippet.output_label == "[bg_pan_zoom_1]"
+
+    parts = list(snippet.filter_chain)
+    parts.append(
+        f"{snippet.output_label}[1:v]overlay=x=42:y=54:shortest=1[world]"
+    )
+    camera_label = append_camera_transform(
+        camera_config={
+            "focus": {"x": 0.5, "y": 0.5},
+            "zoom": 1.2,
+        },
+        input_label="[world]",
+        width=160,
+        height=120,
+        fps=30,
+        parts=parts,
+    )
+    parts.append(f"{camera_label}format=yuv420p[v]")
+
+    output = tmp_path / "background-motion-camera.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-loop",
+            "1",
+            "-framerate",
+            "30",
+            "-i",
+            str(background),
+            "-loop",
+            "1",
+            "-framerate",
+            "30",
+            "-i",
+            str(world_marker),
+            "-filter_complex",
+            ";".join(parts),
+            "-map",
+            "[v]",
+            "-t",
+            "1.2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    start = _extract_frame(
+        output,
+        0.03,
+        tmp_path / "background-motion-start.png",
+    )
+    end = _extract_frame(
+        output,
+        1.08,
+        tmp_path / "background-motion-end.png",
+    )
+    start_green = _green_bounds(start)
+    end_green = _green_bounds(end)
+    start_red = _red_bounds(start)
+    end_red = _red_bounds(end)
+
+    # Background-local motion changes the prepared background over time.
+    assert (end_green[2] - end_green[0]) > (start_green[2] - start_green[0])
+    assert end_green[0] != pytest.approx(start_green[0], abs=2)
+
+    # The red world overlay is added after background motion. Static camera
+    # transforms it equally at both times, so it must not inherit bg motion.
     assert abs(end_red[0] - start_red[0]) <= 1
     assert abs(end_red[1] - start_red[1]) <= 1
     assert abs((end_red[2] - end_red[0]) - (start_red[2] - start_red[0])) <= 1
