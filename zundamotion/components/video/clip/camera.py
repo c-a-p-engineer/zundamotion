@@ -93,7 +93,11 @@ def build_camera_expressions(
     from_map = raw_from if isinstance(raw_from, Mapping) else {}
     from_focus_raw = from_map.get("focus")
     from_focus = (
-        _focus_mapping(from_focus_raw, "camera.move.from.focus")
+        _focus_mapping(
+            from_focus_raw,
+            "camera.move.from.focus",
+            require_both=False,
+        )
         if from_focus_raw is not None
         else {}
     )
@@ -249,11 +253,18 @@ def _flatten_waypoints(value: Any) -> list[Mapping[str, Any]]:
     return flattened
 
 
-def _focus_mapping(value: Any, label: str) -> Mapping[str, Any]:
+def _focus_mapping(
+    value: Any,
+    label: str,
+    *,
+    require_both: bool = True,
+) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise ValidationError(f"{label} must be a dictionary with x and y.")
-    if "x" not in value or "y" not in value:
+        raise ValidationError(f"{label} must be a dictionary.")
+    if require_both and ("x" not in value or "y" not in value):
         raise ValidationError(f"{label}.x and {label}.y are required.")
+    if not value and not require_both:
+        raise ValidationError(f"{label} must define x or y.")
     return value
 
 
