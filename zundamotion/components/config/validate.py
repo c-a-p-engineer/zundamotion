@@ -124,6 +124,10 @@ def _validate_defaults(config: Dict[str, Any]) -> None:
         value = defaults.get(key)
         if value is not None and not isinstance(value, bool):
             raise ValidationError(f"'defaults.{key}' must be a boolean.")
+    if "camera" in defaults:
+        raise ValidationError(
+            "'defaults.camera' is not supported; camera is line-local."
+        )
     characters = defaults.get("characters")
     if characters is not None:
         if not isinstance(characters, dict):
