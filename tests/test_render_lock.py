@@ -156,3 +156,74 @@ def test_render_lock_cli_round_trip_and_difference_exit_code(tmp_path: Path) -> 
     document = json.loads(changed_proc.stdout)
     assert document["valid"] is False
     assert any(item["code"] == "ZDM-L1200" for item in document["differences"])
+
+
+
+def test_render_lock_tracks_svg_rig_and_referenced_local_assets(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    part = tmp_path / "assets" / "characters" / "hero" / "part.png"
+    part.parent.mkdir(parents=True)
+    part.write_bytes(b"part-v1")
+    rig = part.parent / "character.svg"
+    rig.write_text(
+        """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<g id="character">
+  <g id="body"><image href="part.png" data-source-part="body"/></g>
+  <g id="head"><g id="face">
+    <g id="eyes"><g id="eyes-open"/><g id="eyes-closed"/></g>
+    <g id="mouth"><g id="mouth-closed"/></g>
+  </g></g>
+</g>
+</svg>""",
+        encoding="utf-8",
+    )
+    script = tmp_path / "script.yaml"
+    script.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"title": "rig-lock", "version": 3},
+                "scenes": [
+                    {
+                        "id": "scene1",
+                        "lines": [
+                            {
+                                "wait": {"duration": 0.1},
+                                "characters": [
+                                    {
+                                        "name": "hero",
+                                        "visible": True,
+                                        "rig": {
+                                            "path": "assets/characters/hero/character.svg"
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    lock = create_render_lock("script.yaml", project_root=tmp_path)
+    assets = {item["path"]: item["sha256"] for item in lock["assets"]}
+
+    assert "assets/characters/hero/character.svg" in assets
+    assert "assets/characters/hero/part.png" in assets
+
+    part.write_bytes(b"part-v2")
+    verification = verify_render_lock(
+        "script.yaml",
+        lock,
+        project_root=tmp_path,
+    )
+    assert verification["valid"] is False
+    assert any(
+        item["subject"] == "assets:assets/characters/hero/part.png"
+        for item in verification["differences"]
+    )
