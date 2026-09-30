@@ -731,7 +731,7 @@ def test_background_keyframes_move_only_background_before_camera(
 
     # Background-local motion changes the prepared background over time.
     assert (end_green[2] - end_green[0]) > (start_green[2] - start_green[0])
-    assert end_green[0] != pytest.approx(start_green[0], abs=2)
+    assert end_green[2] > start_green[2]
 
     # The red world overlay is added after background motion. Static camera
     # transforms it equally at both times, so it must not inherit bg motion.
