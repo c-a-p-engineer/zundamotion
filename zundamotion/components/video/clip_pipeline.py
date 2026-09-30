@@ -12,6 +12,7 @@ from .clip_audio_graph import append_clip_audio_graph
 from .clip_command import build_clip_command
 from .clip_executor import execute_clip_command
 from .clip.camera import camera_requested
+from .clip.motion_preset import expand_character_motion_presets
 from .clip_filter_policy import resolve_clip_filter_policy
 from .clip_input_collection import collect_clip_inputs
 from .clip_video_graph import ClipVideoGraphRequest, build_clip_video_graph
@@ -78,6 +79,9 @@ async def run_clip_pipeline(
     output_path = renderer.temp_dir / f"{request.output_filename}.mp4"
     started_at = time.time()
     logger.info("[Video] Rendering clip -> %s", output_path.name)
+    request.characters_config = expand_character_motion_presets(
+        request.characters_config
+    )
     inputs = await collect_clip_inputs(
         renderer=renderer, audio_path=request.audio_path,
         duration=request.duration,
