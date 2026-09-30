@@ -276,6 +276,71 @@ def test_compile_preserves_camera_authoring_without_renderer_ir(
     assert "tracks" not in camera
 
 
+def test_compile_preserves_background_pan_zoom_keyframes_without_renderer_ir(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "background-motion.yaml"
+    _write_script(
+        script,
+        {
+            "meta": {"title": "background motion", "version": 3},
+            "scenes": [
+                {
+                    "id": "background-motion",
+                    "lines": [
+                        {
+                            "text": "background motion",
+                            "background_effects": [
+                                {
+                                    "type": "bg:pan_zoom",
+                                    "zoom": {"from": 1.0, "to": 1.4},
+                                    "pan": {
+                                        "from": {"x": 0.2, "y": 0.5},
+                                        "to": {"x": 0.8, "y": 0.5},
+                                    },
+                                    "start": 0.1,
+                                    "duration": 1.2,
+                                    "easing": "ease_in_out",
+                                    "keyframes": [
+                                        {
+                                            "at": 0.4,
+                                            "zoom": 1.15,
+                                            "easing": "ease_out",
+                                        },
+                                        {
+                                            "at": 0.8,
+                                            "pan": {"x": 0.6},
+                                            "zoom": 1.3,
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    document = compiled_document(str(script))
+    effect = document["config"]["script"]["scenes"][0]["lines"][0][
+        "background_effects"
+    ][0]
+
+    assert document["format_version"] == 1
+    assert effect["type"] == "bg:pan_zoom"
+    assert effect["start"] == 0.1
+    assert effect["duration"] == 1.2
+    assert effect["easing"] == "ease_in_out"
+    assert effect["keyframes"] == [
+        {"at": 0.4, "easing": "ease_out", "zoom": 1.15},
+        {"at": 0.8, "pan": {"x": 0.6}, "zoom": 1.3},
+    ]
+    assert "tracks" not in effect
+    assert "zoompan" not in effect
+    assert "cpu_fallback" not in effect
+
+
 def test_validation_document_reports_stable_error_code(tmp_path: Path) -> None:
     script = tmp_path / "invalid.yaml"
     _write_script(script, {"meta": {"title": "invalid", "version": 3}, "scenes": "bad"})
