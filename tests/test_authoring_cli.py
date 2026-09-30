@@ -409,6 +409,61 @@ def test_compile_preserves_background_pan_zoom_keyframes_without_renderer_ir(
     assert "cpu_fallback" not in effect
 
 
+def test_compile_preserves_svg_rig_authoring_without_materialized_paths(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    rig = tmp_path / "assets" / "characters" / "hero" / "character.svg"
+    rig.parent.mkdir(parents=True)
+    rig.write_text(
+        """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<g id="character"><g id="body"/><g id="head"><g id="face">
+<g id="eyes"><g id="eyes-open"/><g id="eyes-closed"/></g>
+<g id="mouth"><g id="mouth-closed"/></g>
+</g></g></g></svg>""",
+        encoding="utf-8",
+    )
+    script = tmp_path / "rig.yaml"
+    _write_script(
+        script,
+        {
+            "meta": {"title": "rig", "version": 3},
+            "scenes": [
+                {
+                    "id": "rig",
+                    "lines": [
+                        {
+                            "wait": {"duration": 0.1},
+                            "characters": [
+                                {
+                                    "name": "hero",
+                                    "visible": True,
+                                    "rig": {
+                                        "path": "assets/characters/hero/character.svg",
+                                        "raster_width": 100,
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    document = compiled_document(str(script))
+    character = document["config"]["script"]["scenes"][0]["lines"][0]["characters"][0]
+
+    assert document["format_version"] == 1
+    assert character["rig"] == {
+        "path": "assets/characters/hero/character.svg",
+        "raster_width": 100,
+    }
+    assert "materialized" not in character["rig"]
+    assert "cache_path" not in character["rig"]
+
+
 def test_validation_document_reports_stable_error_code(tmp_path: Path) -> None:
     script = tmp_path / "invalid.yaml"
     _write_script(script, {"meta": {"title": "invalid", "version": 3}, "scenes": "bad"})
