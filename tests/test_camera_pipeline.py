@@ -59,7 +59,7 @@ def test_camera_only_forces_cpu_when_view_transform_is_active(
     observed: dict[str, object] = {}
 
     async def _collect(**_kwargs):
-        return SimpleNamespace()
+        return SimpleNamespace(cmd=[])
 
     def _policy(**kwargs):
         observed["policy_force_cpu"] = kwargs["force_cpu"]
@@ -169,12 +169,19 @@ def test_camera_stage_is_after_world_composition_and_before_subtitle(
         audio_delay=0.0,
         force_cpu=True,
     )
-    policy = SimpleNamespace()
+    policy = SimpleNamespace(
+        use_cuda_filters=False,
+        use_opencl_overlays=False,
+    )
 
     asyncio.run(
         build_clip_video_graph(
             renderer,
-            SimpleNamespace(),
+            SimpleNamespace(
+                character_indices={},
+                char_effective_scale={},
+                char_metadata={},
+            ),
             request,
             policy,
         )
