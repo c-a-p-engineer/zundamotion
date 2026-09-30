@@ -11,6 +11,7 @@ from ...video.clip.characters import (
     is_horizontal_flip_enabled,
     is_vertical_flip_enabled,
 )
+from ...video.character_rig_materializer import rig_runtime_enabled
 from ...video.image_color_filter_cache import ImageColorFilterCache
 
 
@@ -74,10 +75,12 @@ def resolve_character_render_state(
     rotate = _number(character.get("rotate", 0.0), 0.0)
     has_opacity = "opacity" in character
     opacity = _number(character.get("opacity", 1.0), 1.0)
+    rig_enabled = rig_runtime_enabled(character)
     dynamic = bool(
         move_enabled
         or abs(rotate) > 1e-12
         or has_opacity
+        or rig_enabled
         or character.get("enter")
         or character.get("leave")
         or character.get("effects")
@@ -94,6 +97,7 @@ def resolve_character_render_state(
         "scale": _number(character.get("scale", defaults.get("default_scale", 1.0)), 1.0),
         "rotate": rotate,
         "opacity": opacity,
+        "rig": character.get("rig"),
         "anchor": str(
             character.get("anchor", defaults.get("default_anchor", "bottom_center"))
         ).lower(),
@@ -120,6 +124,7 @@ def character_state_fingerprint(state: Dict[str, Any]) -> Dict[str, Any]:
             "scale",
             "rotate",
             "opacity",
+            "rig",
             "anchor",
             "position",
             "flip_x",
