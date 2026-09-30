@@ -66,6 +66,10 @@ def test_wait_clip_delegates_to_common_clip_pipeline_with_finite_audio(tmp_path:
             {
                 "background_effects": [{"type": "zoom"}],
                 "screen_effects": [{"type": "fade"}],
+                "camera": {
+                    "focus": {"x": 0.6, "y": 0.5},
+                    "zoom": 1.2,
+                },
             },
             characters_config=[{"id": "zundamon", "visible": True}],
             image_layer_overlays=[{"path": "overlay.png"}],
@@ -83,6 +87,10 @@ def test_wait_clip_delegates_to_common_clip_pipeline_with_finite_audio(tmp_path:
     assert renderer.render_kwargs["characters_config"][0]["id"] == "zundamon"
     assert renderer.render_kwargs["background_effects"] == [{"type": "zoom"}]
     assert renderer.render_kwargs["screen_effects"] == [{"type": "fade"}]
+    assert renderer.render_kwargs["camera_config"] == {
+        "focus": {"x": 0.6, "y": 0.5},
+        "zoom": 1.2,
+    }
     assert renderer.cache_manager.key_data["type"] == "finite_wait_silence"
     assert renderer.cache_manager.key_data["duration_us"] == 250_000
 
