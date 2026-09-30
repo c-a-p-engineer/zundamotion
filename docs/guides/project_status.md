@@ -97,8 +97,8 @@ first vertical slice は完了しています。
 
 残り:
 
-- deterministic motion preset
-- generic target abstractionが必要かの再評価
+- deterministic character motion preset runtime実装（#120 contract確定済み。first sliceは pop / bounce / emphasis）
+- generic public target abstraction は現時点で採用見送り。owner間のpublic contract共通化が実益を持つ条件が揃った場合だけ再評価
 
 camera は background / insert / image layer / character / face をworld-spaceとしてまとめてview transformし、subtitle / badgeはscreen-spaceに残します。first sliceはoverscan / zoom-out / camera rotationを持ちません。rotate は既存overlay rotateを別ownerのまま維持し、opacity は foreground overlay opacity/blink と別target ownerのまま維持しています。
 最初から任意frame callbackやbrowser runtimeを導入しません。
@@ -163,9 +163,10 @@ Google系など新しいcloud TTSを追加する場合も、既存 `TTSProvider`
 
 1. 0.1.x release / compiler / provider 基準線を継続して安定化する
 2. Motion Core x/y/scale/rotate/opacity/camera/background pan-zoom の代表実動画を増やし、native基準線を維持する
-3. deterministic motion preset と generic target abstraction の必要性を再評価する
-4. Motion Core の基準線を確認して Character Runtime へ進む
-5. native経路で不足する具体例が集まってから Rich Renderer を比較する
+3. 確定済みpreset contractに従い、character moveへ pop / bounce / emphasis を決定論的にloweringする
+4. presetを含むMotion Core基準線を確認して Character Runtime へ進む
+5. generic public target abstraction は再検討条件が成立した時だけ再評価する
+6. native経路で不足する具体例が集まってから Rich Renderer を比較する
 
 ## 6. 状態更新ルール
 
