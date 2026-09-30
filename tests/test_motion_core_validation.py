@@ -5,6 +5,7 @@ import math
 import pytest
 
 from zundamotion.components.config.validate_script import (
+    _validate_camera,
     _validate_character_move,
     _validate_character_opacity,
     _validate_character_rotate,
@@ -222,3 +223,69 @@ def test_opacity_values_must_be_finite_in_unit_interval(value) -> None:
             {"opacity": value},
             "character",
         )
+
+
+
+def test_camera_validation_accepts_partial_start_and_sparse_waypoints() -> None:
+    _validate_camera(
+        {
+            "focus": {"x": 0.7, "y": 0.4},
+            "zoom": 1.4,
+            "move": {
+                "from": {
+                    "focus": {"x": 0.5},
+                    "zoom": 1.0,
+                },
+                "start": 0.1,
+                "duration": 1.0,
+                "easing": "ease_in_out",
+                "keyframes": [
+                    {"at": 0.3, "zoom": 1.2, "easing": "ease_out"},
+                    {"at": 0.7, "focus": {"x": 0.65}},
+                ],
+            },
+        },
+        "camera",
+    )
+
+
+@pytest.mark.parametrize(
+    ("camera", "message"),
+    [
+        (
+            {"focus": {"x": -0.1, "y": 0.5}, "zoom": 1.0},
+            "focus.x must be between 0.0 and 1.0",
+        ),
+        (
+            {"focus": {"x": 0.5, "y": 0.5}, "zoom": 0.9},
+            "zoom must be between 1.0 and 4.0",
+        ),
+        (
+            {
+                "focus": {"x": 0.7, "y": 0.5},
+                "zoom": 1.2,
+                "move": {
+                    "from": {"zoom": 1.0},
+                    "duration": 1.0,
+                    "keyframes": [{"at": 0.5, "focus": {"x": 0.6}}],
+                },
+            },
+            "missing start values for: focus.x",
+        ),
+        (
+            {
+                "focus": {"x": 0.5, "y": 0.5},
+                "zoom": 1.0,
+                "move": {
+                    "from": {"zoom": 1.0},
+                    "duration": 1.0,
+                    "keyframes": [{"at": 0.5, "easing": "ease_out"}],
+                },
+            },
+            "must define focus or zoom",
+        ),
+    ],
+)
+def test_camera_validation_rejects_invalid_contract(camera, message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        _validate_camera(camera, "camera")
