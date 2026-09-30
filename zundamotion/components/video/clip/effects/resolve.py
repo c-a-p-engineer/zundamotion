@@ -140,7 +140,6 @@ def resolve_background_effects(
                 height=height,
                 index=idx,
                 id_prefix=id_prefix,
-                output_fps=output_fps,
             )
         elif effect_type in {"bg:pan_zoom", "bg:ken_burns"}:
             snippet = _resolve_background_pan_zoom(
@@ -151,6 +150,7 @@ def resolve_background_effects(
                 height=height,
                 index=idx,
                 id_prefix=id_prefix,
+                output_fps=output_fps,
             )
         else:
             logger.debug("[Effects] Unsupported background effect type: %s", effect_type)
