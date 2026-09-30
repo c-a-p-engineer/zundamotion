@@ -42,16 +42,25 @@ def build_opacity_expression(
 ) -> tuple[str, bool]:
     """Build a static or MotionTrack-backed alpha multiplier expression."""
 
+    raw_from = move_config.get("from") if isinstance(move_config, Mapping) else None
+    keyframes = _keyframes(move_config) if isinstance(move_config, Mapping) else []
+    has_waypoint = any("opacity" in frame for frame in keyframes)
+    has_start = isinstance(raw_from, Mapping) and "opacity" in raw_from
+    has_final = to_opacity is not None
+
+    if not has_final and not has_waypoint and not has_start:
+        return "1.000000", False
+    if not has_final:
+        raise ValidationError(
+            "Character opacity is required when move animates opacity."
+        )
+
     final_opacity = _opacity_value(to_opacity, "character opacity")
     static_expr = f"{final_opacity:.6f}"
 
     if not isinstance(move_config, Mapping) or move_config.get("enabled") is False:
         return static_expr, True
 
-    raw_from = move_config.get("from")
-    keyframes = _keyframes(move_config)
-    has_waypoint = any("opacity" in frame for frame in keyframes)
-    has_start = isinstance(raw_from, Mapping) and "opacity" in raw_from
     if not has_waypoint and not has_start:
         return static_expr, True
     if not has_start:
