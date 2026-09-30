@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from zundamotion.components.config.validate_script import _validate_camera
 from zundamotion.components.video.clip.camera import (
     append_camera_transform,
     build_camera_expressions,
@@ -152,3 +153,69 @@ def test_camera_keyframe_requires_matching_start_value() -> None:
             },
             fps=30,
         )
+
+
+
+def test_camera_validator_accepts_sparse_property_tracks() -> None:
+    _validate_camera(
+        {
+            "focus": {"x": 0.7, "y": 0.4},
+            "zoom": 1.3,
+            "move": {
+                "from": {
+                    "focus": {"x": 0.5},
+                    "zoom": 1.0,
+                },
+                "duration": 1.0,
+                "keyframes": [
+                    {"at": 0.4, "zoom": 1.2, "easing": "ease_out"},
+                    {"at": 0.7, "focus": {"x": 0.65}},
+                ],
+            },
+        },
+        "line camera",
+    )
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        (
+            {"focus": {"x": 0.5, "y": 0.5}, "zoom": 0.9},
+            "zoom must be between 1.0 and 4.0",
+        ),
+        (
+            {"focus": {"x": 1.1, "y": 0.5}, "zoom": 1.2},
+            "focus.x must be between 0.0 and 1.0",
+        ),
+        (
+            {
+                "focus": {"x": 0.7, "y": 0.5},
+                "zoom": 1.2,
+                "move": {
+                    "duration": 1.0,
+                    "keyframes": [{"at": 0.5, "focus": {"x": 0.6}}],
+                },
+            },
+            "missing start values",
+        ),
+        (
+            {
+                "focus": {"x": 0.7, "y": 0.5},
+                "zoom": 1.2,
+                "move": {
+                    "from": {"zoom": 1.0},
+                    "duration": 1.0,
+                    "keyframes": [
+                        {"at": 0.7, "zoom": 1.1},
+                        {"at": 0.4, "zoom": 1.2},
+                    ],
+                },
+            },
+            "strictly increasing",
+        ),
+    ],
+)
+def test_camera_validator_rejects_invalid_contract(config, message) -> None:
+    with pytest.raises(ValidationError, match=message):
+        _validate_camera(config, "line camera")
