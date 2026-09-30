@@ -750,8 +750,8 @@ def test_background_keyframes_move_only_background_before_camera(
 @pytest.mark.parametrize(
     ("preset", "peak_time", "expect_start_smaller"),
     [
-        ("pop", 0.30, True),
-        ("emphasis", 0.23, False),
+        ("pop", 0.40, True),
+        ("emphasis", 0.33, False),
     ],
 )
 def test_scale_motion_presets_render_expected_pulse_and_keep_duration(
@@ -769,7 +769,11 @@ def test_scale_motion_presets_render_expected_pulse_and_keep_duration(
             "visible": True,
             "position": {"x": 40, "y": 40},
             "scale": 1.0,
-            "move": {"preset": preset},
+            "move": {
+                "preset": preset,
+                "start": 0.1,
+                "intensity": 2.0,
+            },
         }
     )
     move = expanded["move"]
@@ -859,7 +863,7 @@ def test_bounce_motion_preset_moves_y_and_keeps_duration(
             "visible": True,
             "position": {"x": 40, "y": 60},
             "scale": 1.0,
-            "move": {"preset": "bounce"},
+            "move": {"preset": "bounce", "start": 0.1},
         }
     )
     move = expanded["move"]
@@ -916,10 +920,10 @@ def test_bounce_motion_preset_moves_y_and_keeps_duration(
         _extract_frame(output, 0.03, tmp_path / "bounce-start.png")
     )
     high = _green_bounds(
-        _extract_frame(output, 0.22, tmp_path / "bounce-high.png")
+        _extract_frame(output, 0.32, tmp_path / "bounce-high.png")
     )
     low = _green_bounds(
-        _extract_frame(output, 0.42, tmp_path / "bounce-low.png")
+        _extract_frame(output, 0.52, tmp_path / "bounce-low.png")
     )
     end = _green_bounds(
         _extract_frame(output, 0.82, tmp_path / "bounce-end.png")
