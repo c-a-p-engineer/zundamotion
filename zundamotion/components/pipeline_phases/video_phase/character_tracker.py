@@ -51,7 +51,10 @@ class CharacterTracker:
             state = self._initial_state(name) if not previous_state else deepcopy(previous_state)
             if isinstance(upd.get("move"), dict):
                 move = dict(upd["move"])
-                if move.get("enabled") is not False:
+                if (
+                    move.get("enabled") is not False
+                    and "preset" not in move
+                ):
                     previous_position = previous_state.get("position")
                     previous_scale = previous_state.get("scale")
                     has_scale_keyframe = _has_scale_keyframe(move)
