@@ -194,3 +194,62 @@ def test_simple_fast_path_allows_disabled_motion_preset(
     assert error is None
     assert state is not None
     assert state["move"]["enabled"] is False
+
+
+
+def test_simple_fast_path_rejects_enabled_svg_rig(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "hero.png"
+    Image.new("RGBA", (8, 8), (0, 255, 0, 255)).save(image_path)
+    renderer = SceneFastPathCharacterMixin()
+    monkeypatch.setattr(
+        renderer,
+        "_resolve_char_base_image",
+        lambda _name, _expression: image_path,
+    )
+
+    state, error = renderer._extract_simple_character_state(
+        {
+            "characters": [
+                {
+                    "name": "hero",
+                    "visible": True,
+                    "rig": {"path": "assets/characters/hero/character.svg"},
+                }
+            ]
+        }
+    )
+
+    assert state is None
+    assert error == "svg_rig_requires_standard_renderer"
+
+
+def test_simple_fast_path_ignores_disabled_svg_rig(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "hero.png"
+    Image.new("RGBA", (8, 8), (0, 255, 0, 255)).save(image_path)
+    renderer = SceneFastPathCharacterMixin()
+    monkeypatch.setattr(
+        renderer,
+        "_resolve_char_base_image",
+        lambda _name, _expression: image_path,
+    )
+
+    state, error = renderer._extract_simple_character_state(
+        {
+            "characters": [
+                {
+                    "name": "hero",
+                    "visible": True,
+                    "rig": {"enabled": False},
+                }
+            ]
+        }
+    )
+
+    assert error is None
+    assert state is not None
