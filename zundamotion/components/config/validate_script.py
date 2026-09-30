@@ -210,6 +210,10 @@ def _validate_line_features(line: Dict[str, Any], scene_id: str, line_idx: int) 
                 character,
                 f"{container_id}, characters[{char_idx}]",
             )
+            _validate_character_opacity(
+                character,
+                f"{container_id}, characters[{char_idx}]",
+            )
     reset_flag = line.get("reset_characters")
     if reset_flag is not None and not isinstance(reset_flag, bool):
         raise ValidationError(
@@ -295,6 +299,14 @@ def _validate_character_move(move: Any, label: str) -> None:
         from_rotate = from_position.get("rotate")
         if from_rotate is not None and not _is_finite_number(from_rotate):
             raise ValidationError(f"{label}.from.rotate must be a finite number.")
+        from_opacity = from_position.get("opacity")
+        if from_opacity is not None:
+            if not _is_finite_number(from_opacity):
+                raise ValidationError(f"{label}.from.opacity must be a finite number.")
+            if not 0.0 <= float(from_opacity) <= 1.0:
+                raise ValidationError(
+                    f"{label}.from.opacity must be between 0.0 and 1.0."
+                )
 
     keyframes = move.get("keyframes")
     if keyframes is None:
@@ -331,7 +343,7 @@ def _validate_character_move(move: Any, label: str) -> None:
             if float(from_scale) <= 0.0:
                 raise ValidationError(f"{label}.from.scale must be greater than 0.")
 
-    allowed_keys = {"at", "x", "y", "scale", "rotate", "easing"}
+    allowed_keys = {"at", "x", "y", "scale", "rotate", "opacity", "easing"}
     previous_at = 0.0
     resolved_duration = float(duration)
     for index, frame in enumerate(keyframes):
@@ -359,10 +371,14 @@ def _validate_character_move(move: Any, label: str) -> None:
             )
         previous_at = resolved_at
 
-        properties = [key for key in ("x", "y", "scale", "rotate") if key in frame]
+        properties = [
+            key
+            for key in ("x", "y", "scale", "rotate", "opacity")
+            if key in frame
+        ]
         if not properties:
             raise ValidationError(
-                f"{frame_label} must define at least one of x, y, scale, or rotate."
+                f"{frame_label} must define at least one of x, y, scale, rotate, or opacity."
             )
         for property_name in properties:
             value = frame[property_name]
@@ -373,6 +389,10 @@ def _validate_character_move(move: Any, label: str) -> None:
             if property_name == "scale" and float(value) <= 0.0:
                 raise ValidationError(
                     f"{frame_label}.scale must be greater than 0."
+                )
+            if property_name == "opacity" and not 0.0 <= float(value) <= 1.0:
+                raise ValidationError(
+                    f"{frame_label}.opacity must be between 0.0 and 1.0."
                 )
 
         frame_easing = frame.get("easing")
@@ -423,6 +443,54 @@ def _validate_character_rotate(character: Dict[str, Any], label: str) -> None:
     if not _is_finite_number(raw_from.get("rotate")):
         raise ValidationError(
             f"{label}.move.from.rotate must be a finite number."
+        )
+
+
+def _validate_character_opacity(character: Dict[str, Any], label: str) -> None:
+    final_opacity = character.get("opacity")
+    if final_opacity is not None:
+        if not _is_finite_number(final_opacity):
+            raise ValidationError(f"{label}.opacity must be a finite number.")
+        if not 0.0 <= float(final_opacity) <= 1.0:
+            raise ValidationError(
+                f"{label}.opacity must be between 0.0 and 1.0."
+            )
+
+    move = character.get("move")
+    if not isinstance(move, dict) or move.get("enabled") is False:
+        return
+
+    raw_from = move.get("from")
+    from_has_opacity = isinstance(raw_from, dict) and "opacity" in raw_from
+    keyframes = move.get("keyframes")
+    keyframe_has_opacity = isinstance(keyframes, list) and any(
+        isinstance(frame, dict) and "opacity" in frame for frame in keyframes
+    )
+    if not from_has_opacity and not keyframe_has_opacity:
+        return
+
+    duration = move.get("duration", 0.3)
+    if not _is_finite_number(duration) or float(duration) <= 0.0:
+        raise ValidationError(
+            f"{label}.move.duration must be a finite number greater than 0 "
+            "when move animates opacity."
+        )
+    if final_opacity is None:
+        raise ValidationError(
+            f"{label}.opacity is required when move animates opacity."
+        )
+    if not from_has_opacity:
+        raise ValidationError(
+            f"{label}.move.from.opacity is required when move animates opacity."
+        )
+    start_opacity = raw_from.get("opacity")
+    if not _is_finite_number(start_opacity):
+        raise ValidationError(
+            f"{label}.move.from.opacity must be a finite number."
+        )
+    if not 0.0 <= float(start_opacity) <= 1.0:
+        raise ValidationError(
+            f"{label}.move.from.opacity must be between 0.0 and 1.0."
         )
 
 
