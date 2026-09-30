@@ -341,3 +341,32 @@ def test_character_tracker_does_not_persist_rotate() -> None:
     next_line = tracker.snapshot()[0]
     assert "rotate" not in next_line
     assert "move" not in next_line
+
+
+
+def test_character_tracker_does_not_persist_opacity() -> None:
+    tracker = CharacterTracker(1920, 1080)
+    tracker.apply(
+        [
+            {
+                "name": "copetan",
+                "visible": True,
+                "position": {"x": 0, "y": -32},
+                "scale": 1.0,
+                "opacity": 0.5,
+                "move": {
+                    "from": {"opacity": 0.0},
+                    "duration": 0.8,
+                },
+            }
+        ]
+    )
+
+    current = tracker.snapshot()[0]
+    assert current["opacity"] == pytest.approx(0.5)
+    assert current["move"]["from"]["opacity"] == pytest.approx(0.0)
+
+    tracker.apply([{"name": "copetan", "visible": True}])
+    next_line = tracker.snapshot()[0]
+    assert "opacity" not in next_line
+    assert "move" not in next_line
