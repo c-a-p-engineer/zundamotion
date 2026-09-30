@@ -1,0 +1,37 @@
+meta:
+  title: "背景パン・ズーム Motion Core サンプル"
+  version: 3
+
+video:
+  fps: 30
+
+scenes:
+  - id: background_motion
+    bg: "assets/bg/room.png"
+    lines:
+      - wait: 1.4
+        background_effects:
+          - type: bg:pan_zoom
+            zoom: {from: 1.0, to: 1.45}
+            pan:
+              from: {x: 0.30, y: 0.50}
+              to: {x: 0.70, y: 0.45}
+            start: 0.10
+            duration: 1.10
+            easing: ease_in_out
+            keyframes:
+              - at: 0.35
+                zoom: 1.15
+                easing: ease_out
+              - at: 0.75
+                pan: {x: 0.58}
+                zoom: 1.32
+
+      # keyframes が無い既存pathは従来の1区間linear互換を維持します。
+      - wait: 1.0
+        background_effects:
+          - type: bg:ken_burns
+            zoom: {from: 1.0, to: 1.20}
+            pan:
+              from: {x: 0.50, y: 0.50}
+              to: {x: 0.62, y: 0.50}
