@@ -17,7 +17,7 @@ Issue: #117
 
 ## 1. Evaluation conclusion
 
-実装します。
+実装済みです。PR #119 のruntime-only headで unit / actual FFmpeg / packaging / clean install / render smoke / reproducibility / Performance Smoke を通過し、capability/docs同期後のfinal headをmerge gateとして再検証します。
 
 理由:
 
