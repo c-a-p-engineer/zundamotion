@@ -60,11 +60,17 @@ class ClipRenderRequest:
         self,
         *,
         force_cpu: Optional[bool] = None,
+        characters_config: Optional[List[Dict[str, Any]]] = None,
     ) -> ClipVideoGraphRequest:
         resolved_force_cpu = self.force_cpu if force_cpu is None else bool(force_cpu)
+        resolved_characters = (
+            self.characters_config
+            if characters_config is None
+            else characters_config
+        )
         return ClipVideoGraphRequest(
             duration=self.duration, background_config=self.background_config,
-            characters_config=self.characters_config, subtitle_text=self.subtitle_text,
+            characters_config=resolved_characters, subtitle_text=self.subtitle_text,
             subtitle_line_config=self.subtitle_line_config, insert_config=self.insert_config,
             screen_effects=self.screen_effects, camera_config=self.camera_config,
             subtitle_png_path=self.subtitle_png_path,
@@ -79,14 +85,14 @@ async def run_clip_pipeline(
     output_path = renderer.temp_dir / f"{request.output_filename}.mp4"
     started_at = time.time()
     logger.info("[Video] Rendering clip -> %s", output_path.name)
-    request.characters_config = expand_character_motion_presets(
+    expanded_characters = expand_character_motion_presets(
         request.characters_config
     )
     inputs = await collect_clip_inputs(
         renderer=renderer, audio_path=request.audio_path,
         duration=request.duration,
         background_config=request.background_config,
-        characters_config=request.characters_config, insert_config=request.insert_config,
+        characters_config=expanded_characters, insert_config=request.insert_config,
         image_layer_overlays=request.image_layer_overlays,
         extra_audio_overlays=request.extra_audio_overlays,
     )
@@ -101,7 +107,10 @@ async def run_clip_pipeline(
     graph = await build_clip_video_graph(
         renderer,
         inputs,
-        request.video_graph_request(force_cpu=effective_force_cpu),
+        request.video_graph_request(
+            force_cpu=effective_force_cpu,
+            characters_config=expanded_characters,
+        ),
         policy,
     )
     audio_map = await append_clip_audio_graph(
